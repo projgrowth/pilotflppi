@@ -567,14 +567,23 @@ export default function PlanReviewDetail() {
           {/* Deadline ring */}
           <DeadlineRing daysElapsed={21 - daysLeft} totalDays={21} size={30} />
 
-          {/* Primary action */}
+          {/* Primary action — with inline feedback */}
           <Button
             size="sm"
             onClick={() => runAICheck(review)}
             disabled={aiRunning}
-            className="bg-accent text-accent-foreground hover:bg-accent/90 h-8 text-xs shrink-0"
+            className={cn(
+              "h-8 text-xs shrink-0 transition-all",
+              aiCompleteFlash !== null
+                ? "bg-[hsl(var(--success))] text-[hsl(var(--success-foreground))]"
+                : !hasFindings && !aiRunning
+                ? "bg-accent text-accent-foreground hover:bg-accent/90 animate-pulse"
+                : "bg-accent text-accent-foreground hover:bg-accent/90"
+            )}
           >
-            {aiRunning ? (
+            {aiCompleteFlash !== null ? (
+              <><Check className="h-3.5 w-3.5 mr-1.5" /> ✓ {aiCompleteFlash} findings</>
+            ) : aiRunning ? (
               <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Analyzing...</>
             ) : (
               <><Sparkles className="h-3.5 w-3.5 mr-1.5" /> {hasFindings ? "Re-Analyze" : "Run AI Check"}</>
