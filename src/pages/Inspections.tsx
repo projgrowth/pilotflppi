@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
-import { ClipboardCheck, Video, Calendar, ChevronLeft, ChevronRight, Loader2, CheckCircle2 } from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/EmptyState";
+import { ClipboardCheck, Video, ChevronLeft, ChevronRight, Loader2, CheckCircle2 } from "lucide-react";
 import { format, startOfWeek, addDays, isSameDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -55,7 +57,6 @@ export default function Inspections() {
         .eq("id", selectedInspection.id);
       if (error) throw error;
 
-      // Update project status if pass
       if (result === "pass") {
         await supabase
           .from("projects")
@@ -79,9 +80,7 @@ export default function Inspections() {
 
   return (
     <div className="p-6 md:p-8 max-w-7xl">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-medium">Inspections</h1>
-      </div>
+      <PageHeader title="Inspections" />
 
       {/* Week navigation */}
       <div className="mb-4 flex items-center gap-3">
@@ -157,11 +156,12 @@ export default function Inspections() {
 
       {/* No inspections empty state */}
       {!isLoading && (inspections || []).length === 0 && (
-        <div className="flex flex-col items-center justify-center py-12 text-center mt-6">
-          <ClipboardCheck className="h-12 w-12 text-muted-foreground/30 mb-4" />
-          <h2 className="text-lg font-medium">No inspections scheduled</h2>
-          <p className="text-sm text-muted-foreground mt-1">Schedule inspections from project details</p>
-        </div>
+        <EmptyState
+          icon={ClipboardCheck}
+          title="No inspections scheduled"
+          description="Schedule inspections from project details"
+          className="mt-6"
+        />
       )}
 
       {/* Start Inspection side panel */}
@@ -175,10 +175,9 @@ export default function Inspections() {
 
           {selectedInspection && (
             <div className="mt-6 space-y-6">
-              {/* Project brief */}
               <Card className="shadow-subtle border">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm uppercase tracking-wide text-muted-foreground">Project Brief</CardTitle>
+                  <CardTitle className="text-xs uppercase tracking-widest text-muted-foreground">Project Brief</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
                   <p className="text-sm font-medium">{selectedInspection.project?.name}</p>
@@ -206,9 +205,8 @@ export default function Inspections() {
                 </CardContent>
               </Card>
 
-              {/* Checklist */}
               <div>
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-3">
                   {tradeType.charAt(0).toUpperCase() + tradeType.slice(1)} Checklist
                 </h3>
                 <div className="space-y-2">
@@ -232,9 +230,8 @@ export default function Inspections() {
                 </p>
               </div>
 
-              {/* Notes */}
               <div>
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">Notes</h3>
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-2">Notes</h3>
                 <Textarea
                   value={inspectionNotes}
                   onChange={(e) => setInspectionNotes(e.target.value)}
@@ -244,7 +241,6 @@ export default function Inspections() {
                 />
               </div>
 
-              {/* Result buttons — only show for pending inspections */}
               {selectedInspection.result === "pending" && (
                 <div className="flex gap-2">
                   <Button

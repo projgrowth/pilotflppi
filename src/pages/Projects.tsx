@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { StatusChip } from "@/components/StatusChip";
 import { DeadlineRing } from "@/components/DeadlineRing";
+import { PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/EmptyState";
 import { useProjects, getDaysElapsed, getDaysRemaining } from "@/hooks/useProjects";
 import { useContractors } from "@/hooks/useContractors";
 import {
@@ -47,7 +49,6 @@ export default function Projects() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // New project dialog
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState("");
@@ -57,7 +58,6 @@ export default function Projects() {
   const [tradeType, setTradeType] = useState("building");
   const [contractorId, setContractorId] = useState("");
 
-  // Open dialog from URL param
   useEffect(() => {
     if (searchParams.get("action") === "new") {
       setDialogOpen(true);
@@ -121,23 +121,25 @@ export default function Projects() {
 
   return (
     <div className="p-6 md:p-8 max-w-7xl">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-medium">Projects</h1>
-        <Button className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => setDialogOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" /> New Project
-        </Button>
-      </div>
+      <PageHeader
+        title="Projects"
+        actions={
+          <Button className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => setDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" /> New Project
+          </Button>
+        }
+      />
 
       <div className="mb-4 flex flex-wrap items-center gap-4">
-        <div className="flex gap-1">
+        <div className="flex gap-1 rounded-lg bg-muted/50 p-1">
           {filters.map((f) => (
             <button
               key={f}
               onClick={() => setActiveFilter(f)}
               className={cn(
-                "px-3 py-1.5 text-sm rounded-md transition-colors",
+                "px-3 py-1.5 text-sm rounded-md transition-all duration-150",
                 activeFilter === f
-                  ? "bg-accent/10 text-accent font-medium border-b-2 border-accent"
+                  ? "bg-background text-foreground font-medium shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
@@ -155,7 +157,7 @@ export default function Projects() {
         {isLoading ? (
           <div className="divide-y">
             {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4 px-5 py-3">
+              <div key={i} className="flex items-center gap-4 px-5 py-3.5">
                 <div className="h-10 w-10 rounded-full bg-muted animate-pulse" />
                 <div className="flex-1 space-y-2">
                   <div className="h-4 w-48 rounded bg-muted animate-pulse" />
@@ -165,13 +167,24 @@ export default function Projects() {
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <FolderKanban className="h-10 w-10 text-muted-foreground/40 mb-3" />
-            <h3 className="text-sm font-medium">No projects found</h3>
-            <p className="text-xs text-muted-foreground mt-1">Try adjusting your filters or search</p>
-          </div>
+          <EmptyState
+            icon={FolderKanban}
+            title="No projects found"
+            description="Try adjusting your filters or search"
+          />
         ) : (
           <div className="divide-y">
+            {/* Column headers */}
+            <div className="hidden md:grid grid-cols-[40px_1fr_100px_80px_80px_120px_80px_20px] gap-4 px-5 py-2.5 text-[10px] uppercase tracking-widest text-muted-foreground font-semibold border-b bg-muted/30">
+              <span />
+              <span>Project</span>
+              <span>Contractor</span>
+              <span>Trade</span>
+              <span>County</span>
+              <span>Status</span>
+              <span>Deadline</span>
+              <span />
+            </div>
             {filtered.map((project) => {
               const daysElapsed = getDaysElapsed(project.notice_filed_at);
               const remaining = getDaysRemaining(project.deadline_at);
@@ -179,14 +192,14 @@ export default function Projects() {
                 <div
                   key={project.id}
                   onClick={() => navigate(`/projects/${project.id}`)}
-                  className="flex items-center gap-4 px-5 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+                  className="list-row"
                 >
                   <DeadlineRing daysElapsed={daysElapsed} size={40} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{project.name}</p>
                     <p className="text-xs text-muted-foreground truncate">{project.address}</p>
                   </div>
-                  <span className="hidden sm:inline text-xs text-muted-foreground">
+                  <span className="hidden sm:inline text-xs text-muted-foreground truncate">
                     {project.contractor?.name || "—"}
                   </span>
                   <span className="hidden md:inline-flex rounded bg-muted px-2 py-0.5 text-[10px] font-medium capitalize">

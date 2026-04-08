@@ -5,7 +5,7 @@ import { lovable } from "@/integrations/lovable/index";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2 } from "lucide-react";
+import { Loader2, Shield, MapPin, Award } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { Navigate } from "react-router-dom";
@@ -78,15 +78,41 @@ export default function Login() {
   return (
     <div className="flex min-h-screen">
       {/* Left — branding panel */}
-      <div className="hidden lg:flex lg:w-1/2 flex-col justify-center items-center bg-primary p-12">
-        <p className="font-display text-5xl font-bold tracking-wider text-white">FLPPI</p>
+      <div className="hidden lg:flex lg:w-1/2 flex-col justify-between bg-primary p-12">
+        <div />
+        <div className="space-y-6">
+          <div>
+            <p className="font-display text-5xl text-white leading-tight">Florida</p>
+            <div className="my-2 h-px w-20 bg-accent" />
+            <p className="text-sm font-semibold uppercase tracking-[0.25em] text-accent">Private Providers</p>
+          </div>
+          <p className="max-w-sm text-sm leading-relaxed text-primary-foreground/60">
+            Licensed private provider services for plan review, inspections, and building code compliance across the state of Florida.
+          </p>
+        </div>
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2 text-xs text-primary-foreground/40">
+            <Shield className="h-3.5 w-3.5" />
+            <span className="font-mono">AR92053</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-primary-foreground/40">
+            <Award className="h-3.5 w-3.5" />
+            <span>Est. 1980</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-primary-foreground/40">
+            <MapPin className="h-3.5 w-3.5" />
+            <span>67 Counties</span>
+          </div>
+        </div>
       </div>
 
       {/* Right — auth form */}
       <div className="flex flex-1 items-center justify-center p-8 bg-background">
         <div className="w-full max-w-sm space-y-8">
-          <div className="lg:hidden text-center">
-            <p className="font-display text-3xl font-bold tracking-wider text-foreground">FLPPI</p>
+          <div className="lg:hidden">
+            <p className="font-display text-3xl text-foreground">Florida</p>
+            <div className="my-1.5 h-px w-14 bg-accent" />
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-accent">Private Providers</p>
           </div>
 
           <div>
@@ -94,7 +120,7 @@ export default function Login() {
               {isSignUp ? "Create your account" : "Sign in to your account"}
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              {isSignUp ? "Get started with FLPPI" : "Welcome back"}
+              {isSignUp ? "Get started with Florida Private Providers" : "Welcome back"}
             </p>
           </div>
 
