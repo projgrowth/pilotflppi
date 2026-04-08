@@ -125,4 +125,7 @@
   .shadow-subtle {
     box-shadow: var(--shadow-subtle);
   }
+  .list-row {
+    @apply flex items-center gap-4 px-5 py-3.5 transition-all duration-150 cursor-pointer hover:bg-muted/50 active:scale-[0.998];
+  }
 }

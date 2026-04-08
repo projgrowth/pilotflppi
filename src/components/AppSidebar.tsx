@@ -64,10 +64,10 @@ function NavSection({ title, items, onNavigate }: { title: string; items: NavIte
               to={item.path}
               onClick={onNavigate}
               className={cn(
-                "flex items-center gap-3 px-4 py-2 text-sm transition-colors",
+                "flex items-center gap-3 mx-3 px-3 py-2 text-sm rounded-md transition-all duration-150",
                 active
-                  ? "border-l-2 border-sidebar-primary bg-sidebar-accent text-sidebar-primary font-medium"
-                  : "border-l-2 border-transparent text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
+                  ? "bg-sidebar-accent text-sidebar-primary font-medium shadow-sm"
+                  : "text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
               )}
             >
               <item.icon className="h-4 w-4 shrink-0" />
