@@ -1,83 +1,43 @@
 
 
-## Portal UX Overhaul — Document Viewer, Dashboard, and Navigation
+## Plan: Redesign Project Detail & Dashboard Pages
 
-### Core Problem
-The document viewer (site plans, inspections) handles massive PDFs poorly — no pan/drag, zoom is clunky, no fit-to-width, and navigating large documents is frustrating. The dashboard lacks task-oriented focus, and the overall flow between modules feels disconnected.
+Looking at the screenshot and current code, here are the specific improvements:
 
----
+### Project Detail Page (`src/pages/ProjectDetail.tsx`)
 
-### 1. Document Viewer Overhaul — `PlanMarkupViewer.tsx`
+**1. Horizontal stepper timeline instead of vertical list**
+Replace the tall vertical timeline card with a compact horizontal step indicator — similar to Stripe's checkout progress. Each step is a small dot or pill connected by a line, with labels below. Completed steps get a filled dot, current step gets an accent ring, future steps are muted. This cuts the card height by ~60% and feels modern.
 
-**Current issues**: Zoom uses CSS `transform: scale()` which doesn't reflow the scroll container properly. No drag-to-pan. No fit-to-width/fit-to-page. No minimap or page thumbnails for large documents.
+**2. Better layout proportions**
+Change from 3/5 + 2/5 split to a cleaner 3-column grid: timeline spans full width at top, then details + deadline ring side by side below, then tabs below that. This eliminates the awkward vertical stacking.
 
-**Changes**:
-- **Drag-to-pan**: Add mouse-down drag scrolling on the canvas area (cursor: grab/grabbing). Hold space+drag or just click-drag on empty areas.
-- **Scroll-wheel zoom**: Ctrl+scroll or pinch to zoom, centered on cursor position (not top-left origin).
-- **Fit controls**: Add "Fit Width" and "Fit Page" buttons to toolbar. Calculate zoom based on container dimensions vs image dimensions.
-- **Zoom presets**: Replace free-form zoom with preset buttons: 50%, 75%, 100%, 150%, 200% plus fit-width/fit-page.
-- **Page thumbnails strip**: Add a collapsible vertical thumbnail strip on the left edge showing miniature page previews. Click to jump. Highlight current page.
-- **Keyboard shortcuts**: Arrow keys for page nav, +/- for zoom, 0 for fit-width.
+**3. Deadline ring refinement**
+Make the ring smaller and inline it into a combined "Status & Deadline" card alongside key metadata (county, trade, contractor) rather than isolating it in its own card. Show the deadline as text like "18 days left" with a subtle progress bar instead of the large circular ring on the detail page.
 
-**File**: `src/components/PlanMarkupViewer.tsx`
+**4. Details card cleanup**
+Format "Services" values properly (title case instead of raw DB values like "Plan_review"). Remove em-dash placeholders for empty fields — just hide rows with no data. Add subtle row hover states.
 
-### 2. Dashboard Reorganization — `Dashboard.tsx`
+**5. Quick actions as icon buttons**
+Replace the two bottom buttons with a single-row action bar integrated into the page header area (next to the status chip), using icon-only or compact buttons.
 
-**Current issues**: Generic KPI cards don't drive action. Activity feed is passive. No sense of "what do I need to do right now?"
+### Dashboard Page (`src/pages/Dashboard.tsx`)
 
-**Changes**:
-- **Replace KPI row with "Needs Attention" queue**: Show items that need action — reviews awaiting AI check, inspections today, approaching deadlines. Each item is a clickable row that navigates directly to the action.
-- **Collapse activity feed into a compact timeline**: Move to a small right column or bottom section. Keep it but reduce prominence.
-- **Add "In Progress" section**: Show currently open plan reviews with progress indicators (findings count, status).
-- **Quick stats become a subtle inline bar** at the top (e.g., "5 active · 2 due this week · 1 inspection today") instead of 4 large cards.
+**6. Stats as clickable metric cards**
+Replace the tiny inline stats text with 3-4 proper KPI cards in a row (like Stripe's dashboard metrics): "Active Projects", "Due This Week", "Completed MTD", "Avg Review Time". Each with the number large, label small below, and clickable to navigate.
 
-**File**: `src/pages/Dashboard.tsx`
+**7. Merge "Needs Attention" and "In Progress" sections**
+These currently show overlapping data. Combine into a single smart table/list with sortable columns: Project, Status, Days Remaining, Last Activity. This is more scannable and avoids redundancy.
 
-### 3. Plan Review Detail — Responsive Split Panel
+**8. Activity feed with project links**
+Make activity items clickable, navigating to the relevant project. Add project name context to each entry.
 
-**Current issues**: Right panel is fixed 420px, doesn't work on smaller screens. Left panel has no pan/drag for PDFs.
+**9. Remove greeting verbosity**
+Keep the greeting but make it a single line with the date inline, not a separate subtitle. Tighten vertical spacing.
 
-**Changes**:
-- **Make split resizable**: Use `react-resizable-panels` (already in project as `src/components/ui/resizable.tsx`) to let users drag the divider between document viewer and findings panel.
-- **Collapsible right panel**: Add a toggle button to collapse/expand the right panel. When collapsed, show a thin icon strip.
-- **Mobile stack**: On screens < 1024px, stack vertically with the document viewer on top and findings in a bottom drawer.
-
-**File**: `src/pages/PlanReviewDetail.tsx`
-
-### 4. Inspections — Document Attachment Viewer
-
-**Current issues**: Inspections page has no document viewing. For site inspections with large plans, there's no way to reference documents.
-
-**Changes**:
-- **Add document reference to inspection sheet**: When an inspection is opened, show a "View Plans" button that opens the associated project's plan documents in a modal using PlanMarkupViewer.
-- Keep the inspection sheet focused on checklist/results, but add easy access to reference documents.
-
-**File**: `src/pages/Inspections.tsx`
-
-### 5. Global Navigation Polish
-
-**Changes**:
-- **Breadcrumb trail on all detail pages**: PlanReviewDetail already has back button; add breadcrumbs (Dashboard > Projects > Project Name > Plan Review R1).
-- **Keyboard shortcut hints**: Add subtle shortcut hints in sidebar items (visible on hover) for power users.
-
-**Files**: `src/pages/PlanReviewDetail.tsx`, `src/pages/ProjectDetail.tsx`
-
----
-
-### Technical Summary
-
-| File | Change |
-|------|--------|
-| `src/components/PlanMarkupViewer.tsx` | Major rewrite — drag-to-pan, scroll zoom, fit controls, page thumbnails, keyboard nav |
-| `src/pages/Dashboard.tsx` | Restructure to action-oriented "Needs Attention" queue |
-| `src/pages/PlanReviewDetail.tsx` | Resizable split panels, collapsible right panel, breadcrumbs |
-| `src/pages/Inspections.tsx` | Add plan document reference in inspection sheet |
-| `src/pages/ProjectDetail.tsx` | Add breadcrumbs |
-
-### Priority Order
-1. PlanMarkupViewer (biggest pain point — large document navigation)
-2. PlanReviewDetail resizable panels
-3. Dashboard reorganization
-4. Inspections document reference
-5. Breadcrumbs & navigation polish
+### Technical approach
+- Edit `src/pages/ProjectDetail.tsx` — rewrite timeline to horizontal stepper, restructure layout grid, inline deadline into details card
+- Edit `src/pages/Dashboard.tsx` — add KPI cards row, merge attention/progress into unified list, tighten header
+- Edit `src/components/DeadlineRing.tsx` — add a compact "bar" variant for inline use
+- Minor tweaks to `src/components/StatusChip.tsx` for consistent sizing
 
