@@ -103,8 +103,12 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
     font-family: var(--font-body);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  h1, h2, h3 {
+    letter-spacing: -0.02em;
   }
 }
 
@@ -114,5 +118,12 @@
   }
   .font-mono {
     font-family: var(--font-mono);
+  }
+}
+
+@layer components {
+  /* Refined card hover */
+  .shadow-subtle {
+    box-shadow: var(--shadow-subtle);
   }
 }
