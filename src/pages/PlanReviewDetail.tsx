@@ -11,10 +11,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
+import { PageHeader } from "@/components/PageHeader";
 import {
   Sparkles, Send, Loader2, Copy, Check,
   Wind, Upload, ArrowLeft, Mail, Phone,
-  FileDown, Printer, Plus
+  FileDown, Printer, Plus, PanelRightClose, PanelRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
