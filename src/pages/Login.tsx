@@ -80,7 +80,7 @@ export default function Login() {
       {/* Left — branding panel */}
       <div className="hidden lg:flex lg:w-1/2 flex-col justify-between bg-primary p-12 text-primary-foreground">
         <div>
-          <p className="font-display text-3xl leading-tight">Florida</p>
+          <p className="text-3xl leading-tight font-sans">Florida</p>
           <div className="my-2 h-px w-24 bg-accent" />
           <p className="text-sm font-semibold uppercase tracking-[0.25em] text-accent">Private Providers</p>
         </div>
