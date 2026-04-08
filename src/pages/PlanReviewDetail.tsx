@@ -229,7 +229,8 @@ export default function PlanReviewDetail() {
       await supabase.from("plan_reviews").update({ file_urls: newUrls }).eq("id", review.id);
       queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
       hasAutoRendered.current = false; // allow re-render
-      toast.success("Documents uploaded");
+      setUploadSuccess(true);
+      setTimeout(() => setUploadSuccess(false), 2500);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Upload failed");
     } finally {
