@@ -349,7 +349,8 @@ export default function PlanReviewDetail() {
 
       queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
       setFindingStatuses({});
-      toast.success(`AI check complete — ${findings.length} findings`);
+      setAiCompleteFlash(findings.length);
+      setTimeout(() => setAiCompleteFlash(null), 3500);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "AI check failed");
       await supabase.from("plan_reviews").update({ ai_check_status: "error" }).eq("id", r.id);
