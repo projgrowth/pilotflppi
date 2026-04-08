@@ -88,7 +88,7 @@ export default function PlanReview() {
 
       await supabase.from("plan_reviews").update({
         ai_check_status: "complete",
-        ai_findings: findings as unknown as Record<string, unknown>[],
+        ai_findings: JSON.parse(JSON.stringify(findings)),
       }).eq("id", review.id);
 
       queryClient.invalidateQueries({ queryKey: ["plan-reviews"] });
