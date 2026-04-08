@@ -533,30 +533,32 @@ export default function PlanReviewDetail() {
             </div>
           </div>
 
-          {/* Round pills */}
-          <div className="flex items-center gap-1 shrink-0">
-            {projectRounds.map((round) => (
-              <button
-                key={round.id}
-                onClick={() => navigate(`/plan-review/${round.id}`)}
-                className={cn(
-                  "px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all",
-                  round.id === review.id
-                    ? "bg-accent text-accent-foreground"
-                    : "bg-muted text-muted-foreground hover:bg-muted/80"
-                )}
-              >
-                R{round.round}
+          {/* Round dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-accent text-accent-foreground shrink-0">
+                R{review.round}
+                <ChevronDown className="h-3 w-3" />
               </button>
-            ))}
-            <button
-              onClick={createNewRound}
-              className="px-1.5 py-0.5 rounded-full text-[10px] text-muted-foreground hover:bg-muted transition-colors"
-              title="New round"
-            >
-              <Plus className="h-3 w-3" />
-            </button>
-          </div>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[120px]">
+              {projectRounds.map((round) => (
+                <DropdownMenuItem
+                  key={round.id}
+                  onClick={() => navigate(`/plan-review/${round.id}`)}
+                  className={cn("text-xs", round.id === review.id && "bg-accent/10 font-medium")}
+                >
+                  R{round.round}
+                  {round.findingsCount > 0 && (
+                    <span className="ml-auto text-[9px] text-muted-foreground">{round.findingsCount} findings</span>
+                  )}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuItem onClick={createNewRound} className="text-xs text-accent">
+                <Plus className="h-3 w-3 mr-1" /> New Round
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {/* Deadline ring */}
           <DeadlineRing daysElapsed={21 - daysLeft} totalDays={21} size={30} />
