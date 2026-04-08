@@ -331,11 +331,12 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete }: NewPlanR
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="wizard-desc">
         <DialogHeader>
           <DialogTitle className="font-[var(--font-display)] text-xl">
             New Plan Review
           </DialogTitle>
+          <p id="wizard-desc" className="sr-only">Upload plans and create a new plan review</p>
         </DialogHeader>
 
         {/* Step indicators */}

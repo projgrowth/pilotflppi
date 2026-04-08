@@ -1,3 +1,4 @@
+import { forwardRef } from "react";
 import { cn } from "@/lib/utils";
 import { Check, Loader2 } from "lucide-react";
 import { getDisciplineIcon, getDisciplineColor, SCANNING_STEPS } from "@/lib/county-utils";
@@ -7,7 +8,7 @@ interface ScanTimelineProps {
   className?: string;
 }
 
-export function ScanTimeline({ currentStep, className }: ScanTimelineProps) {
+export const ScanTimeline = forwardRef<HTMLDivElement, ScanTimelineProps>(({ currentStep, className }, ref) => {
   return (
     <div className={cn("space-y-1", className)}>
       {SCANNING_STEPS.map((step, i) => {
