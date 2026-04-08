@@ -1,11 +1,14 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Building2, Users, MapPin, Plus, X } from "lucide-react";
+import { Building2, Users, MapPin, Plus, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 const defaultJurisdictions = [
@@ -14,15 +17,73 @@ const defaultJurisdictions = [
   "City of Naples", "City of Destin", "Miami-Dade County", "Broward County", "Palm Beach County",
 ];
 
+function useProfile() {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ["profile", user?.id],
+    queryFn: async () => {
+      if (!user) return null;
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!user,
+  });
+}
+
 export default function SettingsPage() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const { data: profile, isLoading: profileLoading } = useProfile();
+
+  const [fullName, setFullName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // Firm info — in a real app these would come from a firm_settings table
   const [firmName, setFirmName] = useState("Florida Private Providers, LLC");
-  const [firmEmail, setFirmEmail] = useState("info@fpp.com");
-  const [firmPhone, setFirmPhone] = useState("(305) 555-1000");
-  const [firmAddress, setFirmAddress] = useState("100 SE 2nd St, Suite 300, Miami, FL 33131");
-  const [firmLicense, setFirmLicense] = useState("PP-0001234");
+  const [firmEmail, setFirmEmail] = useState("");
+  const [firmPhone, setFirmPhone] = useState("");
+  const [firmAddress, setFirmAddress] = useState("");
+  const [firmLicense, setFirmLicense] = useState("");
 
   const [jurisdictions, setJurisdictions] = useState(defaultJurisdictions);
   const [newJurisdiction, setNewJurisdiction] = useState("");
+
+  // Sync profile data
+  useEffect(() => {
+    if (profile) {
+      setFullName(profile.full_name || "");
+    }
+  }, [profile]);
+
+  // Set email from user
+  useEffect(() => {
+    if (user?.email && !firmEmail) {
+      setFirmEmail(user.email);
+    }
+  }, [user, firmEmail]);
+
+  const saveProfile = async () => {
+    if (!user) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ full_name: fullName.trim() })
+        .eq("id", user.id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ["profile"] });
+      toast.success("Profile updated");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const addJurisdiction = () => {
     const trimmed = newJurisdiction.trim();
@@ -41,12 +102,51 @@ export default function SettingsPage() {
     <div className="p-6 md:p-8 max-w-4xl">
       <h1 className="text-2xl font-medium mb-6">Settings</h1>
 
-      <Tabs defaultValue="firm">
+      <Tabs defaultValue="profile">
         <TabsList>
+          <TabsTrigger value="profile" className="gap-1.5"><Users className="h-3.5 w-3.5" />Profile</TabsTrigger>
           <TabsTrigger value="firm" className="gap-1.5"><Building2 className="h-3.5 w-3.5" />Firm Info</TabsTrigger>
-          <TabsTrigger value="users" className="gap-1.5"><Users className="h-3.5 w-3.5" />Users</TabsTrigger>
           <TabsTrigger value="jurisdictions" className="gap-1.5"><MapPin className="h-3.5 w-3.5" />Jurisdictions</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="profile">
+          <Card className="shadow-subtle border">
+            <CardHeader>
+              <CardTitle className="text-base">Your Profile</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {profileLoading ? (
+                <div className="space-y-3">
+                  <div className="h-10 w-full rounded bg-muted animate-pulse" />
+                  <div className="h-10 w-full rounded bg-muted animate-pulse" />
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label>Full Name</Label>
+                    <Input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Your full name" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Email</Label>
+                    <Input value={user?.email || ""} disabled className="bg-muted/50" />
+                    <p className="text-[10px] text-muted-foreground">Email cannot be changed here</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Role</Label>
+                    <Input value={profile?.role || "reviewer"} disabled className="bg-muted/50 capitalize" />
+                  </div>
+                  <Button
+                    className="bg-accent text-accent-foreground hover:bg-accent/90"
+                    onClick={saveProfile}
+                    disabled={saving}
+                  >
+                    {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : "Save Profile"}
+                  </Button>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         <TabsContent value="firm">
           <Card className="shadow-subtle border">
@@ -61,55 +161,24 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>License Number</Label>
-                  <Input value={firmLicense} onChange={(e) => setFirmLicense(e.target.value)} />
+                  <Input value={firmLicense} onChange={(e) => setFirmLicense(e.target.value)} placeholder="PP-0001234" />
                 </div>
                 <div className="space-y-2">
                   <Label>Email</Label>
-                  <Input type="email" value={firmEmail} onChange={(e) => setFirmEmail(e.target.value)} />
+                  <Input type="email" value={firmEmail} onChange={(e) => setFirmEmail(e.target.value)} placeholder="info@yourfirm.com" />
                 </div>
                 <div className="space-y-2">
                   <Label>Phone</Label>
-                  <Input value={firmPhone} onChange={(e) => setFirmPhone(e.target.value)} />
+                  <Input value={firmPhone} onChange={(e) => setFirmPhone(e.target.value)} placeholder="(305) 555-1000" />
                 </div>
               </div>
               <div className="space-y-2">
                 <Label>Address</Label>
-                <Input value={firmAddress} onChange={(e) => setFirmAddress(e.target.value)} />
+                <Input value={firmAddress} onChange={(e) => setFirmAddress(e.target.value)} placeholder="100 SE 2nd St, Suite 300, Miami, FL 33131" />
               </div>
-              <Button className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => toast.success("Settings saved")}>
+              <Button className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => toast.success("Firm settings saved")}>
                 Save Changes
               </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="users">
-          <Card className="shadow-subtle border">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base">Team Members</CardTitle>
-              <Button size="sm" className="bg-accent text-accent-foreground hover:bg-accent/90">
-                <Plus className="h-3.5 w-3.5 mr-1" /> Invite User
-              </Button>
-            </CardHeader>
-            <CardContent>
-              <div className="divide-y">
-                {[
-                  { name: "Admin User", email: "admin@fpp.com", role: "Admin" },
-                  { name: "John Smith", email: "john@fpp.com", role: "Reviewer" },
-                  { name: "Maria Garcia", email: "maria@fpp.com", role: "Inspector" },
-                ].map((u) => (
-                  <div key={u.email} className="flex items-center gap-4 py-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
-                      {u.name.split(" ").map((w) => w[0]).join("")}
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">{u.name}</p>
-                      <p className="text-xs text-muted-foreground">{u.email}</p>
-                    </div>
-                    <Badge variant="secondary" className="text-xs">{u.role}</Badge>
-                  </div>
-                ))}
-              </div>
             </CardContent>
           </Card>
         </TabsContent>

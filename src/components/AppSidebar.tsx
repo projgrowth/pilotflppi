@@ -1,4 +1,4 @@
-import { useLocation, Link } from "react-router-dom";
+import { useLocation, Link, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   FolderKanban,
@@ -13,11 +13,13 @@ import {
   Settings,
   ChevronRight,
   Menu,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useAuth } from "@/contexts/AuthContext";
 import { useState } from "react";
 
 interface NavItem {
@@ -46,7 +48,7 @@ const manageNav: NavItem[] = [
   { label: "Settings", path: "/settings", icon: Settings },
 ];
 
-function NavSection({ title, items }: { title: string; items: NavItem[] }) {
+function NavSection({ title, items, onNavigate }: { title: string; items: NavItem[]; onNavigate?: () => void }) {
   const location = useLocation();
   return (
     <div className="mb-6">
@@ -60,6 +62,7 @@ function NavSection({ title, items }: { title: string; items: NavItem[] }) {
             <Link
               key={item.path}
               to={item.path}
+              onClick={onNavigate}
               className={cn(
                 "flex items-center gap-3 px-4 py-2 text-sm transition-colors",
                 active
@@ -77,8 +80,23 @@ function NavSection({ title, items }: { title: string; items: NavItem[] }) {
   );
 }
 
-function SidebarContent() {
-  const initials = "AD";
+function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const displayName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "User";
+  const email = user?.email || "";
+  const initials = displayName
+    .split(" ")
+    .map((w: string) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "U";
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/login");
+  };
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
@@ -97,22 +115,33 @@ function SidebarContent() {
 
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto py-2">
-        <NavSection title="Operations" items={operationsNav} />
-        <NavSection title="Intelligence" items={intelligenceNav} />
-        <NavSection title="Manage" items={manageNav} />
+        <NavSection title="Operations" items={operationsNav} onNavigate={onNavigate} />
+        <NavSection title="Intelligence" items={intelligenceNav} onNavigate={onNavigate} />
+        <NavSection title="Manage" items={manageNav} onNavigate={onNavigate} />
       </div>
 
       {/* User chip */}
-      <div className="border-t border-sidebar-border p-4">
-        <button className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-sm hover:bg-sidebar-accent/50 transition-colors">
+      <div className="border-t border-sidebar-border p-4 space-y-1">
+        <Link
+          to="/settings"
+          onClick={onNavigate}
+          className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-sm hover:bg-sidebar-accent/50 transition-colors"
+        >
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground">
             {initials}
           </div>
-          <div className="flex-1 text-left">
-            <p className="truncate text-sm font-medium text-sidebar-accent-foreground">Admin</p>
-            <p className="text-[10px] text-sidebar-foreground/60">Administrator</p>
+          <div className="flex-1 text-left min-w-0">
+            <p className="truncate text-sm font-medium text-sidebar-accent-foreground">{displayName}</p>
+            <p className="text-[10px] text-sidebar-foreground/60 truncate">{email}</p>
           </div>
-          <ChevronRight className="h-4 w-4 text-sidebar-foreground/40" />
+          <ChevronRight className="h-4 w-4 text-sidebar-foreground/40 shrink-0" />
+        </Link>
+        <button
+          onClick={handleSignOut}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[11px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          Sign out
         </button>
       </div>
     </div>
@@ -136,7 +165,7 @@ export function AppSidebar() {
         </Button>
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetContent side="left" className="w-[240px] p-0 border-0">
-            <SidebarContent />
+            <SidebarContent onNavigate={() => setOpen(false)} />
           </SheetContent>
         </Sheet>
       </>

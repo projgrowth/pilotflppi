@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { useInspections } from "@/hooks/useInspections";
+import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { StatusChip } from "@/components/StatusChip";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
-import { ClipboardCheck, Video, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+import { ClipboardCheck, Video, Calendar, ChevronLeft, ChevronRight, Loader2, CheckCircle2 } from "lucide-react";
 import { format, startOfWeek, addDays, isSameDay } from "date-fns";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import type { Inspection } from "@/hooks/useInspections";
 
 const tradeChecklists: Record<string, string[]> = {
@@ -21,10 +23,12 @@ const tradeChecklists: Record<string, string[]> = {
 
 export default function Inspections() {
   const { data: inspections, isLoading } = useInspections();
+  const queryClient = useQueryClient();
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [selectedInspection, setSelectedInspection] = useState<Inspection | null>(null);
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
   const [inspectionNotes, setInspectionNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
@@ -37,6 +41,39 @@ export default function Inspections() {
     setInspectionNotes(insp.notes || "");
   };
 
+  const submitResult = async (result: "pass" | "fail" | "partial") => {
+    if (!selectedInspection) return;
+    setSubmitting(true);
+    try {
+      const { error } = await supabase
+        .from("inspections")
+        .update({
+          result,
+          notes: inspectionNotes || null,
+          certificate_issued: result === "pass",
+        })
+        .eq("id", selectedInspection.id);
+      if (error) throw error;
+
+      // Update project status if pass
+      if (result === "pass") {
+        await supabase
+          .from("projects")
+          .update({ status: "inspection_complete" as const })
+          .eq("id", selectedInspection.project_id);
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["inspections"] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      toast.success(`Inspection marked as ${result}`);
+      setSelectedInspection(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save result");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const tradeType = selectedInspection?.project?.trade_type || "general";
   const checklist = tradeChecklists[tradeType] || tradeChecklists.general;
 
@@ -44,7 +81,6 @@ export default function Inspections() {
     <div className="p-6 md:p-8 max-w-7xl">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-medium">Inspections</h1>
-        <Button className="bg-accent text-accent-foreground hover:bg-accent/90">+ Schedule Inspection</Button>
       </div>
 
       {/* Week navigation */}
@@ -87,14 +123,29 @@ export default function Inspections() {
                     <button
                       key={insp.id}
                       onClick={() => openInspection(insp)}
-                      className="w-full text-left rounded bg-teal/10 border border-teal/20 p-1.5 hover:bg-teal/20 transition-colors"
+                      className={cn(
+                        "w-full text-left rounded border p-1.5 transition-colors",
+                        insp.result === "pass" ? "bg-success/10 border-success/20" :
+                        insp.result === "fail" ? "bg-destructive/10 border-destructive/20" :
+                        insp.result === "partial" ? "bg-warning/10 border-warning/20" :
+                        "bg-teal/10 border-teal/20 hover:bg-teal/20"
+                      )}
                     >
                       <p className="text-[11px] font-medium truncate">{insp.project?.name || "Unnamed"}</p>
                       <p className="text-[10px] text-muted-foreground capitalize">{insp.inspection_type}</p>
                       {insp.scheduled_at && (
                         <p className="text-[10px] text-muted-foreground">{format(new Date(insp.scheduled_at), "h:mm a")}</p>
                       )}
-                      {insp.virtual && <Video className="h-3 w-3 text-teal mt-0.5" />}
+                      <div className="flex items-center gap-1 mt-0.5">
+                        {insp.virtual && <Video className="h-3 w-3 text-teal" />}
+                        {insp.result !== "pending" && (
+                          <span className={cn("text-[9px] font-medium capitalize",
+                            insp.result === "pass" ? "text-success" : insp.result === "fail" ? "text-destructive" : "text-warning"
+                          )}>
+                            {insp.result}
+                          </span>
+                        )}
+                      </div>
                     </button>
                   ))
                 )}
@@ -109,7 +160,7 @@ export default function Inspections() {
         <div className="flex flex-col items-center justify-center py-12 text-center mt-6">
           <ClipboardCheck className="h-12 w-12 text-muted-foreground/30 mb-4" />
           <h2 className="text-lg font-medium">No inspections scheduled</h2>
-          <p className="text-sm text-muted-foreground mt-1">Schedule virtual inspections from project details</p>
+          <p className="text-sm text-muted-foreground mt-1">Schedule inspections from project details</p>
         </div>
       )}
 
@@ -117,7 +168,9 @@ export default function Inspections() {
       <Sheet open={!!selectedInspection} onOpenChange={(open) => !open && setSelectedInspection(null)}>
         <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
           <SheetHeader>
-            <SheetTitle className="text-lg">Start Inspection</SheetTitle>
+            <SheetTitle className="text-lg">
+              {selectedInspection?.result !== "pending" ? "Inspection Results" : "Start Inspection"}
+            </SheetTitle>
           </SheetHeader>
 
           {selectedInspection && (
@@ -139,6 +192,17 @@ export default function Inspections() {
                       <Video className="h-3.5 w-3.5" /> Join Video Call
                     </a>
                   )}
+                  {selectedInspection.result !== "pending" && (
+                    <div className={cn("flex items-center gap-2 mt-2 rounded-lg p-2 text-sm font-medium",
+                      selectedInspection.result === "pass" ? "bg-success/10 text-success" :
+                      selectedInspection.result === "fail" ? "bg-destructive/10 text-destructive" :
+                      "bg-warning/10 text-warning"
+                    )}>
+                      <CheckCircle2 className="h-4 w-4" />
+                      Result: {selectedInspection.result.toUpperCase()}
+                      {selectedInspection.certificate_issued && " — Certificate Issued"}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -157,6 +221,7 @@ export default function Inspections() {
                           checked ? next.add(item) : next.delete(item);
                           setCheckedItems(next);
                         }}
+                        disabled={selectedInspection.result !== "pending"}
                       />
                       <span className="text-sm">{item}</span>
                     </label>
@@ -175,19 +240,39 @@ export default function Inspections() {
                   onChange={(e) => setInspectionNotes(e.target.value)}
                   placeholder="Add inspection notes..."
                   rows={4}
+                  readOnly={selectedInspection.result !== "pending"}
                 />
               </div>
 
-              {/* Result buttons */}
-              <div className="flex gap-2">
-                <Button className="flex-1 bg-success text-success-foreground hover:bg-success/90">Pass</Button>
-                <Button variant="outline" className="flex-1 border-warning text-warning hover:bg-warning/10">Partial</Button>
-                <Button variant="outline" className="flex-1 border-destructive text-destructive hover:bg-destructive/10">Fail</Button>
-              </div>
-
-              <Button variant="outline" className="w-full">
-                <Calendar className="h-4 w-4 mr-2" /> Generate Certificate
-              </Button>
+              {/* Result buttons — only show for pending inspections */}
+              {selectedInspection.result === "pending" && (
+                <div className="flex gap-2">
+                  <Button
+                    className="flex-1 bg-success text-success-foreground hover:bg-success/90"
+                    onClick={() => submitResult("pass")}
+                    disabled={submitting}
+                  >
+                    {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                    Pass
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1 border-warning text-warning hover:bg-warning/10"
+                    onClick={() => submitResult("partial")}
+                    disabled={submitting}
+                  >
+                    Partial
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1 border-destructive text-destructive hover:bg-destructive/10"
+                    onClick={() => submitResult("fail")}
+                    disabled={submitting}
+                  >
+                    Fail
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </SheetContent>
