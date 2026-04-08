@@ -721,11 +721,28 @@ export default function PlanReviewDetail() {
                 {rightPanel === "findings" && (
                   <div className="p-3 space-y-2">
                     {!hasFindings && !aiRunning && (
-                      <div className="text-center py-16">
-                        <p className="text-sm text-muted-foreground">No findings yet</p>
-                        <p className="text-xs text-muted-foreground/60 mt-1">
-                          {hasDocuments ? "Click \"Run AI Check\" to analyze your plans" : "Upload documents first"}
-                        </p>
+                      <div className="flex flex-col items-center justify-center py-12 px-4">
+                        {hasDocuments ? (
+                          <div className="text-center space-y-3 max-w-[220px]">
+                            <div className="mx-auto w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center">
+                              <Sparkles className="h-5 w-5 text-accent" />
+                            </div>
+                            <p className="text-sm font-medium">Ready to analyze</p>
+                            <p className="text-xs text-muted-foreground">{fileUrls.length} document{fileUrls.length > 1 ? "s" : ""} loaded</p>
+                            <Button
+                              size="sm"
+                              onClick={() => runAICheck(review)}
+                              className="w-full bg-accent text-accent-foreground hover:bg-accent/90"
+                            >
+                              <Sparkles className="h-3.5 w-3.5 mr-1.5" /> Analyze Plans
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="text-center space-y-2">
+                            <Upload className="h-8 w-8 text-muted-foreground/20 mx-auto" />
+                            <p className="text-sm text-muted-foreground">Upload documents to begin</p>
+                          </div>
+                        )}
                       </div>
                     )}
                     {hasFindings && (
