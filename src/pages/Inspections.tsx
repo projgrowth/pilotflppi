@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
-import { ClipboardCheck, Video, ChevronLeft, ChevronRight, Loader2, CheckCircle2 } from "lucide-react";
+import { ClipboardCheck, Video, ChevronLeft, ChevronRight, Loader2, CheckCircle2, FileText } from "lucide-react";
 import { format, startOfWeek, addDays, isSameDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";

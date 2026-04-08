@@ -7,9 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/StatusChip";
 import { DeadlineRing } from "@/components/DeadlineRing";
+import { PageHeader } from "@/components/PageHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, FileText, ClipboardCheck, Activity, Upload, Loader2 } from "lucide-react";
+import { FileText, ClipboardCheck, Activity, Upload, Loader2 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -121,17 +122,17 @@ export default function ProjectDetail() {
 
   return (
     <div className="p-6 md:p-8 max-w-7xl">
-      {/* Header */}
-      <div className="mb-6 flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/projects")}>
-          <ArrowLeft className="h-5 w-5" />
-        </Button>
-        <div className="flex-1">
-          <h1 className="text-2xl font-medium">{project.name}</h1>
-          <p className="text-sm text-muted-foreground">{project.address}</p>
-        </div>
-        <StatusChip status={project.status} className="text-sm px-3 py-1" />
-      </div>
+      {/* Header with breadcrumbs */}
+      <PageHeader
+        title={project.name}
+        subtitle={project.address}
+        breadcrumbs={[
+          { label: "Dashboard", href: "/" },
+          { label: "Projects", href: "/projects" },
+          { label: project.name },
+        ]}
+        actions={<StatusChip status={project.status} className="text-sm px-3 py-1" />}
+      />
 
       <div className="grid gap-6 lg:grid-cols-5">
         {/* Left panel */}
