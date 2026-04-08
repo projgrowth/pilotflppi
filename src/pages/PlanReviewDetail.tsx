@@ -633,6 +633,11 @@ export default function PlanReviewDetail() {
                   />
                 )}
                 <div className="shrink-0 border-t bg-muted/20 px-3 py-1.5 flex items-center gap-2 overflow-x-auto">
+                  {uploadSuccess && (
+                    <span className="flex items-center gap-1 text-[10px] text-[hsl(var(--success))] font-medium animate-in fade-in">
+                      <Check className="h-3 w-3" /> Uploaded
+                    </span>
+                  )}
                   {fileUrls.map((url, i) => {
                     const name = decodeURIComponent(url.split("/").pop() || `Doc ${i + 1}`);
                     return (
