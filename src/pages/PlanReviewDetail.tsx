@@ -161,6 +161,9 @@ export default function PlanReviewDetail() {
   const [statusFilter, setStatusFilter] = useState<FindingStatus | "all">("all");
   const [showDiff, setShowDiff] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  const [aiCompleteFlash, setAiCompleteFlash] = useState<number | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState(false);
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
 
   useEffect(() => {
     if (review?.finding_statuses) {
