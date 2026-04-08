@@ -14,7 +14,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   FileSearch, Sparkles, Send, Loader2, ChevronRight, Copy, Check,
-  Wind, Upload, FileText, Printer, X, Plus, Eye
+  Wind, Upload, FileText, X, Plus, Eye, ClipboardCheck
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -24,6 +24,10 @@ import { SeverityDonut } from "@/components/SeverityDonut";
 import { ScanTimeline } from "@/components/ScanTimeline";
 import { PlanMarkupViewer } from "@/components/PlanMarkupViewer";
 import { DeadlineRing } from "@/components/DeadlineRing";
+import { FindingStatusFilter, type FindingStatus } from "@/components/FindingStatusFilter";
+import { RoundNavigator } from "@/components/RoundNavigator";
+import { DisciplineChecklist } from "@/components/DisciplineChecklist";
+import { CommentLetterExport } from "@/components/CommentLetterExport";
 import {
   isHVHZ, getCountyLabel, getDisciplineIcon, getDisciplineColor,
   getDisciplineLabel, DISCIPLINE_ORDER, SCANNING_STEPS,
@@ -37,6 +41,8 @@ interface PlanReviewRow {
   file_urls: string[];
   round: number;
   created_at: string;
+  finding_statuses?: Record<string, string> | null;
+  previous_findings?: unknown;
   project?: { id: string; name: string; address: string; trade_type: string; county: string; jurisdiction: string } | null;
 }
 
@@ -75,7 +81,6 @@ function hasCriticalFindings(review: PlanReviewRow): boolean {
   return Array.isArray(findings) && findings.some((f) => f.severity === "critical");
 }
 
-// Retry wrapper with exponential backoff
 async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
   let lastError: Error | null = null;
   for (let i = 0; i < maxRetries; i++) {
@@ -91,7 +96,6 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
   throw lastError;
 }
 
-// Calculate days remaining from created_at (21-day statutory period)
 function getDaysRemaining(createdAt: string): number {
   const deadline = new Date(createdAt);
   deadline.setDate(deadline.getDate() + 21);
@@ -124,6 +128,44 @@ export default function PlanReview() {
   const [renderProgress, setRenderProgress] = useState(0);
   const findingRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
+  // New state for features
+  const [findingStatuses, setFindingStatuses] = useState<Record<number, FindingStatus>>({});
+  const [statusFilter, setStatusFilter] = useState<FindingStatus | "all">("all");
+  const [showDiff, setShowDiff] = useState(false);
+
+  // Load finding statuses from DB when review selected
+  useEffect(() => {
+    if (selectedReview?.finding_statuses) {
+      const loaded: Record<number, FindingStatus> = {};
+      for (const [k, v] of Object.entries(selectedReview.finding_statuses as Record<string, string>)) {
+        loaded[Number(k)] = v as FindingStatus;
+      }
+      setFindingStatuses(loaded);
+    } else {
+      setFindingStatuses({});
+    }
+  }, [selectedReview?.id]);
+
+  // Persist finding statuses to DB (debounced)
+  const statusSaveTimer = useRef<NodeJS.Timeout | null>(null);
+  const persistFindingStatuses = useCallback((reviewId: string, statuses: Record<number, FindingStatus>) => {
+    if (statusSaveTimer.current) clearTimeout(statusSaveTimer.current);
+    statusSaveTimer.current = setTimeout(async () => {
+      await supabase
+        .from("plan_reviews")
+        .update({ finding_statuses: JSON.parse(JSON.stringify(statuses)) })
+        .eq("id", reviewId);
+    }, 800);
+  }, []);
+
+  const updateFindingStatus = useCallback((index: number, status: FindingStatus) => {
+    setFindingStatuses((prev) => {
+      const next = { ...prev, [index]: status };
+      if (selectedReview) persistFindingStatuses(selectedReview.id, next);
+      return next;
+    });
+  }, [selectedReview, persistFindingStatuses]);
+
   const handleWizardComplete = useCallback((reviewId: string) => {
     queryClient.invalidateQueries({ queryKey: ["plan-reviews"] });
     setTimeout(async () => {
@@ -139,7 +181,6 @@ export default function PlanReview() {
     }, 500);
   }, [queryClient]);
 
-  // Scanning step animation
   useEffect(() => {
     if (!aiRunning) { setScanStep(0); return; }
     const interval = setInterval(() => {
@@ -152,7 +193,6 @@ export default function PlanReview() {
   const completedReviews = reviews?.filter((r) => r.ai_check_status === "complete").length || 0;
   const totalFindings = reviews?.reduce((sum, r) => sum + (Array.isArray(r.ai_findings) ? (r.ai_findings as Finding[]).length : 0), 0) || 0;
 
-  // --- Document Upload ---
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || !selectedReview) return;
     setUploading(true);
@@ -186,12 +226,10 @@ export default function PlanReview() {
     queryClient.invalidateQueries({ queryKey: ["plan-reviews"] });
   };
 
-  // --- Render PDF pages for visual analysis ---
   const renderDocumentPages = async (review: PlanReviewRow): Promise<PDFPageImage[]> => {
     if (!review.file_urls || review.file_urls.length === 0) return [];
     setRenderingPages(true);
     setRenderProgress(0);
-
     try {
       const allImages: PDFPageImage[] = [];
       for (let fi = 0; fi < review.file_urls.length; fi++) {
@@ -213,7 +251,6 @@ export default function PlanReview() {
     }
   };
 
-  // --- AI Pre-Check (with visual analysis) ---
   const runAICheck = async (review: PlanReviewRow) => {
     setAiRunning(true);
     setActiveTab("findings");
@@ -222,16 +259,12 @@ export default function PlanReview() {
       await supabase.from("plan_reviews").update({ ai_check_status: "running" }).eq("id", review.id);
       queryClient.invalidateQueries({ queryKey: ["plan-reviews"] });
 
-      // Try visual analysis first if documents are attached
       let findings: Finding[] = [];
       const hasFiles = review.file_urls && review.file_urls.length > 0;
 
       if (hasFiles) {
-        // Render pages for visual analysis
         const images = await renderDocumentPages(review);
-
         if (images.length > 0) {
-          // Use visual analysis with actual plan images
           const result = await withRetry(() =>
             callAI({
               action: "plan_review_check_visual",
@@ -246,7 +279,6 @@ export default function PlanReview() {
               },
             })
           );
-
           try {
             findings = JSON.parse(result);
             if (!Array.isArray(findings)) {
@@ -262,7 +294,6 @@ export default function PlanReview() {
         }
       }
 
-      // Fallback to text-only analysis
       if (findings.length === 0) {
         const payload: Record<string, unknown> = {
           project_name: review.project?.name,
@@ -275,7 +306,6 @@ export default function PlanReview() {
         if (hasFiles) {
           payload.document_context = `Plans attached: ${review.file_urls.map((u) => decodeURIComponent(u.split("/").pop() || "")).join(", ")}`;
         }
-
         const result = await withRetry(() => callAI({ action: "plan_review_check", payload }));
         try {
           findings = JSON.parse(result);
@@ -291,13 +321,19 @@ export default function PlanReview() {
         }
       }
 
+      // Store previous findings for diff
+      const prevFindings = review.ai_findings || [];
+
       await supabase.from("plan_reviews").update({
         ai_check_status: "complete",
         ai_findings: JSON.parse(JSON.stringify(findings)),
+        previous_findings: JSON.parse(JSON.stringify(prevFindings)),
+        finding_statuses: {},
       }).eq("id", review.id);
 
       queryClient.invalidateQueries({ queryKey: ["plan-reviews"] });
-      setSelectedReview({ ...review, ai_check_status: "complete", ai_findings: findings });
+      setSelectedReview({ ...review, ai_check_status: "complete", ai_findings: findings, previous_findings: prevFindings, finding_statuses: {} });
+      setFindingStatuses({});
       toast.success(`AI check complete — ${findings.length} findings`, {
         action: { label: "View Findings", onClick: () => setActiveTab("findings") },
       });
@@ -310,7 +346,42 @@ export default function PlanReview() {
     }
   };
 
-  // --- Comment Letter ---
+  // Create new round (resubmission)
+  const createNewRound = async () => {
+    if (!selectedReview) return;
+    try {
+      const maxRound = (reviews || [])
+        .filter((r) => r.project_id === selectedReview.project_id)
+        .reduce((max, r) => Math.max(max, r.round), 0);
+
+      const { data: newReview, error } = await supabase
+        .from("plan_reviews")
+        .insert({
+          project_id: selectedReview.project_id,
+          round: maxRound + 1,
+          file_urls: selectedReview.file_urls,
+          previous_findings: JSON.parse(JSON.stringify(selectedReview.ai_findings || [])),
+        } as any)
+        .select("*, project:projects(id, name, address, trade_type, county, jurisdiction)")
+        .single();
+
+      if (error) throw error;
+
+      // Reset the 21-day clock by updating project deadline
+      await supabase.from("projects").update({
+        deadline_at: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
+      }).eq("id", selectedReview.project_id);
+
+      queryClient.invalidateQueries({ queryKey: ["plan-reviews"] });
+      setSelectedReview(newReview as PlanReviewRow);
+      setFindingStatuses({});
+      setCommentLetter("");
+      toast.success(`Round ${maxRound + 1} created — 21-day clock reset`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create new round");
+    }
+  };
+
   const generateCommentLetter = async (review: PlanReviewRow) => {
     setGeneratingLetter(true);
     setCommentLetter("");
@@ -343,19 +414,6 @@ export default function PlanReview() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const printLetter = () => {
-    const w = window.open("", "_blank");
-    if (!w) return;
-    w.document.write(`
-      <html><head><title>Comment Letter</title>
-      <style>body{font-family:Georgia,serif;white-space:pre-wrap;padding:60px;font-size:11px;line-height:1.7;max-width:700px;margin:0 auto;color:#1a1a1a;}</style>
-      </head><body>${commentLetter.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</body></html>
-    `);
-    w.document.close();
-    w.print();
-  };
-
-  // Finding interaction handlers
   const handleAnnotationClick = useCallback((index: number) => {
     setActiveFindingIndex(index);
     const el = findingRefs.current.get(index);
@@ -367,15 +425,28 @@ export default function PlanReview() {
   }, []);
 
   const findings = (selectedReview?.ai_findings as Finding[]) || [];
+  const previousFindings = (selectedReview?.previous_findings as Finding[]) || [];
   const groupedFindings = groupFindingsByDiscipline(findings);
   const county = selectedReview?.project?.county || "";
   const hvhz = isHVHZ(county);
   const fileUrls = selectedReview?.file_urls || [];
   const hasMarkup = findings.some((f) => f.markup);
 
+  // Filter findings by status
+  const filteredFindings = statusFilter === "all"
+    ? findings
+    : findings.filter((_, i) => (findingStatuses[i] || "open") === statusFilter);
+
+  const filteredGrouped = groupFindingsByDiscipline(filteredFindings);
+
   const criticalCount = findings.filter((f) => f.severity === "critical").length;
   const majorCount = findings.filter((f) => f.severity === "major").length;
   const minorCount = findings.filter((f) => f.severity === "minor").length;
+
+  // Status counts
+  const openCount = findings.filter((_, i) => !findingStatuses[i] || findingStatuses[i] === "open").length;
+  const resolvedCount = findings.filter((_, i) => findingStatuses[i] === "resolved").length;
+  const deferredCount = findings.filter((_, i) => findingStatuses[i] === "deferred").length;
 
   // Compute global finding index
   let globalIndexCounter = 0;
@@ -387,9 +458,34 @@ export default function PlanReview() {
     }
   }
 
+  // Get all rounds for this project
+  const projectRounds = selectedReview
+    ? (reviews || [])
+        .filter((r) => r.project_id === selectedReview.project_id)
+        .sort((a, b) => a.round - b.round)
+        .map((r) => ({
+          id: r.id,
+          round: r.round,
+          created_at: r.created_at,
+          ai_check_status: r.ai_check_status,
+          findingsCount: Array.isArray(r.ai_findings) ? (r.ai_findings as Finding[]).length : 0,
+        }))
+    : [];
+
+  // Diff: identify new/carried-over findings
+  const diffMap = new Map<number, "new" | "carried">();
+  if (showDiff && previousFindings.length > 0) {
+    for (let i = 0; i < findings.length; i++) {
+      const f = findings[i];
+      const match = previousFindings.find(
+        (pf) => pf.code_ref === f.code_ref && pf.discipline === f.discipline
+      );
+      diffMap.set(i, match ? "carried" : "new");
+    }
+  }
+
   return (
     <div className="p-6 md:p-8 max-w-7xl">
-      {/* Page header */}
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-medium font-[var(--font-display)]">Plan Review</h1>
@@ -402,7 +498,6 @@ export default function PlanReview() {
 
       <NewPlanReviewWizard open={wizardOpen} onOpenChange={setWizardOpen} onComplete={handleWizardComplete} />
 
-      {/* Summary bar */}
       {totalReviews > 0 && (
         <div className="grid grid-cols-3 gap-3 mb-6">
           <Card className="shadow-subtle border">
@@ -426,7 +521,6 @@ export default function PlanReview() {
         </div>
       )}
 
-      {/* Queue header */}
       {!isLoading && (reviews || []).length > 0 && (
         <div className="hidden md:grid grid-cols-[1fr_100px_120px_60px_80px_100px_80px_24px] gap-4 px-4 mb-2">
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Project</span>
@@ -440,7 +534,6 @@ export default function PlanReview() {
         </div>
       )}
 
-      {/* Queue list */}
       {isLoading ? (
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -472,7 +565,7 @@ export default function PlanReview() {
                   "shadow-subtle border cursor-pointer hover:bg-muted/30 transition-colors relative overflow-hidden",
                   critical && "border-l-destructive border-l-2"
                 )}
-                onClick={() => { setSelectedReview(review); setCommentLetter(""); setCopied(false); setActiveTab("overview"); setPageImages([]); setActiveFindingIndex(null); }}
+                onClick={() => { setSelectedReview(review); setCommentLetter(""); setCopied(false); setActiveTab("overview"); setPageImages([]); setActiveFindingIndex(null); setStatusFilter("all"); setShowDiff(false); }}
               >
                 <CardContent className="p-4 grid grid-cols-1 md:grid-cols-[1fr_100px_120px_60px_80px_100px_80px_24px] gap-2 md:gap-4 items-center">
                   <div className="min-w-0">
@@ -487,7 +580,6 @@ export default function PlanReview() {
                     <span className="text-xs font-medium">{getCountyLabel(review.project?.county || "")}</span>
                     {isHVHZ(review.project?.county || "") && <Wind className="h-3 w-3 text-destructive" />}
                   </div>
-                  {/* Deadline ring */}
                   <div className="hidden md:flex items-center justify-center">
                     <DeadlineRing daysElapsed={21 - daysLeft} totalDays={21} size={28} />
                   </div>
@@ -534,7 +626,6 @@ export default function PlanReview() {
                       <p className="text-sm text-foreground/80">{selectedReview.project?.address}</p>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="rounded bg-muted px-2 py-0.5 text-[10px] font-medium capitalize">{selectedReview.project?.trade_type}</span>
-                        <Badge variant="secondary" className="text-xs">Round {selectedReview.round}</Badge>
                         <Badge variant="outline" className="text-xs font-medium">
                           {getCountyLabel(county)} County
                         </Badge>
@@ -549,6 +640,25 @@ export default function PlanReview() {
                           </Badge>
                         )}
                       </div>
+                      {/* Round navigator */}
+                      {projectRounds.length > 0 && (
+                        <RoundNavigator
+                          rounds={projectRounds}
+                          currentRoundId={selectedReview.id}
+                          onRoundSelect={(roundId) => {
+                            const r = (reviews || []).find((rev) => rev.id === roundId);
+                            if (r) {
+                              setSelectedReview(r);
+                              setCommentLetter("");
+                              setPageImages([]);
+                              setActiveFindingIndex(null);
+                            }
+                          }}
+                          onNewRound={createNewRound}
+                          showDiff={showDiff}
+                          onToggleDiff={() => setShowDiff(!showDiff)}
+                        />
+                      )}
                     </div>
                     {findings.length > 0 && (
                       <SeverityDonut critical={criticalCount} major={majorCount} minor={minorCount} />
@@ -557,7 +667,6 @@ export default function PlanReview() {
                 </CardContent>
               </Card>
 
-              {/* HVHZ Banner */}
               {hvhz && (
                 <div className="flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 mb-4">
                   <Wind className="h-5 w-5 text-destructive shrink-0" />
@@ -568,9 +677,8 @@ export default function PlanReview() {
                 </div>
               )}
 
-              {/* Tabs */}
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="w-full grid grid-cols-4 mb-4">
+                <TabsList className="w-full grid grid-cols-5 mb-4">
                   <TabsTrigger value="overview">Overview</TabsTrigger>
                   <TabsTrigger value="findings" className="relative">
                     Findings
@@ -578,9 +686,13 @@ export default function PlanReview() {
                       <span className="ml-1.5 text-[10px] bg-accent/15 text-accent rounded-full px-1.5 py-0.5 font-semibold">{findings.length}</span>
                     )}
                   </TabsTrigger>
-                  <TabsTrigger value="letter">Comment Letter</TabsTrigger>
+                  <TabsTrigger value="checklist">
+                    <ClipboardCheck className="h-3.5 w-3.5 mr-1" />
+                    Checklist
+                  </TabsTrigger>
+                  <TabsTrigger value="letter">Letter</TabsTrigger>
                   <TabsTrigger value="documents" className="relative">
-                    Documents
+                    Docs
                     {fileUrls.length > 0 && (
                       <span className="ml-1.5 text-[10px] bg-accent/15 text-accent rounded-full px-1.5 py-0.5 font-semibold">{fileUrls.length}</span>
                     )}
@@ -601,7 +713,6 @@ export default function PlanReview() {
                     )}
                   </Button>
 
-                  {/* Scan timeline animation */}
                   {aiRunning && (
                     <Card className="shadow-subtle border">
                       <CardContent className="p-4">
@@ -619,7 +730,6 @@ export default function PlanReview() {
                     </Card>
                   )}
 
-                  {/* Findings summary */}
                   {findings.length > 0 && (
                     <Card className="shadow-subtle border">
                       <CardContent className="p-4">
@@ -631,6 +741,12 @@ export default function PlanReview() {
                               {criticalCount > 0 && <Badge className={cn("text-[10px]", severityColors.critical)}>{criticalCount} Critical</Badge>}
                               {majorCount > 0 && <Badge className={cn("text-[10px]", severityColors.major)}>{majorCount} Major</Badge>}
                               {minorCount > 0 && <Badge className={cn("text-[10px]", severityColors.minor)}>{minorCount} Minor</Badge>}
+                            </div>
+                            {/* Status summary */}
+                            <div className="flex items-center gap-2 mt-2 text-[10px]">
+                              <span className="text-destructive font-medium">{openCount} open</span>
+                              <span className="text-[hsl(var(--success))] font-medium">{resolvedCount} resolved</span>
+                              <span className="text-[hsl(var(--warning))] font-medium">{deferredCount} deferred</span>
                             </div>
                           </div>
                         </div>
@@ -646,7 +762,6 @@ export default function PlanReview() {
                     </Card>
                   )}
 
-                  {/* Quick upload */}
                   {fileUrls.length === 0 && (
                     <div
                       className="border-2 border-dashed border-border/60 rounded-lg p-6 text-center cursor-pointer hover:bg-muted/20 transition-colors"
@@ -676,38 +791,63 @@ export default function PlanReview() {
 
                   {findings.length > 0 && (
                     <>
-                      {/* Summary bar */}
-                      <div className="flex items-center gap-3 flex-wrap">
-                        <span className="text-sm font-semibold">{findings.length} Findings</span>
-                        {criticalCount > 0 && <Badge className={cn("text-[10px]", severityColors.critical)}>{criticalCount} Critical</Badge>}
-                        {majorCount > 0 && <Badge className={cn("text-[10px]", severityColors.major)}>{majorCount} Major</Badge>}
-                        {minorCount > 0 && <Badge className={cn("text-[10px]", severityColors.minor)}>{minorCount} Minor</Badge>}
-                        {hasMarkup && pageImages.length === 0 && !renderingPages && fileUrls.length > 0 && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-[10px] h-6 gap-1 text-accent border-accent/30"
-                            onClick={() => selectedReview && renderDocumentPages(selectedReview)}
-                          >
-                            <Eye className="h-3 w-3" /> Load Visual Annotations
-                          </Button>
-                        )}
-                        {hasMarkup && pageImages.length > 0 && (
-                          <Badge variant="outline" className="text-[10px] text-accent border-accent/30">
-                            <Eye className="h-3 w-3 mr-1" /> Visual annotations
-                          </Badge>
-                        )}
-                        {renderingPages && (
-                          <div className="flex items-center gap-1.5 text-[10px] text-accent">
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            <span>Rendering pages...</span>
-                          </div>
-                        )}
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <span className="text-sm font-semibold">{findings.length} Findings</span>
+                          {criticalCount > 0 && <Badge className={cn("text-[10px]", severityColors.critical)}>{criticalCount} Critical</Badge>}
+                          {majorCount > 0 && <Badge className={cn("text-[10px]", severityColors.major)}>{majorCount} Major</Badge>}
+                          {minorCount > 0 && <Badge className={cn("text-[10px]", severityColors.minor)}>{minorCount} Minor</Badge>}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {hasMarkup && pageImages.length === 0 && !renderingPages && fileUrls.length > 0 && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-[10px] h-6 gap-1 text-accent border-accent/30"
+                              onClick={() => selectedReview && renderDocumentPages(selectedReview)}
+                            >
+                              <Eye className="h-3 w-3" /> Load Annotations
+                            </Button>
+                          )}
+                          {hasMarkup && pageImages.length > 0 && (
+                            <Badge variant="outline" className="text-[10px] text-accent border-accent/30">
+                              <Eye className="h-3 w-3 mr-1" /> Visual
+                            </Badge>
+                          )}
+                          {renderingPages && (
+                            <div className="flex items-center gap-1.5 text-[10px] text-accent">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              <span>Rendering...</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
 
-                      {/* Split view: markup viewer + findings */}
+                      {/* Status filter bar */}
+                      <FindingStatusFilter
+                        activeFilter={statusFilter}
+                        counts={{
+                          all: findings.length,
+                          open: openCount,
+                          resolved: resolvedCount,
+                          deferred: deferredCount,
+                        }}
+                        onFilterChange={setStatusFilter}
+                      />
+
+                      {/* Diff legend */}
+                      {showDiff && previousFindings.length > 0 && (
+                        <div className="flex items-center gap-3 text-[10px] bg-muted/30 rounded-md px-3 py-1.5">
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-accent" /> New finding
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-muted-foreground/40" /> Carried from R{selectedReview.round - 1}
+                          </span>
+                        </div>
+                      )}
+
                       <div className={cn("gap-4", hasMarkup && pageImages.length > 0 ? "grid grid-cols-1 lg:grid-cols-[3fr_2fr]" : "")}>
-                        {/* Plan markup viewer */}
                         {hasMarkup && pageImages.length > 0 && (
                           <PlanMarkupViewer
                             pageImages={pageImages}
@@ -718,11 +858,10 @@ export default function PlanReview() {
                           />
                         )}
 
-                        {/* Finding cards */}
                         <div className="space-y-1">
-                          <Accordion type="multiple" defaultValue={DISCIPLINE_ORDER.filter((d) => groupedFindings[d])} className="space-y-1">
-                            {DISCIPLINE_ORDER.filter((d) => groupedFindings[d]).map((discipline) => {
-                              const group = groupedFindings[discipline];
+                          <Accordion type="multiple" defaultValue={DISCIPLINE_ORDER.filter((d) => filteredGrouped[d])} className="space-y-1">
+                            {DISCIPLINE_ORDER.filter((d) => filteredGrouped[d]).map((discipline) => {
+                              const group = filteredGrouped[discipline];
                               const Icon = getDisciplineIcon(discipline);
                               const worst = getWorstSeverity(group);
                               return (
@@ -742,17 +881,27 @@ export default function PlanReview() {
                                   <AccordionContent className="px-4 pb-4 space-y-2">
                                     {group.map((finding, i) => {
                                       const gi = globalIndexMap.get(finding)!;
+                                      const diffStatus = diffMap.get(gi);
                                       return (
-                                        <FindingCard
-                                          key={i}
-                                          ref={(el) => { if (el) findingRefs.current.set(gi, el); }}
-                                          finding={finding}
-                                          index={i}
-                                          globalIndex={gi}
-                                          isActive={activeFindingIndex === gi}
-                                          onLocateClick={() => handleLocateFinding(gi)}
-                                          animationDelay={i * 60}
-                                        />
+                                        <div key={i} className="relative">
+                                          {showDiff && diffStatus && (
+                                            <div className={cn(
+                                              "absolute -left-3 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full z-10",
+                                              diffStatus === "new" ? "bg-accent" : "bg-muted-foreground/40"
+                                            )} />
+                                          )}
+                                          <FindingCard
+                                            ref={(el) => { if (el) findingRefs.current.set(gi, el); }}
+                                            finding={finding}
+                                            index={i}
+                                            globalIndex={gi}
+                                            isActive={activeFindingIndex === gi}
+                                            onLocateClick={() => handleLocateFinding(gi)}
+                                            animationDelay={i * 60}
+                                            status={findingStatuses[gi] || "open"}
+                                            onStatusChange={(status) => updateFindingStatus(gi, status)}
+                                          />
+                                        </div>
                                       );
                                     })}
                                   </AccordionContent>
@@ -766,21 +915,39 @@ export default function PlanReview() {
                   )}
                 </TabsContent>
 
+                {/* === Checklist Tab === */}
+                <TabsContent value="checklist" className="space-y-4">
+                  <DisciplineChecklist
+                    tradeType={selectedReview.project?.trade_type || "building"}
+                    findings={findings}
+                  />
+                </TabsContent>
+
                 {/* === Comment Letter Tab === */}
                 <TabsContent value="letter" className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
                     <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Comment Letter</h3>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-wrap">
+                      {/* Formal PDF export */}
+                      {findings.length > 0 && (
+                        <CommentLetterExport
+                          projectName={selectedReview.project?.name || ""}
+                          address={selectedReview.project?.address || ""}
+                          county={county}
+                          jurisdiction={selectedReview.project?.jurisdiction || ""}
+                          tradeType={selectedReview.project?.trade_type || ""}
+                          round={selectedReview.round}
+                          findings={findings}
+                          findingStatuses={Object.fromEntries(
+                            Object.entries(findingStatuses).map(([k, v]) => [Number(k), v])
+                          )}
+                        />
+                      )}
                       {commentLetter && !generatingLetter && (
-                        <>
-                          <Button size="sm" variant="outline" onClick={copyLetter}>
-                            {copied ? <Check className="h-3.5 w-3.5 mr-1" /> : <Copy className="h-3.5 w-3.5 mr-1" />}
-                            {copied ? "Copied" : "Copy"}
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={printLetter}>
-                            <Printer className="h-3.5 w-3.5 mr-1" /> Print / PDF
-                          </Button>
-                        </>
+                        <Button size="sm" variant="outline" onClick={copyLetter}>
+                          {copied ? <Check className="h-3.5 w-3.5 mr-1" /> : <Copy className="h-3.5 w-3.5 mr-1" />}
+                          {copied ? "Copied" : "Copy"}
+                        </Button>
                       )}
                       <Button
                         size="sm"

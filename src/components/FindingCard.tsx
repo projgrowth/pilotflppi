@@ -1,9 +1,10 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { getDisciplineIcon, getDisciplineColor, getDisciplineLabel } from "@/lib/county-utils";
-import { AlertTriangle, AlertCircle, Info, CheckCircle2, HelpCircle, Flag, CheckCheck, MapPin } from "lucide-react";
+import { AlertTriangle, AlertCircle, Info, CheckCircle2, HelpCircle, Flag, CheckCheck, MapPin, Clock, ArrowRightLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, forwardRef } from "react";
+import type { FindingStatus } from "@/components/FindingStatusFilter";
 
 interface MarkupData {
   page_index: number;
@@ -51,6 +52,12 @@ const confidenceConfig: Record<string, { icon: typeof CheckCircle2; label: strin
   advisory: { icon: Info, label: "Advisory", className: "text-muted-foreground" },
 };
 
+const statusOptions: { value: FindingStatus; icon: typeof Clock; label: string; className: string }[] = [
+  { value: "open", icon: Clock, label: "Open", className: "text-destructive" },
+  { value: "resolved", icon: CheckCheck, label: "Resolved", className: "text-[hsl(var(--success))]" },
+  { value: "deferred", icon: ArrowRightLeft, label: "Deferred", className: "text-[hsl(var(--warning))]" },
+];
+
 interface FindingCardProps {
   finding: Finding;
   index: number;
@@ -58,20 +65,33 @@ interface FindingCardProps {
   isActive?: boolean;
   onLocateClick?: () => void;
   animationDelay?: number;
+  status?: FindingStatus;
+  onStatusChange?: (status: FindingStatus) => void;
 }
 
 export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
-  ({ finding, index, globalIndex, isActive, onLocateClick, animationDelay = 0 }, ref) => {
+  ({ finding, index, globalIndex, isActive, onLocateClick, animationDelay = 0, status = "open", onStatusChange }, ref) => {
     const [expanded, setExpanded] = useState(false);
     const [flagged, setFlagged] = useState(false);
-    const [resolved, setResolved] = useState(finding.resolved || false);
     const sev = severityConfig[finding.severity] || severityConfig.minor;
     const SevIcon = sev.icon;
     const conf = finding.confidence ? confidenceConfig[finding.confidence] : null;
     const ConfIcon = conf?.icon;
     const DisciplineIcon = finding.discipline ? getDisciplineIcon(finding.discipline) : null;
+    const isResolved = status === "resolved";
+    const isDeferred = status === "deferred";
 
     const displayIndex = globalIndex !== undefined ? globalIndex : index;
+
+    const cycleStatus = () => {
+      if (!onStatusChange) return;
+      const order: FindingStatus[] = ["open", "resolved", "deferred"];
+      const nextIdx = (order.indexOf(status) + 1) % order.length;
+      onStatusChange(order[nextIdx]);
+    };
+
+    const currentStatusOption = statusOptions.find((s) => s.value === status)!;
+    const StatusIcon = currentStatusOption.icon;
 
     return (
       <Card
@@ -81,17 +101,17 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
           "relative animate-in fade-in slide-in-from-bottom-2",
           isActive && "ring-2 ring-accent shadow-lg",
           flagged && "ring-1 ring-accent/50",
-          resolved && "opacity-60"
+          isResolved && "opacity-60",
+          isDeferred && "opacity-75"
         )}
         style={{ animationDelay: `${animationDelay}ms`, animationFillMode: "backwards" }}
         onClick={() => setExpanded(!expanded)}
       >
         {/* Severity left bar */}
-        <div className={cn("absolute left-0 top-0 bottom-0 w-1", sev.bar, resolved && "opacity-30")} />
+        <div className={cn("absolute left-0 top-0 bottom-0 w-1", sev.bar, isResolved && "opacity-30")} />
 
         <CardContent className="p-4 pl-5">
           <div className="flex items-start gap-3">
-            {/* Finding index */}
             <span className={cn(
               "text-[10px] font-mono font-bold mt-1 shrink-0 w-5 text-right",
               isActive ? "text-accent" : "text-muted-foreground/60"
@@ -99,13 +119,11 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
               #{displayIndex + 1}
             </span>
 
-            {/* Severity icon */}
             <div className={cn("rounded-md p-1.5 shrink-0 mt-0.5", sev.badge)}>
               <SevIcon className="h-3.5 w-3.5" />
             </div>
 
-            <div className={cn("flex-1 min-w-0 space-y-1.5", resolved && "line-through decoration-muted-foreground/40")}>
-              {/* Top badges row */}
+            <div className={cn("flex-1 min-w-0 space-y-1.5", isResolved && "line-through decoration-muted-foreground/40")}>
               <div className="flex items-center gap-2 flex-wrap">
                 <Badge className={cn("text-[10px] uppercase font-semibold border", sev.badge)}>
                   {finding.severity}
@@ -130,9 +148,16 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
                     County Amendment
                   </Badge>
                 )}
+
+                {/* Status badge */}
+                {status !== "open" && (
+                  <Badge variant="outline" className={cn("text-[9px] font-medium", currentStatusOption.className)}>
+                    <StatusIcon className="h-2.5 w-2.5 mr-0.5" />
+                    {currentStatusOption.label}
+                  </Badge>
+                )}
               </div>
 
-              {/* Code ref + page */}
               <div className="flex items-center gap-3">
                 <code className="text-[11px] font-mono font-medium text-foreground/80 bg-muted/60 px-1.5 py-0.5 rounded">
                   {finding.code_ref}
@@ -144,10 +169,8 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
                 )}
               </div>
 
-              {/* Description */}
               <p className="text-sm leading-relaxed text-foreground/90">{finding.description}</p>
 
-              {/* Recommendation (expandable) */}
               {expanded && finding.recommendation && (
                 <div className="mt-2 rounded-md bg-muted/50 border border-border/60 p-3">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Recommendation</p>
@@ -164,7 +187,6 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
 
             {/* Action buttons */}
             <div className="flex flex-col gap-1 shrink-0">
-              {/* Locate on plan */}
               {finding.markup && onLocateClick && (
                 <button
                   className="p-1 rounded-md text-accent/60 hover:text-accent hover:bg-accent/10 transition-colors"
@@ -175,19 +197,15 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
                 </button>
               )}
 
-              {/* Resolved toggle */}
+              {/* Status cycle button */}
               <button
-                className={cn(
-                  "p-1 rounded-md transition-colors",
-                  resolved ? "text-[hsl(var(--success))] bg-[hsl(var(--success))]/10" : "text-muted-foreground/30 hover:text-muted-foreground/60"
-                )}
-                onClick={(e) => { e.stopPropagation(); setResolved(!resolved); }}
-                title={resolved ? "Mark unresolved" : "Mark resolved"}
+                className={cn("p-1 rounded-md transition-colors", currentStatusOption.className, "hover:bg-muted/50")}
+                onClick={(e) => { e.stopPropagation(); cycleStatus(); }}
+                title={`Status: ${currentStatusOption.label} — Click to change`}
               >
-                <CheckCheck className="h-3.5 w-3.5" />
+                <StatusIcon className="h-3.5 w-3.5" />
               </button>
 
-              {/* Flag for review */}
               <button
                 className={cn(
                   "p-1 rounded-md transition-colors",

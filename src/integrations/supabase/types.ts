@@ -234,7 +234,9 @@ export type Database = {
           ai_findings: Json | null
           created_at: string
           file_urls: string[]
+          finding_statuses: Json | null
           id: string
+          previous_findings: Json | null
           project_id: string
           reviewer_id: string | null
           round: number
@@ -245,7 +247,9 @@ export type Database = {
           ai_findings?: Json | null
           created_at?: string
           file_urls?: string[]
+          finding_statuses?: Json | null
           id?: string
+          previous_findings?: Json | null
           project_id: string
           reviewer_id?: string | null
           round?: number
@@ -256,7 +260,9 @@ export type Database = {
           ai_findings?: Json | null
           created_at?: string
           file_urls?: string[]
+          finding_statuses?: Json | null
           id?: string
+          previous_findings?: Json | null
           project_id?: string
           reviewer_id?: string | null
           round?: number
