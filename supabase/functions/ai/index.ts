@@ -7,31 +7,72 @@ const corsHeaders = {
 };
 
 const SYSTEM_PROMPTS: Record<string, string> = {
-  plan_review_check: `You are an expert Florida Building Code (FBC) plan reviewer for a licensed Private Provider firm. Analyze the provided plan details and identify potential code violations, deficiencies, and areas requiring attention.
+  plan_review_check: `You are an expert Florida Building Code (FBC 2023) plan reviewer for a licensed Private Provider firm operating under Florida Statute 553.791.
 
-For each finding, provide:
-- A severity level (critical, major, minor)
-- The specific FBC code reference (e.g., FBC 2023 Section 1003.5)
-- The page/sheet reference if applicable
-- A clear description of the issue
-- A specific recommendation for resolution
+You will receive project context including the county/jurisdiction. Tailor your analysis to county-specific requirements:
 
-Focus on: structural integrity, fire safety, egress, ADA compliance, energy code (FBC Energy Conservation), mechanical/electrical/plumbing per trade, and wind load requirements per ASCE 7 for Florida's High Velocity Hurricane Zone (HVHZ) where applicable.
+**HVHZ (High Velocity Hurricane Zone)**: Miami-Dade and Broward counties have enhanced requirements:
+- Miami-Dade County: Testing/approval per TAS 201, 202, 203 for impact-resistant products
+- ASCE 7 wind speeds ≥ 170 mph, missile impact criteria per FBC 1626
+- Product approvals must be Miami-Dade NOA (Notice of Acceptance)
+- Enhanced roofing requirements per FBC 1523 (HVHZ)
 
-Return your analysis as a JSON array of findings using this exact structure:
-[{"severity":"critical|major|minor","code_ref":"FBC section","page":"sheet/page ref","description":"issue description","recommendation":"how to fix"}]`,
+**Non-HVHZ Counties** (Palm Beach, Sarasota, etc.): Standard FBC wind load per ASCE 7, Florida Product Approvals (FL #) accepted.
 
-  generate_comment_letter: `You are a professional plan review engineer at a Florida Private Provider firm. Generate a formal comment letter for deficiencies found during plan review.
+**County Amendments**: Reference any known county-specific amendments to FBC 2023.
 
-The letter should:
-- Be addressed to the contractor/design professional
-- Reference the project name, address, and permit application
-- List each deficiency with the specific Florida Building Code citation
-- Use professional, clear language
-- Include a deadline for resubmission (14 calendar days)
-- Reference the 21-day statutory review period under Florida Statute 553.791
+For each finding, provide ALL of the following fields:
+- severity: "critical" | "major" | "minor"
+- discipline: "structural" | "life_safety" | "fire" | "mechanical" | "electrical" | "plumbing" | "energy" | "ada" | "site"
+- code_ref: Specific FBC 2023 section, ASCE 7 section, NFPA reference, or Florida Statute
+- county_specific: true if this is driven by a county amendment or HVHZ-specific requirement
+- page: Sheet/page reference (use realistic sheet designations like S-101, A-201, E-100, M-100)
+- description: Clear, specific description of the deficiency
+- recommendation: Actionable fix with code reference
+- confidence: "verified" (definite code violation) | "likely" (probable based on common issues) | "advisory" (best practice recommendation)
 
-Format as a professional letter with proper salutation and closing.`,
+Produce 8-12 findings spanning multiple disciplines. Ensure at least:
+- 2 structural findings
+- 1-2 life safety / egress findings
+- 1 energy code finding
+- 1 ADA finding
+- Remaining across fire, MEP as appropriate for the trade type
+
+Return ONLY a JSON array of findings with no additional text.`,
+
+  generate_comment_letter: `You are a professional plan review engineer at Florida Private Providers (FPP), a licensed Private Provider firm (License #PVP-XXXXX) operating under Florida Statute 553.791.
+
+Generate a formal deficiency/comment letter with this structure:
+
+**LETTERHEAD FORMAT:**
+Florida Private Providers, Inc.
+[License # PVP-XXXXX]
+Plan Review Comment Letter
+
+**HEADER:**
+- Date
+- Project Name & Address
+- County & Jurisdiction
+- Permit Application #: [placeholder]
+- Review Round #
+- Trade(s) Under Review
+
+**BODY:**
+- Opening paragraph referencing F.S. 553.791 and the statutory 21-day review period
+- Group deficiencies BY DISCIPLINE with numbered items
+- Each deficiency must include:
+  - The FBC 2023 code section or referenced standard
+  - For county-specific items, note "Per [County] Amendment" or "HVHZ Requirement"
+  - Clear description and required corrective action
+- Mark critical items with ⚠️
+
+**CLOSING:**
+- Resubmission deadline: 14 calendar days
+- Reference statutory authority
+- Contact information placeholder
+- Reviewer signature block
+
+Use professional, authoritative language. Be specific and actionable.`,
 
   generate_inspection_brief: `You are a field inspection coordinator for a Florida Private Provider. Generate a concise pre-inspection briefing (max 200 words) for the inspector.
 
@@ -73,6 +114,40 @@ Always:
 - Provide practical guidance for compliance`,
 };
 
+// Tool schema for structured plan review output
+const PLAN_REVIEW_TOOL = {
+  type: "function" as const,
+  function: {
+    name: "submit_findings",
+    description: "Submit plan review findings as structured data",
+    parameters: {
+      type: "object",
+      properties: {
+        findings: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              severity: { type: "string", enum: ["critical", "major", "minor"] },
+              discipline: { type: "string", enum: ["structural", "life_safety", "fire", "mechanical", "electrical", "plumbing", "energy", "ada", "site"] },
+              code_ref: { type: "string" },
+              county_specific: { type: "boolean" },
+              page: { type: "string" },
+              description: { type: "string" },
+              recommendation: { type: "string" },
+              confidence: { type: "string", enum: ["verified", "likely", "advisory"] },
+            },
+            required: ["severity", "discipline", "code_ref", "county_specific", "page", "description", "recommendation", "confidence"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["findings"],
+      additionalProperties: false,
+    },
+  },
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -98,8 +173,24 @@ serve(async (req) => {
 
     const systemPrompt = SYSTEM_PROMPTS[action];
     const userMessage = typeof payload === "string" ? payload : JSON.stringify(payload);
-
     const stream = payload?.stream === true;
+
+    // Use tool calling for plan_review_check for structured output
+    const useToolCalling = action === "plan_review_check";
+
+    const requestBody: Record<string, unknown> = {
+      model: "google/gemini-3-flash-preview",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      stream,
+    };
+
+    if (useToolCalling && !stream) {
+      requestBody.tools = [PLAN_REVIEW_TOOL];
+      requestBody.tool_choice = { type: "function", function: { name: "submit_findings" } };
+    }
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -107,14 +198,7 @@ serve(async (req) => {
         Authorization: `Bearer ${LOVABLE_API_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
-        ],
-        stream,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
@@ -145,8 +229,28 @@ serve(async (req) => {
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || "";
 
+    // Handle tool call response for structured output
+    if (useToolCalling) {
+      const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+      if (toolCall?.function?.arguments) {
+        try {
+          const parsed = JSON.parse(toolCall.function.arguments);
+          return new Response(JSON.stringify({ content: JSON.stringify(parsed.findings) }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        } catch (e) {
+          console.error("Failed to parse tool call arguments:", e);
+        }
+      }
+      // Fallback to regular content
+      const content = data.choices?.[0]?.message?.content || "[]";
+      return new Response(JSON.stringify({ content }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const content = data.choices?.[0]?.message?.content || "";
     return new Response(JSON.stringify({ content }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
