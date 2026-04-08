@@ -223,8 +223,8 @@ export default function PlanReviewDetail() {
         const path = `plan-reviews/${review.id}/${file.name}`;
         const { error: uploadError } = await supabase.storage.from("documents").upload(path, file, { upsert: true });
         if (uploadError) throw uploadError;
-        const { data: urlData } = supabase.storage.from("documents").getPublicUrl(path);
-        newUrls.push(urlData.publicUrl);
+        // Store the path, not a public URL — bucket is private
+        newUrls.push(path);
       }
       await supabase.from("plan_reviews").update({ file_urls: newUrls }).eq("id", review.id);
       queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
@@ -252,8 +252,19 @@ export default function PlanReviewDetail() {
     try {
       const allImages: PDFPageImage[] = [];
       for (let fi = 0; fi < r.file_urls.length; fi++) {
-        const url = r.file_urls[fi];
-        const response = await fetch(url);
+        const storedPath = r.file_urls[fi];
+        // If it's a full URL (legacy public URL), extract the path; otherwise use as-is
+        const filePath = storedPath.includes('/storage/v1/')
+          ? storedPath.split('/documents/').pop() || storedPath
+          : storedPath;
+        const { data: signedData, error: signError } = await supabase.storage
+          .from("documents")
+          .createSignedUrl(filePath, 3600);
+        if (signError || !signedData?.signedUrl) {
+          console.error("Failed to get signed URL:", signError);
+          continue;
+        }
+        const response = await fetch(signedData.signedUrl);
         const blob = await response.blob();
         const file = new File([blob], `doc-${fi}.pdf`, { type: "application/pdf" });
         const images = await renderPDFPagesToImages(file, 10, 150);
