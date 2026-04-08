@@ -17,7 +17,9 @@ import {
   Sparkles, Send, Loader2, Copy, Check,
   Wind, Upload, ArrowLeft, Mail, Phone,
   FileDown, Printer, Plus, PanelRightClose, PanelRight,
+  ChevronDown,
 } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { FindingCard, type Finding } from "@/components/FindingCard";
@@ -32,6 +34,7 @@ import {
   isHVHZ, getCountyLabel, getDisciplineIcon, getDisciplineColor,
   getDisciplineLabel, DISCIPLINE_ORDER, SCANNING_STEPS,
 } from "@/lib/county-utils";
+import { ContractorHoverCard } from "@/components/ContractorHoverCard";
 
 interface ContractorInfo {
   id: string;
