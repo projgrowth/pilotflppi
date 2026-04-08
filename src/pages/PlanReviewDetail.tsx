@@ -157,6 +157,7 @@ export default function PlanReviewDetail() {
   const [findingStatuses, setFindingStatuses] = useState<Record<number, FindingStatus>>({});
   const [statusFilter, setStatusFilter] = useState<FindingStatus | "all">("all");
   const [showDiff, setShowDiff] = useState(false);
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
 
   useEffect(() => {
     if (review?.finding_statuses) {
