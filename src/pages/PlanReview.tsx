@@ -26,7 +26,7 @@ import { PlanMarkupViewer } from "@/components/PlanMarkupViewer";
 import { DeadlineRing } from "@/components/DeadlineRing";
 import {
   isHVHZ, getCountyLabel, getDisciplineIcon, getDisciplineColor,
-  getDisciplineLabel, DISCIPLINE_ORDER, SCANNING_STEPS, type Discipline,
+  getDisciplineLabel, DISCIPLINE_ORDER, SCANNING_STEPS,
 } from "@/lib/county-utils";
 
 interface PlanReviewRow {
@@ -489,7 +489,7 @@ export default function PlanReview() {
                   </div>
                   {/* Deadline ring */}
                   <div className="hidden md:flex items-center justify-center">
-                    <DeadlineRing daysLeft={daysLeft} totalDays={21} size={28} />
+                    <DeadlineRing daysElapsed={21 - daysLeft} totalDays={21} size={28} />
                   </div>
                   <Badge variant="secondary" className="text-xs w-fit">R{review.round}</Badge>
                   <Badge
