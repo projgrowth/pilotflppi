@@ -41,6 +41,13 @@ export default function Dashboard() {
     { label: "Completed MTD", value: stats?.completedMTD ?? "—", icon: CheckCircle2, color: "text-success" },
   ];
 
+  const quickActions = [
+    { label: "New Intake", icon: Plus, variant: "default" as const, onClick: () => navigate("/projects?action=new") },
+    { label: "Schedule Inspection", icon: CalendarPlus, variant: "outline" as const, onClick: () => navigate("/inspections") },
+    { label: "Run AI Check", icon: Sparkles, variant: "outline" as const, onClick: () => navigate("/plan-review") },
+    { label: "Find Leads", icon: Radar, variant: "outline" as const, onClick: () => navigate("/lead-radar") },
+  ];
+
   return (
     <div className="p-6 md:p-8 max-w-7xl">
       <div className="mb-8">
@@ -51,7 +58,7 @@ export default function Dashboard() {
       {/* KPI cards */}
       <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
         {kpis.map((kpi) => (
-          <Card key={kpi.label} className="shadow-subtle border">
+          <Card key={kpi.label} className="shadow-subtle border hover:shadow-md transition-shadow">
             <CardContent className="p-5">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-medium text-muted-foreground">{kpi.label}</p>
@@ -69,7 +76,12 @@ export default function Dashboard() {
 
       {/* Recent Projects */}
       <div className="mb-8">
-        <h2 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wide">Recent Projects</h2>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Recent Projects</h2>
+          <Button variant="ghost" size="sm" className="text-xs text-accent" onClick={() => navigate("/projects")}>
+            View all →
+          </Button>
+        </div>
         <Card className="shadow-subtle border divide-y">
           {projectsLoading ? (
             Array.from({ length: 4 }).map((_, i) => (
@@ -85,6 +97,9 @@ export default function Dashboard() {
             <div className="flex flex-col items-center py-12">
               <FolderKanban className="h-8 w-8 text-muted-foreground/40 mb-2" />
               <p className="text-sm text-muted-foreground">No projects yet</p>
+              <Button variant="outline" size="sm" className="mt-3" onClick={() => navigate("/projects?action=new")}>
+                Create your first project
+              </Button>
             </div>
           ) : (
             recentProjects.map((project) => {
@@ -119,7 +134,7 @@ export default function Dashboard() {
       {/* Bottom split */}
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">
-          <h2 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wide">AI Briefing</h2>
+          <h2 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wide">Activity Feed</h2>
           <Card className="shadow-subtle border">
             <CardContent className="p-0 divide-y">
               {activityLoading ? (
@@ -154,15 +169,11 @@ export default function Dashboard() {
         <div className="lg:col-span-2">
           <h2 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wide">Quick Actions</h2>
           <div className="grid grid-cols-2 gap-3">
-            {[
-              { label: "New Intake", icon: Plus, variant: "default" as const },
-              { label: "Schedule Inspection", icon: CalendarPlus, variant: "outline" as const },
-              { label: "Run AI Check", icon: Sparkles, variant: "outline" as const },
-              { label: "Find Leads", icon: Radar, variant: "outline" as const },
-            ].map((action) => (
+            {quickActions.map((action) => (
               <Button
                 key={action.label}
                 variant={action.variant}
+                onClick={action.onClick}
                 className={action.variant === "default" ? "bg-accent text-accent-foreground hover:bg-accent/90 h-auto py-4 flex-col gap-2" : "h-auto py-4 flex-col gap-2"}
               >
                 <action.icon className="h-5 w-5" />

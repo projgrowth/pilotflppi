@@ -1,21 +1,110 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { StatusChip } from "@/components/StatusChip";
 import { DeadlineRing } from "@/components/DeadlineRing";
 import { useProjects, getDaysElapsed, getDaysRemaining } from "@/hooks/useProjects";
-import { Search, ChevronRight, FolderKanban } from "lucide-react";
+import { useContractors } from "@/hooks/useContractors";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { Search, ChevronRight, FolderKanban, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 const filters = ["All", "Plan Review", "Inspection", "Pending", "Complete"] as const;
+
+const FLORIDA_COUNTIES = [
+  "miami-dade", "broward", "palm-beach", "hillsborough", "orange", "duval",
+  "pinellas", "lee", "brevard", "volusia", "sarasota", "manatee", "collier",
+  "polk", "seminole", "pasco", "osceola", "st-lucie", "escambia", "marion",
+];
+
+const TRADE_TYPES = [
+  { value: "building", label: "Building (General)" },
+  { value: "structural", label: "Structural" },
+  { value: "mechanical", label: "Mechanical" },
+  { value: "electrical", label: "Electrical" },
+  { value: "plumbing", label: "Plumbing" },
+  { value: "roofing", label: "Roofing" },
+  { value: "fire", label: "Fire Protection" },
+];
 
 export default function Projects() {
   const [activeFilter, setActiveFilter] = useState<typeof filters[number]>("All");
   const [search, setSearch] = useState("");
   const { data: projects, isLoading } = useProjects();
+  const { data: contractors } = useContractors();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // New project dialog
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+  const [county, setCounty] = useState("");
+  const [jurisdiction, setJurisdiction] = useState("");
+  const [tradeType, setTradeType] = useState("building");
+  const [contractorId, setContractorId] = useState("");
+
+  // Open dialog from URL param
+  useEffect(() => {
+    if (searchParams.get("action") === "new") {
+      setDialogOpen(true);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  const resetForm = () => {
+    setName(""); setAddress(""); setCounty(""); setJurisdiction(""); setTradeType("building"); setContractorId("");
+  };
+
+  const handleCreate = async () => {
+    if (!name.trim() || !address.trim()) {
+      toast.error("Name and address are required");
+      return;
+    }
+    setSaving(true);
+    try {
+      const deadlineAt = new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString();
+      const { data, error } = await supabase
+        .from("projects")
+        .insert({
+          name: name.trim(),
+          address: address.trim(),
+          county: county || "",
+          jurisdiction: jurisdiction || "",
+          trade_type: tradeType,
+          contractor_id: contractorId || null,
+          status: "intake" as const,
+          notice_filed_at: new Date().toISOString(),
+          deadline_at: deadlineAt,
+          services: ["plan_review"],
+        })
+        .select("id")
+        .single();
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      toast.success("Project created");
+      setDialogOpen(false);
+      resetForm();
+      navigate(`/projects/${data.id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create project");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const filtered = (projects || []).filter((p) => {
     if (search) {
@@ -34,7 +123,9 @@ export default function Projects() {
     <div className="p-6 md:p-8 max-w-7xl">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-medium">Projects</h1>
-        <Button className="bg-accent text-accent-foreground hover:bg-accent/90">+ New Project</Button>
+        <Button className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => setDialogOpen(true)}>
+          <Plus className="h-4 w-4 mr-2" /> New Project
+        </Button>
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-4">
@@ -116,6 +207,76 @@ export default function Projects() {
           </div>
         )}
       </Card>
+
+      {/* New Project Dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>New Project</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Project Name *</Label>
+              <Input placeholder="Oceanview Residences" value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Address *</Label>
+              <Input placeholder="123 Main St, Miami, FL 33131" value={address} onChange={(e) => setAddress(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>County</Label>
+                <Select value={county} onValueChange={setCounty}>
+                  <SelectTrigger><SelectValue placeholder="Select county" /></SelectTrigger>
+                  <SelectContent>
+                    {FLORIDA_COUNTIES.map((c) => (
+                      <SelectItem key={c} value={c}>{c.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Jurisdiction</Label>
+                <Input placeholder="City of Miami" value={jurisdiction} onChange={(e) => setJurisdiction(e.target.value)} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Trade Type</Label>
+                <Select value={tradeType} onValueChange={setTradeType}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {TRADE_TYPES.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Contractor</Label>
+                <Select value={contractorId} onValueChange={setContractorId}>
+                  <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
+                  <SelectContent>
+                    {(contractors || []).map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }}>Cancel</Button>
+            <Button
+              className="bg-accent text-accent-foreground hover:bg-accent/90"
+              onClick={handleCreate}
+              disabled={saving || !name.trim() || !address.trim()}
+            >
+              {saving ? "Creating..." : "Create Project"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

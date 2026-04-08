@@ -1,14 +1,19 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useProject, getDaysElapsed, getDaysRemaining } from "@/hooks/useProjects";
 import { useProjectActivityLog, getEventColor } from "@/hooks/useActivityLog";
+import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/StatusChip";
 import { DeadlineRing } from "@/components/DeadlineRing";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, FileText, ClipboardCheck, Activity, StickyNote, Sparkles } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { ArrowLeft, FileText, ClipboardCheck, Activity, Upload, Loader2 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { useRef, useState } from "react";
 
 const timelineSteps = [
   { key: "intake", label: "Intake" },
@@ -24,11 +29,63 @@ const timelineSteps = [
 const statusOrder: Record<string, number> = {};
 timelineSteps.forEach((s, i) => { statusOrder[s.key] = i; });
 
+function useProjectDocuments(projectId: string) {
+  return useQuery({
+    queryKey: ["project-documents", projectId],
+    queryFn: async () => {
+      const { data, error } = await supabase.storage
+        .from("documents")
+        .list(`projects/${projectId}`, { limit: 50, sortBy: { column: "created_at", order: "desc" } });
+      if (error) throw error;
+      return (data || []).filter((f) => f.name !== ".emptyFolderPlaceholder");
+    },
+    enabled: !!projectId,
+  });
+}
+
+function useProjectReviews(projectId: string) {
+  return useQuery({
+    queryKey: ["project-reviews", projectId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("plan_reviews")
+        .select("id, round, ai_check_status, ai_findings, created_at")
+        .eq("project_id", projectId)
+        .order("round", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!projectId,
+  });
+}
+
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data: project, isLoading } = useProject(id || "");
   const { data: activity, isLoading: activityLoading } = useProjectActivityLog(id || "");
+  const { data: documents } = useProjectDocuments(id || "");
+  const { data: reviews } = useProjectReviews(id || "");
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleUpload = async (files: FileList | null) => {
+    if (!files || !id) return;
+    setUploading(true);
+    let count = 0;
+    for (const file of Array.from(files)) {
+      const path = `projects/${id}/${file.name}`;
+      const { error } = await supabase.storage.from("documents").upload(path, file, { upsert: true });
+      if (error) toast.error(`${file.name}: ${error.message}`);
+      else count++;
+    }
+    if (count > 0) {
+      toast.success(`${count} file(s) uploaded`);
+      queryClient.invalidateQueries({ queryKey: ["project-documents", id] });
+    }
+    setUploading(false);
+  };
 
   if (isLoading) {
     return (
@@ -60,6 +117,7 @@ export default function ProjectDetail() {
   const daysElapsed = getDaysElapsed(project.notice_filed_at);
   const daysRemaining = getDaysRemaining(project.deadline_at);
   const currentStepIndex = statusOrder[project.status] ?? 0;
+  const findingsCount = (reviews || []).reduce((sum, r) => sum + (Array.isArray(r.ai_findings) ? (r.ai_findings as unknown[]).length : 0), 0);
 
   return (
     <div className="p-6 md:p-8 max-w-7xl">
@@ -117,28 +175,97 @@ export default function ProjectDetail() {
           {/* Tabs */}
           <Tabs defaultValue="activity">
             <TabsList>
-              <TabsTrigger value="documents" className="gap-1.5"><FileText className="h-3.5 w-3.5" />Documents</TabsTrigger>
-              <TabsTrigger value="plan-review" className="gap-1.5"><ClipboardCheck className="h-3.5 w-3.5" />Plan Review</TabsTrigger>
+              <TabsTrigger value="documents" className="gap-1.5">
+                <FileText className="h-3.5 w-3.5" />Documents
+                {(documents || []).length > 0 && (
+                  <span className="ml-1 text-[10px] bg-accent/15 text-accent rounded-full px-1.5 py-0.5 font-semibold">{(documents || []).length}</span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="plan-review" className="gap-1.5">
+                <ClipboardCheck className="h-3.5 w-3.5" />Plan Review
+                {findingsCount > 0 && (
+                  <span className="ml-1 text-[10px] bg-accent/15 text-accent rounded-full px-1.5 py-0.5 font-semibold">{findingsCount}</span>
+                )}
+              </TabsTrigger>
               <TabsTrigger value="activity" className="gap-1.5"><Activity className="h-3.5 w-3.5" />Activity</TabsTrigger>
-              <TabsTrigger value="notes" className="gap-1.5"><StickyNote className="h-3.5 w-3.5" />Notes</TabsTrigger>
             </TabsList>
 
             <TabsContent value="documents">
               <Card className="shadow-subtle border">
-                <CardContent className="py-12 text-center text-sm text-muted-foreground">
-                  No documents uploaded yet
+                <CardContent className="p-4 space-y-3">
+                  <div
+                    className="border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:bg-muted/20 transition-colors"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    {uploading ? (
+                      <Loader2 className="h-6 w-6 mx-auto text-accent animate-spin mb-1" />
+                    ) : (
+                      <Upload className="h-6 w-6 mx-auto text-muted-foreground/40 mb-1" />
+                    )}
+                    <p className="text-xs text-muted-foreground">{uploading ? "Uploading..." : "Drop files or click to upload"}</p>
+                    <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+                  </div>
+                  {(documents || []).length === 0 ? (
+                    <p className="text-xs text-muted-foreground text-center py-4">No documents uploaded yet</p>
+                  ) : (
+                    <div className="divide-y">
+                      {(documents || []).map((doc) => (
+                        <div key={doc.name} className="flex items-center gap-3 py-2">
+                          <FileText className="h-4 w-4 text-accent shrink-0" />
+                          <span className="text-sm truncate flex-1">{doc.name}</span>
+                          <span className="text-[10px] text-muted-foreground">{format(new Date(doc.created_at), "MMM d")}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
 
             <TabsContent value="plan-review">
               <Card className="shadow-subtle border">
-                <CardContent className="py-12 text-center">
-                  <Sparkles className="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
-                  <p className="text-sm text-muted-foreground">AI plan review will appear here</p>
-                  <Button className="mt-3 bg-accent text-accent-foreground hover:bg-accent/90" size="sm">
-                    Run AI Pre-Check
-                  </Button>
+                <CardContent className="p-4">
+                  {(reviews || []).length === 0 ? (
+                    <div className="text-center py-8">
+                      <ClipboardCheck className="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
+                      <p className="text-sm text-muted-foreground">No plan reviews yet</p>
+                      <Button
+                        className="mt-3 bg-accent text-accent-foreground hover:bg-accent/90"
+                        size="sm"
+                        onClick={() => navigate("/plan-review")}
+                      >
+                        Go to Plan Review
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {(reviews || []).map((r) => {
+                        const count = Array.isArray(r.ai_findings) ? (r.ai_findings as unknown[]).length : 0;
+                        return (
+                          <div
+                            key={r.id}
+                            className="flex items-center justify-between rounded-lg border p-3 hover:bg-muted/30 cursor-pointer transition-colors"
+                            onClick={() => navigate("/plan-review")}
+                          >
+                            <div className="flex items-center gap-3">
+                              <Badge variant="secondary" className="text-xs">R{r.round}</Badge>
+                              <span className="text-sm font-medium">{format(new Date(r.created_at), "MMM d, yyyy")}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className={cn("text-[10px]",
+                                r.ai_check_status === "complete" ? "text-success border-success/30" :
+                                r.ai_check_status === "running" ? "text-accent border-accent/30" :
+                                "text-muted-foreground"
+                              )}>
+                                {r.ai_check_status}
+                              </Badge>
+                              {count > 0 && <span className="text-xs text-muted-foreground">{count} findings</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -174,14 +301,6 @@ export default function ProjectDetail() {
                 </CardContent>
               </Card>
             </TabsContent>
-
-            <TabsContent value="notes">
-              <Card className="shadow-subtle border">
-                <CardContent className="py-12 text-center text-sm text-muted-foreground">
-                  No notes yet
-                </CardContent>
-              </Card>
-            </TabsContent>
           </Tabs>
         </div>
 
@@ -206,8 +325,8 @@ export default function ProjectDetail() {
             <CardContent className="p-5 space-y-3">
               <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Details</h3>
               {[
-                ["County", project.county],
-                ["Jurisdiction", project.jurisdiction],
+                ["County", project.county || "—"],
+                ["Jurisdiction", project.jurisdiction || "—"],
                 ["Trade", project.trade_type],
                 ["Contractor", project.contractor?.name || "—"],
                 ["Notice Filed", project.notice_filed_at ? format(new Date(project.notice_filed_at), "MMM d, yyyy") : "—"],
@@ -224,8 +343,16 @@ export default function ProjectDetail() {
 
           {/* Quick actions */}
           <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" size="sm" className="text-xs">Upload Docs</Button>
-            <Button size="sm" className="text-xs bg-accent text-accent-foreground hover:bg-accent/90">Run AI Check</Button>
+            <Button variant="outline" size="sm" className="text-xs" onClick={() => fileInputRef.current?.click()}>
+              <Upload className="h-3.5 w-3.5 mr-1" /> Upload Docs
+            </Button>
+            <Button
+              size="sm"
+              className="text-xs bg-accent text-accent-foreground hover:bg-accent/90"
+              onClick={() => navigate("/plan-review")}
+            >
+              <ClipboardCheck className="h-3.5 w-3.5 mr-1" /> Plan Review
+            </Button>
           </div>
         </div>
       </div>
