@@ -1,5 +1,4 @@
 import { useLocation, Link } from "react-router-dom";
-import { useAuth } from "@/contexts/AuthContext";
 import {
   LayoutDashboard,
   FolderKanban,
@@ -12,7 +11,6 @@ import {
   Users,
   FileText,
   Settings,
-  LogOut,
   ChevronRight,
   Menu,
 } from "lucide-react";
