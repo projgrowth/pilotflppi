@@ -164,7 +164,7 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
                 </code>
                 {finding.page && (
                   <span className="text-[10px] text-accent font-semibold bg-accent/10 px-1.5 py-0.5 rounded">
-                    📄 Sheet: {finding.page}
+                    Sheet: {finding.page}
                   </span>
                 )}
               </div>

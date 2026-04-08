@@ -94,7 +94,7 @@ function buildLetterHTML(props: CommentLetterExportProps): string {
   </table>
 </div>
 
-${hvhz ? '<div class="hvhz-banner">⚠️ <strong>HIGH VELOCITY HURRICANE ZONE (HVHZ)</strong> — Enhanced requirements per FBC 1626, Miami-Dade TAS 201/202/203 apply to this project.</div>' : ''}
+${hvhz ? '<div class="hvhz-banner"><strong>HIGH VELOCITY HURRICANE ZONE (HVHZ)</strong> — Enhanced requirements per FBC 1626, Miami-Dade TAS 201/202/203 apply to this project.</div>' : ''}
 
 <p class="body-text"><strong>RE: Plan Review Comment Letter — Round ${round}</strong></p>
 
@@ -124,7 +124,7 @@ ${items.map(({ finding, index }) => {
 <div class="finding-item">
   <p>
     <span class="finding-number">${itemNumber}.</span>
-    <span class="finding-severity sev-${finding.severity}">${finding.severity === 'critical' ? '⚠️ ' : ''}${finding.severity.toUpperCase()}</span>
+    <span class="finding-severity sev-${finding.severity}">${finding.severity.toUpperCase()}</span>
     ${status !== 'open' ? `<span class="status-tag status-${status}">${status.toUpperCase()}</span>` : ''}
     ${finding.county_specific ? '<span class="county-flag"> [County Amendment]</span>' : ''}
   </p>
@@ -158,25 +158,61 @@ ${items.map(({ finding, index }) => {
 </body></html>`;
 }
 
+function printViaIframe(html: string) {
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.left = "-9999px";
+  iframe.style.top = "-9999px";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!doc) {
+    document.body.removeChild(iframe);
+    return;
+  }
+
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  iframe.onload = () => {
+    setTimeout(() => {
+      iframe.contentWindow?.print();
+      setTimeout(() => {
+        document.body.removeChild(iframe);
+      }, 1000);
+    }, 300);
+  };
+}
+
 export function CommentLetterExport(props: CommentLetterExportProps) {
-  const handleExportPDF = () => {
+  const handlePrint = () => {
     const html = buildLetterHTML(props);
-    const w = window.open("", "_blank");
-    if (!w) return;
-    w.document.write(html);
-    w.document.close();
-    setTimeout(() => w.print(), 500);
+    printViaIframe(html);
+  };
+
+  const handleDownloadHTML = () => {
+    const html = buildLetterHTML(props);
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Comment-Letter-R${props.round}-${props.projectName.replace(/\s+/g, "_")}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
     <div className="flex gap-2">
-      <Button size="sm" variant="outline" onClick={handleExportPDF} className="gap-1.5">
+      <Button size="sm" variant="outline" onClick={handleDownloadHTML} className="gap-1.5">
         <FileDown className="h-3.5 w-3.5" />
-        Export PDF
+        Download
       </Button>
-      <Button size="sm" variant="outline" onClick={handleExportPDF} className="gap-1.5">
+      <Button size="sm" variant="outline" onClick={handlePrint} className="gap-1.5">
         <Printer className="h-3.5 w-3.5" />
-        Print Letter
+        Print
       </Button>
     </div>
   );
