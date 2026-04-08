@@ -529,21 +529,7 @@ export default function PlanReviewDetail() {
             <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
               <span className="truncate">{review.project?.address}</span>
               <span>{getCountyLabel(county)} County</span>
-              {contractor && (
-                <>
-                  <span className="text-foreground font-medium">{contractor.name}</span>
-                  {contractor.email && (
-                    <a href={`mailto:${contractor.email}`} className="flex items-center gap-0.5 hover:text-accent transition-colors">
-                      <Mail className="h-2.5 w-2.5" /> {contractor.email}
-                    </a>
-                  )}
-                  {contractor.phone && (
-                    <a href={`tel:${contractor.phone}`} className="flex items-center gap-0.5 hover:text-accent transition-colors">
-                      <Phone className="h-2.5 w-2.5" /> {contractor.phone}
-                    </a>
-                  )}
-                </>
-              )}
+              {contractor && <ContractorHoverCard contractor={contractor} />}
             </div>
           </div>
 
