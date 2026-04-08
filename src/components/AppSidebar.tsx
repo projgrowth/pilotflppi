@@ -100,17 +100,14 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
-      {/* Logo */}
-      <div className="flex items-center gap-3 px-4 py-6">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sidebar-primary">
-          <svg viewBox="0 0 24 24" className="h-5 w-5 text-sidebar-primary-foreground" fill="currentColor">
-            <polygon points="12,2 22,8.5 22,15.5 12,22 2,15.5 2,8.5" />
-          </svg>
-        </div>
-        <div>
-          <h1 className="font-display text-lg leading-tight text-white">PermitPilot</h1>
-          <p className="text-[10px] tracking-wide text-sidebar-foreground/60">Florida Private Providers</p>
-        </div>
+      {/* FPP Wordmark */}
+      <div className="px-4 py-6">
+        <Link to="/dashboard" className="block">
+          <p className="font-display text-lg leading-tight text-white tracking-wide">Florida</p>
+          <div className="my-1 h-px w-16 bg-sidebar-primary" />
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-sidebar-primary">Private Providers</p>
+        </Link>
+        <p className="mt-2 text-[9px] tracking-wide text-sidebar-foreground/40">License #AR92053 · Est. 1980</p>
       </div>
 
       {/* Navigation */}

@@ -16,6 +16,9 @@ import {
   Sparkles,
   Radar,
   ChevronRight,
+  Shield,
+  MapPin,
+  Award,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { useNavigate } from "react-router-dom";
@@ -50,6 +53,22 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 md:p-8 max-w-7xl">
+      {/* FPP Stats Bar */}
+      <div className="mb-6 flex items-center gap-6 rounded-lg border bg-card px-5 py-3 shadow-subtle">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Shield className="h-3.5 w-3.5 text-primary" />
+          <span className="font-mono">AR92053</span>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Award className="h-3.5 w-3.5 text-accent" />
+          <span>44+ Years</span>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <MapPin className="h-3.5 w-3.5 text-teal" />
+          <span>67 Counties</span>
+        </div>
+      </div>
+
       <div className="mb-8">
         <h1 className="text-2xl font-medium text-foreground">{greeting}, {displayName}.</h1>
         <p className="text-sm text-muted-foreground">{format(now, "EEEE, MMMM d, yyyy")}</p>
@@ -174,7 +193,7 @@ export default function Dashboard() {
                 key={action.label}
                 variant={action.variant}
                 onClick={action.onClick}
-                className={action.variant === "default" ? "bg-accent text-accent-foreground hover:bg-accent/90 h-auto py-4 flex-col gap-2" : "h-auto py-4 flex-col gap-2"}
+                className={action.variant === "default" ? "bg-primary text-primary-foreground hover:bg-primary/90 h-auto py-4 flex-col gap-2" : "h-auto py-4 flex-col gap-2"}
               >
                 <action.icon className="h-5 w-5" />
                 <span className="text-xs">{action.label}</span>
