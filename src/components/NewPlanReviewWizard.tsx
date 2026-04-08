@@ -304,8 +304,8 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete }: NewPlanR
           console.error("Upload error:", uploadError);
           continue;
         }
-        const { data: urlData } = supabase.storage.from("documents").getPublicUrl(path);
-        fileUrls.push(urlData.publicUrl);
+        // Store the path, not a public URL — bucket is private
+        fileUrls.push(path);
       }
 
       // Update plan_review with file URLs

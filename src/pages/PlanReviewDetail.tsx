@@ -223,8 +223,8 @@ export default function PlanReviewDetail() {
         const path = `plan-reviews/${review.id}/${file.name}`;
         const { error: uploadError } = await supabase.storage.from("documents").upload(path, file, { upsert: true });
         if (uploadError) throw uploadError;
-        const { data: urlData } = supabase.storage.from("documents").getPublicUrl(path);
-        newUrls.push(urlData.publicUrl);
+        // Store the path, not a public URL — bucket is private
+        newUrls.push(path);
       }
       await supabase.from("plan_reviews").update({ file_urls: newUrls }).eq("id", review.id);
       queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
