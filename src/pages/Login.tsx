@@ -82,7 +82,7 @@ export default function Login() {
         <div />
         <div className="space-y-6">
           <div>
-            <p className="font-display text-5xl text-white leading-tight">Florida</p>
+            <p className="text-4xl font-semibold text-white leading-tight tracking-tight">Florida</p>
             <div className="my-2 h-px w-20 bg-accent" />
             <p className="text-sm font-semibold uppercase tracking-[0.25em] text-accent">Private Providers</p>
           </div>
@@ -110,7 +110,7 @@ export default function Login() {
       <div className="flex flex-1 items-center justify-center p-8 bg-background">
         <div className="w-full max-w-sm space-y-8">
           <div className="lg:hidden">
-            <p className="font-display text-3xl text-foreground">Florida</p>
+            <p className="text-2xl font-semibold text-foreground tracking-tight">Florida</p>
             <div className="my-1.5 h-px w-14 bg-accent" />
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-accent">Private Providers</p>
           </div>

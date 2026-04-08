@@ -104,7 +104,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       {/* FPP Wordmark */}
       <div className="px-4 py-6">
         <Link to="/dashboard" className="block">
-          <p className="font-display text-lg leading-tight text-white tracking-wide">Florida</p>
+          <p className="text-base font-semibold leading-tight text-white tracking-wide">Florida</p>
           <div className="my-1 h-px w-16 bg-sidebar-primary" />
           <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-sidebar-primary">Private Providers</p>
         </Link>

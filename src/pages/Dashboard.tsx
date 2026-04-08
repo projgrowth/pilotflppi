@@ -65,7 +65,7 @@ function NeedsAttentionQueue({ projects, navigate }: { projects: any[]; navigate
     return (
       <Card className="shadow-subtle border">
         <CardContent className="py-8 text-center">
-          <p className="text-sm text-muted-foreground">Nothing urgent — you're all caught up 🎉</p>
+          <p className="text-sm text-muted-foreground">Nothing urgent — you're all caught up.</p>
         </CardContent>
       </Card>
     );
