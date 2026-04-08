@@ -682,10 +682,26 @@ export default function PlanReview() {
                         {criticalCount > 0 && <Badge className={cn("text-[10px]", severityColors.critical)}>{criticalCount} Critical</Badge>}
                         {majorCount > 0 && <Badge className={cn("text-[10px]", severityColors.major)}>{majorCount} Major</Badge>}
                         {minorCount > 0 && <Badge className={cn("text-[10px]", severityColors.minor)}>{minorCount} Minor</Badge>}
-                        {hasMarkup && (
+                        {hasMarkup && pageImages.length === 0 && !renderingPages && fileUrls.length > 0 && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-[10px] h-6 gap-1 text-accent border-accent/30"
+                            onClick={() => selectedReview && renderDocumentPages(selectedReview)}
+                          >
+                            <Eye className="h-3 w-3" /> Load Visual Annotations
+                          </Button>
+                        )}
+                        {hasMarkup && pageImages.length > 0 && (
                           <Badge variant="outline" className="text-[10px] text-accent border-accent/30">
                             <Eye className="h-3 w-3 mr-1" /> Visual annotations
                           </Badge>
+                        )}
+                        {renderingPages && (
+                          <div className="flex items-center gap-1.5 text-[10px] text-accent">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <span>Rendering pages...</span>
+                          </div>
                         )}
                       </div>
 
