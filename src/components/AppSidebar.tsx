@@ -15,8 +15,7 @@ import {
   Menu,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useState } from "react";
 
@@ -78,9 +77,7 @@ function NavSection({ title, items }: { title: string; items: NavItem[] }) {
 }
 
 function SidebarContent() {
-  const { user, signOut } = useAuth();
-  const email = user?.email ?? "User";
-  const initials = email.substring(0, 2).toUpperCase();
+  const initials = "AD";
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
@@ -111,20 +108,11 @@ function SidebarContent() {
             {initials}
           </div>
           <div className="flex-1 text-left">
-            <p className="truncate text-sm font-medium text-sidebar-accent-foreground">{email}</p>
+            <p className="truncate text-sm font-medium text-sidebar-accent-foreground">Admin</p>
             <p className="text-[10px] text-sidebar-foreground/60">Administrator</p>
           </div>
           <ChevronRight className="h-4 w-4 text-sidebar-foreground/40" />
         </button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="mt-2 w-full justify-start text-sidebar-foreground/60 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/50"
-          onClick={signOut}
-        >
-          <LogOut className="mr-2 h-4 w-4" />
-          Sign out
-        </Button>
       </div>
     </div>
   );
