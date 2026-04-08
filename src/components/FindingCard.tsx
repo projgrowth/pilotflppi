@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { getDisciplineIcon, getDisciplineColor, getDisciplineLabel } from "@/lib/county-utils";
-import { AlertTriangle, AlertCircle, Info, CheckCircle2, HelpCircle } from "lucide-react";
+import { AlertTriangle, AlertCircle, Info, CheckCircle2, HelpCircle, Flag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
@@ -40,19 +40,23 @@ const confidenceConfig: Record<string, { icon: typeof CheckCircle2; label: strin
   advisory: { icon: Info, label: "Advisory", className: "text-muted-foreground" },
 };
 
-export function FindingCard({ finding, index }: { finding: Finding; index: number }) {
+export function FindingCard({ finding, index, globalIndex }: { finding: Finding; index: number; globalIndex?: number }) {
   const [expanded, setExpanded] = useState(false);
+  const [flagged, setFlagged] = useState(false);
   const sev = severityConfig[finding.severity] || severityConfig.minor;
   const SevIcon = sev.icon;
   const conf = finding.confidence ? confidenceConfig[finding.confidence] : null;
   const ConfIcon = conf?.icon;
   const DisciplineIcon = finding.discipline ? getDisciplineIcon(finding.discipline) : null;
 
+  const displayIndex = globalIndex !== undefined ? globalIndex : index;
+
   return (
     <Card
       className={cn(
         "shadow-subtle border overflow-hidden cursor-pointer transition-all hover:shadow-md",
-        "relative"
+        "relative",
+        flagged && "ring-1 ring-accent/50"
       )}
       onClick={() => setExpanded(!expanded)}
     >
@@ -61,6 +65,11 @@ export function FindingCard({ finding, index }: { finding: Finding; index: numbe
 
       <CardContent className="p-4 pl-5">
         <div className="flex items-start gap-3">
+          {/* Finding index */}
+          <span className="text-[10px] font-mono font-bold text-muted-foreground/60 mt-1 shrink-0 w-5 text-right">
+            #{displayIndex + 1}
+          </span>
+
           {/* Severity icon */}
           <div className={cn("rounded-md p-1.5 shrink-0 mt-0.5", sev.badge)}>
             <SevIcon className="h-3.5 w-3.5" />
@@ -100,8 +109,8 @@ export function FindingCard({ finding, index }: { finding: Finding; index: numbe
                 {finding.code_ref}
               </code>
               {finding.page && (
-                <span className="text-[10px] text-muted-foreground">
-                  Sheet: {finding.page}
+                <span className="text-[10px] text-accent font-semibold bg-accent/10 px-1.5 py-0.5 rounded">
+                  📄 Sheet: {finding.page}
                 </span>
               )}
             </div>
@@ -123,6 +132,18 @@ export function FindingCard({ finding, index }: { finding: Finding; index: numbe
               </p>
             )}
           </div>
+
+          {/* Flag for review */}
+          <button
+            className={cn(
+              "shrink-0 mt-1 p-1 rounded-md transition-colors",
+              flagged ? "text-accent bg-accent/10" : "text-muted-foreground/30 hover:text-muted-foreground/60"
+            )}
+            onClick={(e) => { e.stopPropagation(); setFlagged(!flagged); }}
+            title={flagged ? "Unflag" : "Flag for review"}
+          >
+            <Flag className="h-3.5 w-3.5" fill={flagged ? "currentColor" : "none"} />
+          </button>
         </div>
       </CardContent>
     </Card>
