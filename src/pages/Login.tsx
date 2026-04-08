@@ -46,7 +46,7 @@ export default function Login() {
           },
         });
         if (error) throw error;
-        toast.success("Check your email to confirm your account");
+        toast.success("Account created! You can now sign in.");
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
@@ -78,47 +78,15 @@ export default function Login() {
   return (
     <div className="flex min-h-screen">
       {/* Left — branding panel */}
-      <div className="hidden lg:flex lg:w-1/2 flex-col justify-between bg-primary p-12 text-primary-foreground">
-        <div>
-          <p className="font-display text-3xl leading-tight">Florida</p>
-          <div className="my-2 h-px w-24 bg-accent" />
-          <p className="text-sm font-semibold uppercase tracking-[0.25em] text-accent">Private Providers</p>
-        </div>
-
-        <div className="space-y-6">
-          <h2 className="font-display text-4xl leading-tight">
-            Licensed Private Provider<br />Portal
-          </h2>
-          <p className="max-w-md text-sm leading-relaxed text-primary-foreground/70">
-            Streamline plan reviews, inspections, and permit management across all 67 Florida counties — backed by 44+ years of experience.
-          </p>
-          <div className="flex gap-8 text-xs text-primary-foreground/50">
-            <div>
-              <p className="text-2xl font-semibold text-accent">44+</p>
-              <p>Years</p>
-            </div>
-            <div>
-              <p className="text-2xl font-semibold text-accent">67</p>
-              <p>Counties</p>
-            </div>
-            <div>
-              <p className="text-2xl font-semibold text-accent">2,500+</p>
-              <p>Projects</p>
-            </div>
-          </div>
-        </div>
-
-        <p className="text-[10px] text-primary-foreground/30">License #AR92053 · Est. 1980</p>
+      <div className="hidden lg:flex lg:w-1/2 flex-col justify-center items-center bg-primary p-12">
+        <p className="font-display text-5xl font-bold tracking-wider text-white">FLPPI</p>
       </div>
 
       {/* Right — auth form */}
       <div className="flex flex-1 items-center justify-center p-8 bg-background">
         <div className="w-full max-w-sm space-y-8">
-          {/* Mobile logo */}
           <div className="lg:hidden text-center">
-            <p className="font-display text-2xl text-foreground">Florida</p>
-            <div className="mx-auto my-1 h-px w-16 bg-accent" />
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-accent">Private Providers</p>
+            <p className="font-display text-3xl font-bold tracking-wider text-foreground">FLPPI</p>
           </div>
 
           <div>
@@ -126,7 +94,7 @@ export default function Login() {
               {isSignUp ? "Create your account" : "Sign in to your account"}
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              {isSignUp ? "Get started with PermitPilot" : "Welcome back"}
+              {isSignUp ? "Get started with FLPPI" : "Welcome back"}
             </p>
           </div>
 
@@ -134,62 +102,29 @@ export default function Login() {
             {isSignUp && (
               <div className="space-y-1.5">
                 <Label htmlFor="fullName">Full Name</Label>
-                <Input
-                  id="fullName"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder="John Smith"
-                  required
-                />
+                <Input id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="John Smith" required />
               </div>
             )}
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@company.com"
-                required
-              />
+              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" required />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-                minLength={6}
-              />
+              <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6} />
             </div>
-            <Button
-              type="submit"
-              className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-              disabled={loading}
-            >
+            <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90" disabled={loading}>
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {isSignUp ? "Create Account" : "Sign In"}
             </Button>
           </form>
 
           <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t" />
-            </div>
-            <div className="relative flex justify-center text-xs">
-              <span className="bg-background px-2 text-muted-foreground">or</span>
-            </div>
+            <div className="absolute inset-0 flex items-center"><div className="w-full border-t" /></div>
+            <div className="relative flex justify-center text-xs"><span className="bg-background px-2 text-muted-foreground">or</span></div>
           </div>
 
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={handleGoogleSignIn}
-          >
+          <Button variant="outline" className="w-full" onClick={handleGoogleSignIn}>
             <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
               <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
@@ -201,11 +136,7 @@ export default function Login() {
 
           <p className="text-center text-sm text-muted-foreground">
             {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
-            <button
-              type="button"
-              onClick={() => setIsSignUp(!isSignUp)}
-              className="font-medium text-primary hover:underline"
-            >
+            <button type="button" onClick={() => setIsSignUp(!isSignUp)} className="font-medium text-primary hover:underline">
               {isSignUp ? "Sign in" : "Sign up"}
             </button>
           </p>
