@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Check, Loader2 } from "lucide-react";
-import { getDisciplineIcon, getDisciplineLabel, getDisciplineColor, SCANNING_STEPS } from "@/lib/county-utils";
+import { getDisciplineIcon, getDisciplineColor, SCANNING_STEPS } from "@/lib/county-utils";
 
 interface ScanTimelineProps {
   currentStep: number;
