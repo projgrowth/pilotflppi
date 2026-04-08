@@ -26,6 +26,7 @@ const tradeChecklists: Record<string, string[]> = {
 export default function Inspections() {
   const { data: inspections, isLoading } = useInspections();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [selectedInspection, setSelectedInspection] = useState<Inspection | null>(null);
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
