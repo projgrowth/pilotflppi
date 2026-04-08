@@ -516,11 +516,12 @@ export default function PlanReview() {
 
       {/* Review detail panel */}
       <Sheet open={!!selectedReview} onOpenChange={(open) => !open && setSelectedReview(null)}>
-        <SheetContent className="w-full sm:max-w-5xl overflow-y-auto">
+        <SheetContent className="w-full sm:max-w-5xl overflow-y-auto" aria-describedby="review-detail-desc">
           <SheetHeader>
             <SheetTitle className="font-[var(--font-display)] text-xl">
               {selectedReview?.project?.name || "Plan Review"}
             </SheetTitle>
+            <p id="review-detail-desc" className="sr-only">Review details and AI findings</p>
           </SheetHeader>
 
           {selectedReview && (
