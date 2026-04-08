@@ -8,9 +8,9 @@ interface ScanTimelineProps {
   className?: string;
 }
 
-export const ScanTimeline = forwardRef<HTMLDivElement, ScanTimelineProps>(({ currentStep, className }, ref) => {
+export const ScanTimeline = forwardRef<HTMLDivElement, ScanTimelineProps>(function ScanTimeline({ currentStep, className }, ref) {
   return (
-    <div className={cn("space-y-1", className)}>
+    <div ref={ref} className={cn("space-y-1", className)}>
       {SCANNING_STEPS.map((step, i) => {
         const Icon = getDisciplineIcon(step.discipline);
         const active = i === currentStep;
