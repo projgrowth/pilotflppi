@@ -1,47 +1,48 @@
 
 
-# Fix: Unify Documents Under Each Project
+# Fix: Edge Function Crash on Empty Request Body
 
 ## Problem
 
-Three separate document sources exist but none feed into the project Documents tab:
+The `ai` edge function crashes with `SyntaxError: Unexpected end of JSON input` when it receives a request with no body (or an empty body). This happens at `await req.json()` (line 274) — before the CORS check can handle it. The error causes a blank screen because the function returns a 500 instead of a proper error response.
 
-1. **Plan review PDFs** — uploaded to `plan_review_files` table paths, but the project Documents tab only looks in `projects/{id}/` storage folder
-2. **Comment letters** — generated as in-memory HTML blobs and downloaded via `document.createElement("a")` — never persisted to storage
-3. **Global Documents page** — lists root-level storage files, completely disconnected from projects
+The edge function logs confirm this:
+```
+AI function error: SyntaxError: Unexpected end of JSON input
+```
 
-## Solution
+## Fix
 
-### 1. Show plan review files in project Documents tab
+Wrap `await req.json()` in a try-catch to handle empty/malformed request bodies gracefully, returning a 400 error with a clear message instead of crashing.
 
-Update `ProjectDetail.tsx` to also query the `plan_review_files` table for the current project and merge those results into the documents list. These files already exist in storage — they just aren't being shown.
-
-### 2. Auto-save comment letters to storage on export
-
-Update `CommentLetterExport.tsx` so that when a comment letter is generated, it also uploads the HTML blob to `documents/projects/{projectId}/Comment-Letter-R{round}.html` in storage. This way every exported letter appears in the project's Documents tab automatically.
-
-### 3. Auto-save county document packages to storage
-
-Update `CountyDocumentPackage.tsx` similarly — when product checklists or inspection readiness packets are downloaded, also persist them to the project's storage folder.
-
-### 4. Update global Documents page to show all project documents
-
-Update `Documents.tsx` to recursively list files across all `projects/` subfolders (or list from root), so the global Documents page serves as a unified view of everything.
-
-## Files Changed
+## File Changed
 
 | File | Change |
 |------|--------|
-| `src/pages/ProjectDetail.tsx` | Merge `plan_review_files` query results into the documents list |
-| `src/components/CommentLetterExport.tsx` | Add storage upload alongside the download |
-| `src/components/CountyDocumentPackage.tsx` | Add storage upload alongside the download |
-| `src/pages/Documents.tsx` | List files from `projects/` subfolders to show all project documents |
-| `src/hooks/usePlanReviewFiles.ts` | Add a helper to query files by project ID (not just plan review ID) |
+| `supabase/functions/ai/index.ts` | Wrap `req.json()` in try-catch at line 274, return 400 on parse failure |
 
-## Technical Details
+## Code Change (line 273-274)
 
-- Plan review files are queried by joining through `plan_reviews.project_id`
-- Comment letter upload uses `supabase.storage.from("documents").upload(...)` with `upsert: true`
-- The global Documents page uses `supabase.storage.from("documents").list("projects", ...)` then iterates subfolders
-- All uploads go to `projects/{projectId}/` so both the project detail and global views find them
+Replace:
+```typescript
+const { action, payload } = await req.json();
+```
+
+With:
+```typescript
+let action: string;
+let payload: any;
+try {
+  const body = await req.json();
+  action = body.action;
+  payload = body.payload;
+} catch {
+  return new Response(
+    JSON.stringify({ error: "Invalid or empty request body" }),
+    { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
+```
+
+This is a one-line-scope fix — no other files or migrations needed. After deploying, the function will return a clean 400 instead of crashing on empty requests.
 
