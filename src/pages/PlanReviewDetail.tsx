@@ -296,6 +296,7 @@ export default function PlanReviewDetail() {
       if (hasFiles) {
         const images = pageImages.length > 0 ? pageImages : await renderDocumentPages(r);
         if (images.length > 0) {
+          const countyConfig = getCountyRequirements(r.project?.county || "");
           const result = await withRetry(() =>
             callAI({
               action: "plan_review_check_visual",
@@ -306,6 +307,13 @@ export default function PlanReviewDetail() {
                 county: r.project?.county,
                 jurisdiction: r.project?.jurisdiction,
                 round: r.round,
+                county_requirements: {
+                  hvhz: countyConfig.hvhz,
+                  productApprovalFormat: countyConfig.productApprovalFormat,
+                  designWindSpeed: countyConfig.designWindSpeed,
+                  amendments: countyConfig.amendments,
+                  cccl: countyConfig.cccl,
+                },
                 images: images.map((img) => img.base64),
               },
             })
@@ -326,6 +334,7 @@ export default function PlanReviewDetail() {
       }
 
       if (findings.length === 0) {
+        const countyConfigFallback = getCountyRequirements(r.project?.county || "");
         const payload: Record<string, unknown> = {
           project_name: r.project?.name,
           address: r.project?.address,
@@ -333,6 +342,13 @@ export default function PlanReviewDetail() {
           county: r.project?.county,
           jurisdiction: r.project?.jurisdiction,
           round: r.round,
+          county_requirements: {
+            hvhz: countyConfigFallback.hvhz,
+            productApprovalFormat: countyConfigFallback.productApprovalFormat,
+            designWindSpeed: countyConfigFallback.designWindSpeed,
+            amendments: countyConfigFallback.amendments,
+            cccl: countyConfigFallback.cccl,
+          },
         };
         if (hasFiles) {
           payload.document_context = `Plans attached: ${r.file_urls.map((u) => decodeURIComponent(u.split("/").pop() || "")).join(", ")}`;
