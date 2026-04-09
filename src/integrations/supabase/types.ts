@@ -477,8 +477,13 @@ export type Database = {
           jurisdiction: string
           name: string
           notice_filed_at: string | null
+          review_clock_paused_at: string | null
+          review_clock_started_at: string | null
           services: string[]
           status: Database["public"]["Enums"]["project_status"]
+          statutory_deadline_at: string | null
+          statutory_inspection_days: number
+          statutory_review_days: number
           trade_type: string
           updated_at: string
         }
@@ -494,8 +499,13 @@ export type Database = {
           jurisdiction?: string
           name: string
           notice_filed_at?: string | null
+          review_clock_paused_at?: string | null
+          review_clock_started_at?: string | null
           services?: string[]
           status?: Database["public"]["Enums"]["project_status"]
+          statutory_deadline_at?: string | null
+          statutory_inspection_days?: number
+          statutory_review_days?: number
           trade_type?: string
           updated_at?: string
         }
@@ -511,8 +521,13 @@ export type Database = {
           jurisdiction?: string
           name?: string
           notice_filed_at?: string | null
+          review_clock_paused_at?: string | null
+          review_clock_started_at?: string | null
           services?: string[]
           status?: Database["public"]["Enums"]["project_status"]
+          statutory_deadline_at?: string | null
+          statutory_inspection_days?: number
+          statutory_review_days?: number
           trade_type?: string
           updated_at?: string
         }
@@ -526,12 +541,48 @@ export type Database = {
           },
         ]
       }
+      statutory_alerts: {
+        Row: {
+          acknowledged: boolean
+          alert_type: string
+          id: string
+          project_id: string
+          triggered_at: string
+        }
+        Insert: {
+          acknowledged?: boolean
+          alert_type: string
+          id?: string
+          project_id: string
+          triggered_at?: string
+        }
+        Update: {
+          acknowledged?: boolean
+          alert_type?: string
+          id?: string
+          project_id?: string
+          triggered_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "statutory_alerts_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
       check_deadline_alerts: { Args: never; Returns: undefined }
+      compute_statutory_deadline: {
+        Args: { business_days: number; start_date: string }
+        Returns: string
+      }
     }
     Enums: {
       inspection_result: "pass" | "fail" | "partial" | "pending"

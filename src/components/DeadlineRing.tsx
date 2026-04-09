@@ -5,9 +5,11 @@ interface DeadlineRingProps {
   totalDays?: number;
   size?: number;
   className?: string;
+  /** Show "B" suffix for business-day mode */
+  statutory?: boolean;
 }
 
-export function DeadlineRing({ daysElapsed, totalDays = 21, size = 64, className }: DeadlineRingProps) {
+export function DeadlineRing({ daysElapsed, totalDays = 21, size = 64, className, statutory }: DeadlineRingProps) {
   const remaining = Math.max(0, totalDays - daysElapsed);
   const progress = Math.min(daysElapsed / totalDays, 1);
   const radius = (size - 8) / 2;
@@ -45,7 +47,9 @@ export function DeadlineRing({ daysElapsed, totalDays = 21, size = 64, className
           className="transition-all duration-500"
         />
       </svg>
-      <span className="absolute font-mono text-sm font-medium">{remaining}</span>
+      <span className="absolute font-mono text-sm font-medium">
+        {remaining}{statutory ? "B" : ""}
+      </span>
     </div>
   );
 }

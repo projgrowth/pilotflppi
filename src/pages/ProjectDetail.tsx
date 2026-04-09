@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { FileText, ClipboardCheck, Activity, Upload, Loader2 } from "lucide-react";
+import { StatutoryClockCard } from "@/components/StatutoryClockCard";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -176,6 +177,9 @@ export default function ProjectDetail() {
               <DeadlineBar daysElapsed={daysElapsed} />
             </CardContent>
           </Card>
+
+          {/* Statutory Clock (F.S. 553.791) */}
+          <StatutoryClockCard project={project} />
 
           {/* Details */}
           <Card className="shadow-subtle border">

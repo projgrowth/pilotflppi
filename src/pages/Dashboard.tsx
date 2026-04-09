@@ -13,7 +13,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   FolderKanban, AlertTriangle, Plus, CalendarPlus,
-  Sparkles, Radar, ChevronRight, Timer, CheckCircle2, Briefcase,
+  Sparkles, Radar, ChevronRight, Timer, CheckCircle2, Briefcase, Gavel,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { useNavigate } from "react-router-dom";
@@ -186,7 +186,7 @@ export default function Dashboard() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
         <KpiCard
           label="Active"
           value={stats?.activeProjects ?? 0}
@@ -201,6 +201,14 @@ export default function Dashboard() {
           destructive={(stats?.criticalDeadlines ?? 0) > 0}
           loading={statsLoading}
           onClick={() => navigate("/deadlines")}
+        />
+        <KpiCard
+          label="Statutory Due"
+          value={stats?.statutoryDue ?? 0}
+          icon={Gavel}
+          destructive={(stats?.statutoryDue ?? 0) > 0}
+          loading={statsLoading}
+          onClick={() => navigate("/deadlines?filter=Statutory")}
         />
         <KpiCard
           label="Completed MTD"

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { getStatutoryStatus } from "@/lib/statutory-deadlines";
 
 export function useDashboardStats() {
   return useQuery({
@@ -9,7 +10,7 @@ export function useDashboardStats() {
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
       const [projectsRes, completedRes] = await Promise.all([
-        supabase.from("projects").select("id, status, deadline_at, notice_filed_at"),
+        supabase.from("projects").select("id, status, deadline_at, notice_filed_at, review_clock_started_at, review_clock_paused_at, statutory_review_days, statutory_inspection_days"),
         supabase.from("projects").select("id").eq("status", "certificate_issued").gte("updated_at", startOfMonth),
       ]);
 
@@ -26,6 +27,14 @@ export function useDashboardStats() {
         return remaining <= 3 && remaining >= 0 && activeStatuses.includes(p.status);
       });
 
+      // Statutory due: projects within 5 business days of statutory limit
+      const statutoryDue = active.filter((p) => {
+        const stat = getStatutoryStatus(p);
+        if (stat.phase === "review") return stat.reviewDaysRemaining <= 5 && stat.reviewDaysRemaining > 0;
+        if (stat.phase === "inspection") return stat.inspectionDaysRemaining <= 3 && stat.inspectionDaysRemaining > 0;
+        return false;
+      });
+
       // Avg review time: days from notice_filed_at for active projects
       const reviewDays = active
         .filter((p) => p.notice_filed_at)
@@ -37,6 +46,7 @@ export function useDashboardStats() {
         criticalDeadlines: criticalDeadlines.length,
         avgReviewTime: `${avgReview}d`,
         completedMTD: completedRes.data?.length || 0,
+        statutoryDue: statutoryDue.length,
       };
     },
   });

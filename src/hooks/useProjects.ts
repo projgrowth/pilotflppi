@@ -17,6 +17,13 @@ export interface Project {
   created_at: string;
   updated_at: string;
   contractor?: { id: string; name: string } | null;
+  // Statutory fields (F.S. 553.791)
+  statutory_review_days: number;
+  statutory_inspection_days: number;
+  statutory_deadline_at: string | null;
+  review_clock_started_at: string | null;
+  review_clock_paused_at: string | null;
+  hold_reason: string | null;
 }
 
 export function useProjects() {
