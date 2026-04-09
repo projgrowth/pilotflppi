@@ -231,8 +231,8 @@ export default function ProjectDetail() {
               <TabsTrigger value="activity" className="gap-1.5"><Activity className="h-3.5 w-3.5" />Activity</TabsTrigger>
               <TabsTrigger value="documents" className="gap-1.5">
                 <FileText className="h-3.5 w-3.5" />Documents
-                {(documents || []).length > 0 && (
-                  <span className="ml-1 text-[10px] bg-accent/15 text-accent rounded-full px-1.5 py-0.5 font-semibold">{(documents || []).length}</span>
+                {allDocuments.length > 0 && (
+                  <span className="ml-1 text-[10px] bg-accent/15 text-accent rounded-full px-1.5 py-0.5 font-semibold">{allDocuments.length}</span>
                 )}
               </TabsTrigger>
               <TabsTrigger value="plan-review" className="gap-1.5">
@@ -290,15 +290,21 @@ export default function ProjectDetail() {
                     <p className="text-xs text-muted-foreground">{uploading ? "Uploading..." : "Drop files or click to upload"}</p>
                     <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
                   </div>
-                  {(documents || []).length === 0 ? (
+                  {allDocuments.length === 0 ? (
                     <p className="text-xs text-muted-foreground text-center py-4">No documents uploaded yet</p>
                   ) : (
                     <div className="divide-y">
-                      {(documents || []).map((doc) => (
-                        <div key={doc.name} className="flex items-center gap-3 py-2">
+                      {allDocuments.map((doc) => (
+                        <div key={doc.key} className="flex items-center gap-3 py-2">
                           <FileText className="h-4 w-4 text-accent shrink-0" />
                           <span className="text-sm truncate flex-1">{doc.name}</span>
-                          <span className="text-[10px] text-muted-foreground">{format(new Date(doc.created_at), "MMM d")}</span>
+                          {doc.source === "plan-review" && <Badge variant="secondary" className="text-[9px] shrink-0">Plan Review</Badge>}
+                          <span className="text-[10px] text-muted-foreground shrink-0">{format(new Date(doc.date), "MMM d")}</span>
+                          {doc.storagePath && (
+                            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleDownloadDoc(doc.storagePath!, doc.name)}>
+                              <Download className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
                         </div>
                       ))}
                     </div>
