@@ -80,9 +80,10 @@ interface NewPlanReviewWizardProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onComplete: (reviewId: string) => void;
+  preselectedProjectId?: string;
 }
 
-export function NewPlanReviewWizard({ open, onOpenChange, onComplete }: NewPlanReviewWizardProps) {
+export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselectedProjectId }: NewPlanReviewWizardProps) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);

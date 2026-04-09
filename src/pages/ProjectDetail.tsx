@@ -1,5 +1,5 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { useProject, getDaysElapsed, getDaysRemaining } from "@/hooks/useProjects";
+import { useProject, getDaysElapsed } from "@/hooks/useProjects";
 import { useProjectActivityLog, getEventColor } from "@/hooks/useActivityLog";
 import { usePlanReviewFilesByProject } from "@/hooks/usePlanReviewFiles";
 import { supabase } from "@/integrations/supabase/client";
