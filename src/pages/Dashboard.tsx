@@ -18,6 +18,7 @@ import {
 import { format, formatDistanceToNow } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import { useMemo } from "react";
+import { QcPendingWidget } from "@/components/QcPendingWidget";
 
 /* ── Unified project list ── */
 
