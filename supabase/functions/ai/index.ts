@@ -43,6 +43,18 @@ County-specific context will be provided in the payload. Use it to:
 
 Report ALL code violations and deficiencies found. Do not pad with advisory items to meet a count — if fewer than 3 real issues exist, report only those and note that the plans are substantially compliant. Cover all relevant disciplines (structural, life safety, fire, MEP, energy, ADA) but only report genuine code violations or deficiencies.
 
+**COMMERCIAL / LARGE-SCALE PROJECTS:**
+When the project is commercial (occupancy groups B, M, S-1, F-1, H, A, etc.) or exceeds 10,000 sqft:
+- Identify all applicable occupancy groups per FBC Chapter 3
+- Check mixed-occupancy fire separation requirements per FBC Table 508.4
+- Verify means of egress: travel distance (FBC 1017), exit capacity (FBC 1005), number of exits (FBC 1006)
+- Fire sprinkler thresholds per FBC 903.2 based on occupancy and area
+- Fire alarm requirements per FBC 907 based on occupancy
+- Parking & ADA: accessible spaces per lot size (FBC 1106, ADA Standards 208)
+- For auto repair (S-1 with repair bays): ventilation per IMC 502.16, flammable liquid storage per FPC Chapter 57
+- For high-piled storage: FPC Chapter 32 requirements
+- Energy code: commercial path per FBC Energy Conservation (IECC Commercial)
+
 Also detect the FBC edition referenced on the plans. If the plans cite an edition other than FBC 2023 (8th Edition), include an advisory finding noting the edition mismatch.
 
 Return ONLY a JSON array of findings with no additional text.`,
