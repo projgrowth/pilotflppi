@@ -382,7 +382,9 @@ export type Database = {
         Row: {
           ai_check_status: string
           ai_findings: Json | null
+          checklist_state: Json | null
           created_at: string
+          fbc_edition: string | null
           file_urls: string[]
           finding_statuses: Json | null
           id: string
@@ -398,7 +400,9 @@ export type Database = {
         Insert: {
           ai_check_status?: string
           ai_findings?: Json | null
+          checklist_state?: Json | null
           created_at?: string
+          fbc_edition?: string | null
           file_urls?: string[]
           finding_statuses?: Json | null
           id?: string
@@ -414,7 +418,9 @@ export type Database = {
         Update: {
           ai_check_status?: string
           ai_findings?: Json | null
+          checklist_state?: Json | null
           created_at?: string
+          fbc_edition?: string | null
           file_urls?: string[]
           finding_statuses?: Json | null
           id?: string
@@ -474,6 +480,7 @@ export type Database = {
           deadline_at: string | null
           hold_reason: string | null
           id: string
+          inspection_clock_started_at: string | null
           jurisdiction: string
           name: string
           notice_filed_at: string | null
@@ -496,6 +503,7 @@ export type Database = {
           deadline_at?: string | null
           hold_reason?: string | null
           id?: string
+          inspection_clock_started_at?: string | null
           jurisdiction?: string
           name: string
           notice_filed_at?: string | null
@@ -518,6 +526,7 @@ export type Database = {
           deadline_at?: string | null
           hold_reason?: string | null
           id?: string
+          inspection_clock_started_at?: string | null
           jurisdiction?: string
           name?: string
           notice_filed_at?: string | null
