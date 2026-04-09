@@ -114,7 +114,7 @@ export default function PlanReview() {
             <button
               key={status}
               onClick={() => setStatusFilter(status)}
-              className={cn("filter-pill", statusFilter === status && "active")}
+              className={cn("filter-pill", statusFilter === status && "filter-pill-active")}
             >
               {status === "all" ? "All" : status.charAt(0).toUpperCase() + status.slice(1)}
             </button>

@@ -47,7 +47,7 @@ export default function SettingsPage() {
   const [fullName, setFullName] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // Firm info — synced from DB
+  // Firm info
   const [firmName, setFirmName] = useState("");
   const [firmEmail, setFirmEmail] = useState("");
   const [firmPhone, setFirmPhone] = useState("");
@@ -56,8 +56,10 @@ export default function SettingsPage() {
   const [firmLogoUrl, setFirmLogoUrl] = useState("");
   const [firmClosingLanguage, setFirmClosingLanguage] = useState("");
 
-  const [jurisdictions, setJurisdictions] = useState(defaultJurisdictions);
+  const [jurisdictions, setJurisdictions] = useState<string[]>(defaultJurisdictions);
   const [newJurisdiction, setNewJurisdiction] = useState("");
+  const [jurisdictionsDirty, setJurisdictionsDirty] = useState(false);
+  const [savingJurisdictions, setSavingJurisdictions] = useState(false);
 
   // Sync profile data
   useEffect(() => {
@@ -66,7 +68,7 @@ export default function SettingsPage() {
     }
   }, [profile]);
 
-  // Sync firm settings from DB
+  // Sync firm settings from DB, including jurisdictions
   useEffect(() => {
     if (firmSettings) {
       setFirmName(firmSettings.firm_name || "");
@@ -76,6 +78,11 @@ export default function SettingsPage() {
       setFirmLicense(firmSettings.license_number || "");
       setFirmLogoUrl(firmSettings.logo_url || "");
       setFirmClosingLanguage(firmSettings.closing_language || "");
+      // Load jurisdictions from DB if they exist
+      const dbJurisdictions = (firmSettings as any).jurisdictions;
+      if (Array.isArray(dbJurisdictions) && dbJurisdictions.length > 0) {
+        setJurisdictions(dbJurisdictions);
+      }
     } else if (!firmLoading && user?.email) {
       setFirmEmail(user.email);
     }
@@ -117,11 +124,39 @@ export default function SettingsPage() {
     if (jurisdictions.includes(trimmed)) { toast.error("Already exists"); return; }
     setJurisdictions([...jurisdictions, trimmed]);
     setNewJurisdiction("");
-    toast.success("Jurisdiction added");
+    setJurisdictionsDirty(true);
   };
 
   const removeJurisdiction = (j: string) => {
     setJurisdictions(jurisdictions.filter((x) => x !== j));
+    setJurisdictionsDirty(true);
+  };
+
+  const saveJurisdictions = async () => {
+    if (!user) return;
+    setSavingJurisdictions(true);
+    try {
+      // Use raw update since jurisdictions isn't in the generated types yet
+      if (firmSettings) {
+        const { error } = await supabase
+          .from("firm_settings")
+          .update({ jurisdictions: jurisdictions as any })
+          .eq("user_id", user.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("firm_settings")
+          .insert({ user_id: user.id, firm_name: "", jurisdictions: jurisdictions as any });
+        if (error) throw error;
+      }
+      queryClient.invalidateQueries({ queryKey: ["firm-settings"] });
+      setJurisdictionsDirty(false);
+      toast.success("Jurisdictions saved");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSavingJurisdictions(false);
+    }
   };
 
   return (
@@ -161,11 +196,7 @@ export default function SettingsPage() {
                     <Label>Role</Label>
                     <Input value={profile?.role || "reviewer"} disabled className="bg-muted/50 capitalize" />
                   </div>
-                  <Button
-                    className="bg-accent text-accent-foreground hover:bg-accent/90"
-                    onClick={saveProfile}
-                    disabled={saving}
-                  >
+                  <Button className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={saveProfile} disabled={saving}>
                     {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : "Save Profile"}
                   </Button>
                 </>
@@ -224,11 +255,7 @@ export default function SettingsPage() {
                     />
                     <p className="text-[10px] text-muted-foreground">Optional. Appears at the end of generated comment letters.</p>
                   </div>
-                  <Button
-                    className="bg-accent text-accent-foreground hover:bg-accent/90"
-                    onClick={handleSaveFirm}
-                    disabled={isSaving}
-                  >
+                  <Button className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={handleSaveFirm} disabled={isSaving}>
                     {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : "Save Changes"}
                   </Button>
                 </>
@@ -264,6 +291,11 @@ export default function SettingsPage() {
                   </Badge>
                 ))}
               </div>
+              {jurisdictionsDirty && (
+                <Button className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={saveJurisdictions} disabled={savingJurisdictions}>
+                  {savingJurisdictions ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : "Save Jurisdictions"}
+                </Button>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
