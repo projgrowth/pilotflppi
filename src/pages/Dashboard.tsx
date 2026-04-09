@@ -11,8 +11,8 @@ import { useActivityLog, getEventColor } from "@/hooks/useActivityLog";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  FolderKanban, AlertTriangle, Plus, CalendarPlus,
-  Sparkles, Radar, ChevronRight, Timer, CheckCircle2, Briefcase, Gavel,
+  FolderKanban, AlertTriangle, Plus,
+  Sparkles, ChevronRight, Timer, CheckCircle2, Briefcase, Gavel,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { useNavigate } from "react-router-dom";
