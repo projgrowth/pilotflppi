@@ -66,8 +66,9 @@ interface FindingCardProps {
 }
 
 export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
-  ({ finding, index, globalIndex, isActive, onLocateClick, animationDelay = 0, status = "open", onStatusChange, defaultExpanded = false }, ref) => {
+  ({ finding, index, globalIndex, isActive, onLocateClick, animationDelay = 0, status = "open", onStatusChange, defaultExpanded = false, history = [] }, ref) => {
     const [expanded, setExpanded] = useState(defaultExpanded);
+    const [showHistory, setShowHistory] = useState(false);
     const sev = severityConfig[finding.severity] || severityConfig.minor;
     const isResolved = status === "resolved";
     const isDeferred = status === "deferred";
