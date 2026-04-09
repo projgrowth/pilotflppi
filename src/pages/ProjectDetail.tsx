@@ -317,15 +317,42 @@ export default function ProjectDetail() {
                     <p className="text-xs text-muted-foreground">{uploading ? "Uploading..." : "Drop files or click to upload"}</p>
                     <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
                   </div>
+
+                  {/* Category filter chips */}
+                  {allDocuments.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {DOC_CATEGORIES.map((cat) => {
+                        const count = cat.value === "all" ? allDocuments.length : allDocuments.filter((d) => d.category === cat.value).length;
+                        if (count === 0 && cat.value !== "all") return null;
+                        return (
+                          <button
+                            key={cat.value}
+                            onClick={() => setDocFilter(cat.value)}
+                            className={cn(
+                              "px-2.5 py-1 rounded-full text-[10px] font-medium transition-colors border",
+                              docFilter === cat.value
+                                ? "bg-accent text-accent-foreground border-accent"
+                                : "bg-muted/30 text-muted-foreground border-border hover:bg-muted/50"
+                            )}
+                          >
+                            {cat.label} {count > 0 && <span className="ml-0.5 opacity-70">{count}</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {allDocuments.length === 0 ? (
                     <p className="text-xs text-muted-foreground text-center py-4">No documents uploaded yet</p>
                   ) : (
                     <div className="divide-y">
-                      {allDocuments.map((doc) => (
+                      {allDocuments
+                        .filter((doc) => docFilter === "all" || doc.category === docFilter)
+                        .map((doc) => (
                         <div key={doc.key} className="flex items-center gap-3 py-2">
                           <FileText className="h-4 w-4 text-accent shrink-0" />
                           <span className="text-sm truncate flex-1">{doc.name}</span>
-                          {doc.source === "plan-review" && <Badge variant="secondary" className="text-[9px] shrink-0">Plan Review</Badge>}
+                          <Badge variant="secondary" className="text-[9px] shrink-0 capitalize">{doc.category}</Badge>
                           <span className="text-[10px] text-muted-foreground shrink-0">{format(new Date(doc.date), "MMM d")}</span>
                           {doc.storagePath && (
                             <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => handleDownloadDoc(doc.storagePath!, doc.name)}>
