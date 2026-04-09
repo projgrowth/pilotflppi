@@ -388,6 +388,9 @@ export type Database = {
           id: string
           previous_findings: Json | null
           project_id: string
+          qc_notes: string | null
+          qc_reviewer_id: string | null
+          qc_status: string
           reviewer_id: string | null
           round: number
           updated_at: string
@@ -401,6 +404,9 @@ export type Database = {
           id?: string
           previous_findings?: Json | null
           project_id: string
+          qc_notes?: string | null
+          qc_reviewer_id?: string | null
+          qc_status?: string
           reviewer_id?: string | null
           round?: number
           updated_at?: string
@@ -414,6 +420,9 @@ export type Database = {
           id?: string
           previous_findings?: Json | null
           project_id?: string
+          qc_notes?: string | null
+          qc_reviewer_id?: string | null
+          qc_status?: string
           reviewer_id?: string | null
           round?: number
           updated_at?: string
