@@ -91,6 +91,38 @@ export type Database = {
         }
         Relationships: []
       }
+      deadline_alerts: {
+        Row: {
+          acknowledged: boolean
+          alert_type: string
+          id: string
+          project_id: string
+          triggered_at: string
+        }
+        Insert: {
+          acknowledged?: boolean
+          alert_type: string
+          id?: string
+          project_id: string
+          triggered_at?: string
+        }
+        Update: {
+          acknowledged?: boolean
+          alert_type?: string
+          id?: string
+          project_id?: string
+          triggered_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deadline_alerts_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       finding_status_history: {
         Row: {
           changed_at: string
@@ -396,6 +428,7 @@ export type Database = {
           county: string
           created_at: string
           deadline_at: string | null
+          hold_reason: string | null
           id: string
           jurisdiction: string
           name: string
@@ -412,6 +445,7 @@ export type Database = {
           county?: string
           created_at?: string
           deadline_at?: string | null
+          hold_reason?: string | null
           id?: string
           jurisdiction?: string
           name: string
@@ -428,6 +462,7 @@ export type Database = {
           county?: string
           created_at?: string
           deadline_at?: string | null
+          hold_reason?: string | null
           id?: string
           jurisdiction?: string
           name?: string
@@ -452,7 +487,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      check_deadline_alerts: { Args: never; Returns: undefined }
     }
     Enums: {
       inspection_result: "pass" | "fail" | "partial" | "pending"
