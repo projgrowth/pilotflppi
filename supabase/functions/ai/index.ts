@@ -34,6 +34,12 @@ For each finding, provide ALL of the following fields:
 - description: Clear, specific description of the deficiency
 - recommendation: Actionable fix with code reference
 - confidence: "verified" (definite code violation) | "likely" (probable based on common issues) | "advisory" (best practice recommendation)
+- county_amendment_ref: If county_specific is true, provide the specific local amendment reference (e.g., "Miami-Dade Sec. 8A-100.2", "Broward County Amendment to FBC Ch. 17.2.4")
+
+County-specific context will be provided in the payload. Use it to:
+- Reference the correct local code amendments in county_specific findings
+- Apply the correct product approval standard (NOA for HVHZ counties, FL# for others)
+- Flag county-specific wind speed and impact protection requirements
 
 Produce 8-12 findings spanning multiple disciplines. Ensure at least:
 - 2 structural findings
