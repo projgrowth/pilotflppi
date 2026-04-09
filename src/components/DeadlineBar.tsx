@@ -23,7 +23,7 @@ export function DeadlineBar({ daysElapsed, totalDays = 21, className }: Deadline
       <div className="flex items-center justify-between">
         <span className={cn(
           "text-sm font-semibold font-mono",
-          remaining <= 0 ? "text-destructive" : remaining <= 3 ? "text-destructive" : remaining <= 6 ? "text-[hsl(var(--warning))]" : "text-success"
+          remaining <= 0 ? "text-destructive animate-pulse" : remaining <= 3 ? "text-destructive" : remaining <= 6 ? "text-[hsl(var(--warning))]" : "text-success"
         )}>
           {remaining <= 0 ? "OVERDUE" : `${remaining} days left`}
         </span>
@@ -31,7 +31,7 @@ export function DeadlineBar({ daysElapsed, totalDays = 21, className }: Deadline
           Day {Math.min(daysElapsed, totalDays)}/{totalDays}
         </span>
       </div>
-      <Progress value={progress} className={cn("h-2", colorClass)} />
+      <Progress value={progress} className={cn("h-2", colorClass, remaining <= 1 && "animate-pulse")} />
     </div>
   );
 }
