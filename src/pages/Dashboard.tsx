@@ -233,6 +233,11 @@ export default function Dashboard() {
         ))}
       </div>
 
+      {/* QC Pending Reviews */}
+      <div className="mb-6">
+        <QcPendingWidget />
+      </div>
+
       {/* Two-column: project table + activity sidebar */}
       <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
         <div>
