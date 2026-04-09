@@ -1,67 +1,62 @@
 
 
-# Redesign: AI Briefing Page Layout
+# Add Zoning & Commercial Project Capabilities
 
-## Current Issues
+## What exists today
 
-The page has three panels crammed into a 3/5 + 2/5 grid with poor space usage:
-- Activity feed takes prime real estate but shows minimal data (just timestamps)
-- Two separate AI input areas (Quick Code Q&A + County Chatbot) compete for attention
-- The chatbot is squeezed into a narrow 2/5 column
-- No KPI summary or at-a-glance intelligence
-- No visual hierarchy — everything looks the same weight
+Your platform already handles plan visualization well — PDFs are rendered as zoomable/pannable images with AI-placed annotations linked to findings. The AI uses Gemini vision to analyze actual plan sheets and flag FBC 2023 violations across 9 disciplines. County-specific rules (HVHZ, wind loads, product approvals) are already wired in.
 
-## Proposed Layout
+## What's missing for large commercial projects
 
-Restructure into a **dashboard-style intelligence hub** with clear visual hierarchy:
+### 1. Zoning & Lot Allowance Module (new feature)
 
-```text
-┌─────────────────────────────────────────────────┐
-│  AI Briefing                                     │
-│  "3 projects nearing statutory deadline"  banner │
-├──────────┬──────────┬──────────┬────────────────┤
-│ Active   │ Pending  │ Statutory│ Reviews This   │
-│ Reviews  │ Comments │ Alerts   │ Month          │
-├──────────┴──────────┴──────────┴────────────────┤
-│                                                  │
-│  ┌─── County Code Assistant (full width) ──────┐│
-│  │  County picker + HVHZ/CCCL badges           ││
-│  │  Quick question chips                        ││
-│  │  Chat area (taller, more room)               ││
-│  │  Input bar                                   ││
-│  └──────────────────────────────────────────────┘│
-│                                                  │
-│  ┌─── Two columns below ───────────────────────┐│
-│  │  Quick Code Q&A          │  Activity Feed    ││
-│  │  (General FBC questions) │  (compact sidebar)││
-│  └──────────────────────────┴───────────────────┘│
-└──────────────────────────────────────────────────┘
-```
+A dedicated "Zoning" tab in the project workspace where users input or the AI extracts:
 
-## Key Changes
+| Field | Example (Porsche Dealership) |
+|-------|------------------------------|
+| Zoning district | C-2 (General Commercial) |
+| Lot area | ~2.5 acres |
+| Building footprint | 70,000 sqft |
+| FAR (Floor Area Ratio) | Max 0.5 → allows 54,450 sqft on 2.5ac |
+| Lot coverage | Max 60% |
+| Setbacks | Front 25', Side 10', Rear 15' |
+| Max height | 45' / 3 stories |
+| Parking required | 1 per 200 sqft showroom, 1 per 400 sqft service |
+| Landscape buffer | 15' along ROW |
+| Signage allowance | 1 sqft per LF of frontage |
 
-### 1. Add KPI row at the top
-Pull stats from `useDashboardStats` — show Active Reviews, Pending Comments, Statutory Alerts, and Completed MTD as compact KPI cards, matching the Dashboard style.
+This would calculate compliance automatically (e.g., "70K sqft exceeds FAR on this lot — needs variance") and flag issues before plan review begins.
 
-### 2. Promote County Chatbot to full-width hero
-The chatbot is the primary tool on this page. Give it the full width with a taller height (~500px), making the chat area much more usable.
+### 2. Commercial Occupancy Classification
 
-### 3. Demote Activity Feed to compact sidebar
-Move the activity feed into a smaller right column below the chatbot, matching the Dashboard's `CompactActivityFeed` pattern. It's useful context but not the main action.
+Add occupancy-aware logic to the AI review system:
+- Auto-detect occupancy groups (B for offices, S-1 for service bays, M for showroom, F-1 for paint booth)
+- Flag mixed-occupancy fire separation requirements (FBC Table 508.4)
+- High-piled storage requirements for parts warehouses
+- Auto repair bay ventilation (IMC 502.16) and flammable liquid storage
 
-### 4. Keep Quick Code Q&A as a secondary card
-Place it in the left column below the chatbot — same width as the activity feed column.
+### 3. Enhanced AI Prompt for Commercial Scale
 
-### 5. Visual polish
-- Add a contextual alert banner when statutory deadlines are approaching (reuse overdue pattern from Dashboard)
-- Use the same `KpiCard` component from Dashboard for consistency
-- Give the chatbot card a subtle accent border to signal it's the primary interaction
+Extend the edge function's system prompt with commercial-specific instructions covering:
+- Multi-occupancy separation analysis
+- Parking & accessibility calculations (ADA van spaces per lot size)
+- Means of egress for large floor plates (travel distance, exit capacity)
+- Fire sprinkler/alarm thresholds based on building area and occupancy
 
-## Files Changed
+## Files changed
 
 | File | Change |
 |------|--------|
-| `src/pages/AIBriefing.tsx` | Restructure layout: KPI row, full-width chatbot, two-column bottom section |
+| `src/components/ZoningAnalysisPanel.tsx` | **New** — Zoning input form + compliance calculator |
+| `src/pages/ProjectDetail.tsx` | Add "Zoning" tab rendering ZoningAnalysisPanel |
+| `supabase/functions/ai/index.ts` | Add `zoning_analysis` action + commercial-enhanced prompts |
+| `src/lib/zoning-utils.ts` | **New** — FAR/coverage/parking/setback calculation helpers |
+| Migration | Add `zoning_data` JSONB column to `projects` table |
 
-No new components, hooks, or database changes needed — just reorganizing existing pieces and importing `KpiCard` + `useDashboardStats`.
+## Implementation approach
+
+- The zoning panel lets users manually enter district parameters OR paste a zoning code designation, then the AI looks up typical requirements for that district.
+- Calculations run client-side for instant feedback (FAR, coverage %, parking count).
+- The AI review prompt gets a commercial addendum so it checks occupancy separation, high-piled storage, and auto repair bay code sections when the project trade type or square footage indicates commercial scale.
+- No changes to the existing plan viewer — it already handles multi-page visualization and annotation.
 
