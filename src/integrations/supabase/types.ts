@@ -343,6 +343,41 @@ export type Database = {
         }
         Relationships: []
       }
+      plan_review_files: {
+        Row: {
+          file_path: string
+          id: string
+          plan_review_id: string
+          round: number
+          uploaded_at: string
+          uploaded_by: string | null
+        }
+        Insert: {
+          file_path: string
+          id?: string
+          plan_review_id: string
+          round?: number
+          uploaded_at?: string
+          uploaded_by?: string | null
+        }
+        Update: {
+          file_path?: string
+          id?: string
+          plan_review_id?: string
+          round?: number
+          uploaded_at?: string
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "plan_review_files_plan_review_id_fkey"
+            columns: ["plan_review_id"]
+            isOneToOne: false
+            referencedRelation: "plan_reviews"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       plan_reviews: {
         Row: {
           ai_check_status: string
