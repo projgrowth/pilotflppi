@@ -1,8 +1,8 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { DeadlineBar } from "@/components/DeadlineBar";
 import { Badge } from "@/components/ui/badge";
-import { Gavel, Pause, Play } from "lucide-react";
-import { getStatutoryStatus, type StatutoryStatus } from "@/lib/statutory-deadlines";
+import { Gavel, Pause, Play, AlertTriangle } from "lucide-react";
+import { getStatutoryStatus } from "@/lib/statutory-deadlines";
 import { cn } from "@/lib/utils";
 
 interface StatutoryClockCardProps {
@@ -10,6 +10,7 @@ interface StatutoryClockCardProps {
     status: string;
     review_clock_started_at?: string | null;
     review_clock_paused_at?: string | null;
+    inspection_clock_started_at?: string | null;
     statutory_review_days?: number | null;
     statutory_inspection_days?: number | null;
     notice_filed_at?: string | null;
@@ -22,7 +23,7 @@ export function StatutoryClockCard({ project }: StatutoryClockCardProps) {
   if (stat.phase === "none" || stat.phase === "complete") return null;
 
   return (
-    <Card className="shadow-subtle border">
+    <Card className={cn("shadow-subtle border", stat.isDeemedApproved && "border-destructive/50 bg-destructive/5")}>
       <CardContent className="p-5">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-1.5">
@@ -31,19 +32,25 @@ export function StatutoryClockCard({ project }: StatutoryClockCardProps) {
               F.S. 553.791 Clock
             </h3>
           </div>
-          <Badge
-            variant="outline"
-            className={cn(
-              "text-[10px] gap-1",
-              stat.clockRunning ? "text-success border-success/30" : "text-warning border-warning/30"
-            )}
-          >
-            {stat.clockRunning ? <Play className="h-2.5 w-2.5" /> : <Pause className="h-2.5 w-2.5" />}
-            {stat.clockRunning ? "Running" : "Paused"}
-          </Badge>
+          {stat.isDeemedApproved ? (
+            <Badge variant="destructive" className="text-[10px] gap-1">
+              <AlertTriangle className="h-2.5 w-2.5" /> DEEMED APPROVED
+            </Badge>
+          ) : (
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-[10px] gap-1",
+                stat.clockRunning ? "text-success border-success/30" : "text-warning border-warning/30"
+              )}
+            >
+              {stat.clockRunning ? <Play className="h-2.5 w-2.5" /> : <Pause className="h-2.5 w-2.5" />}
+              {stat.clockRunning ? "Running" : "Paused"}
+            </Badge>
+          )}
         </div>
 
-        {stat.phase === "review" && (
+        {(stat.phase === "review" || stat.phase === "deemed_approved") && (
           <DeadlineBar
             daysElapsed={stat.reviewDaysUsed}
             totalDays={stat.reviewDaysTotal}
@@ -61,7 +68,13 @@ export function StatutoryClockCard({ project }: StatutoryClockCardProps) {
           />
         )}
 
-        {stat.isOverdue && (
+        {stat.isDeemedApproved && (
+          <p className="mt-2 text-[10px] text-destructive font-semibold animate-pulse">
+            ⚠ Per F.S. 553.791(4)(b), plans are DEEMED APPROVED — 30 business days expired without action
+          </p>
+        )}
+
+        {stat.isOverdue && !stat.isDeemedApproved && (
           <p className="mt-2 text-[10px] text-destructive font-semibold animate-pulse">
             ⚠ Statutory deadline exceeded — potential F.S. 553.791 violation
           </p>
