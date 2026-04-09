@@ -1,43 +1,62 @@
 
+## Plan: County-Specific Document Generation
 
-## Plan: Redesign Project Detail & Dashboard Pages
+### Problem
+The comment letter and generated documents are generic — they use the same template, boilerplate, and requirements regardless of which Florida county the project is in. Each county building department has different submission requirements, forms, amendment references, and supplemental documents.
 
-Looking at the screenshot and current code, here are the specific improvements:
+### What changes
 
-### Project Detail Page (`src/pages/ProjectDetail.tsx`)
+**1. Create a county requirements registry (`src/lib/county-requirements.ts`)**
 
-**1. Horizontal stepper timeline instead of vertical list**
-Replace the tall vertical timeline card with a compact horizontal step indicator — similar to Stripe's checkout progress. Each step is a small dot or pill connected by a line, with labels below. Completed steps get a filled dot, current step gets an accent ring, future steps are muted. This cuts the card height by ~60% and feels modern.
+A structured config file mapping each major Florida county to its specific requirements:
+- **Submission format preferences** (e.g., Miami-Dade requires NOA numbers on every product, Broward wants specific form references)
+- **County-specific code amendments** to cite in the letter (e.g., Miami-Dade Sec. 8A, Broward County amendments to FBC Ch. 17)
+- **Required supplemental sections** per county: wind mitigation forms, product approval tables (FL# vs NOA), flood zone statements, energy compliance paths, threshold building disclosures
+- **Letterhead/addressee info**: Building Official name/title, department name, mailing address for each county/jurisdiction
+- **Resubmission timelines** (some counties differ from the standard 14-day)
+- **Special flags**: HVHZ (already exists), coastal construction control line (CCCL), flood zone requirements, threshold building thresholds
 
-**2. Better layout proportions**
-Change from 3/5 + 2/5 split to a cleaner 3-column grid: timeline spans full width at top, then details + deadline ring side by side below, then tabs below that. This eliminates the awkward vertical stacking.
+Cover the major counties: Miami-Dade, Broward, Palm Beach, Hillsborough, Orange, Duval, Pinellas, Lee, Sarasota, Volusia, plus a "default" fallback.
 
-**3. Deadline ring refinement**
-Make the ring smaller and inline it into a combined "Status & Deadline" card alongside key metadata (county, trade, contractor) rather than isolating it in its own card. Show the deadline as text like "18 days left" with a subtle progress bar instead of the large circular ring on the detail page.
+**2. Enhance the Comment Letter HTML builder (`src/components/CommentLetterExport.tsx`)**
 
-**4. Details card cleanup**
-Format "Services" values properly (title case instead of raw DB values like "Plan_review"). Remove em-dash placeholders for empty fields — just hide rows with no data. Add subtle row hover states.
+Update `buildLetterHTML` to consume the county config and conditionally render:
+- **County-specific amendment citations** in each finding (e.g., "Per Miami-Dade County Amendment to FBC 2023 §1626.1")
+- **Product approval table** — HVHZ counties get a table listing required NOA numbers; non-HVHZ counties reference FL# approvals
+- **Supplemental sections** based on county flags:
+  - Wind Mitigation Summary (all counties, enhanced for HVHZ)
+  - Flood Zone Compliance Statement (coastal counties)
+  - Threshold Building Disclosure (projects over the threshold)
+  - Energy Code Compliance Path (varies: prescriptive vs. performance)
+- **County building department addressee** in the letter header
+- **County-specific closing language** referencing local ordinances
 
-**5. Quick actions as icon buttons**
-Replace the two bottom buttons with a single-row action bar integrated into the page header area (next to the status chip), using icon-only or compact buttons.
+**3. Update the AI edge function prompts (`supabase/functions/ai/index.ts`)**
 
-### Dashboard Page (`src/pages/Dashboard.tsx`)
+Enhance the `plan_review_check` and `plan_review_check_visual` system prompts to:
+- Receive the county config as context so findings reference the correct local amendments
+- Flag which findings need county-specific product approval references
+- Add a `county_amendment_ref` field to each finding for the specific local code section
 
-**6. Stats as clickable metric cards**
-Replace the tiny inline stats text with 3-4 proper KPI cards in a row (like Stripe's dashboard metrics): "Active Projects", "Due This Week", "Completed MTD", "Avg Review Time". Each with the number large, label small below, and clickable to navigate.
+Add a new tool parameter `county_amendment_ref` (optional string) to the `PLAN_REVIEW_TOOL` schema.
 
-**7. Merge "Needs Attention" and "In Progress" sections**
-These currently show overlapping data. Combine into a single smart table/list with sortable columns: Project, Status, Days Remaining, Last Activity. This is more scannable and avoids redundancy.
+**4. Add a "Document Package" export option**
 
-**8. Activity feed with project links**
-Make activity items clickable, navigating to the relevant project. Add project name context to each entry.
+Create a new `CountyDocumentPackage` component that generates multiple documents in one click based on what the county needs:
+- Comment Letter (existing, enhanced)
+- Product Approval Checklist (HVHZ counties)
+- Private Provider Notice form reference
+- Inspection Readiness Packet
 
-**9. Remove greeting verbosity**
-Keep the greeting but make it a single line with the date inline, not a separate subtitle. Tighten vertical spacing.
+A dropdown menu on the export button lets users pick individual docs or "Full County Package."
 
-### Technical approach
-- Edit `src/pages/ProjectDetail.tsx` — rewrite timeline to horizontal stepper, restructure layout grid, inline deadline into details card
-- Edit `src/pages/Dashboard.tsx` — add KPI cards row, merge attention/progress into unified list, tighten header
-- Edit `src/components/DeadlineRing.tsx` — add a compact "bar" variant for inline use
-- Minor tweaks to `src/components/StatusChip.tsx` for consistent sizing
+**5. Show county requirements in the review UI**
 
+In `PlanReviewDetail.tsx`, add a small info panel (collapsible) showing "County Requirements for [X]" — listing the specific standards, amendment references, and submission notes so the reviewer knows what to look for before they even start.
+
+### Files to create/edit
+- **Create**: `src/lib/county-requirements.ts` — county config registry
+- **Edit**: `src/components/CommentLetterExport.tsx` — consume county config, add supplemental sections
+- **Edit**: `supabase/functions/ai/index.ts` — add `county_amendment_ref` to tool schema, enrich prompts with county context
+- **Edit**: `src/pages/PlanReviewDetail.tsx` — add county requirements info panel, update export section
+- **Create**: `src/components/CountyDocumentPackage.tsx` — multi-document export dropdown
