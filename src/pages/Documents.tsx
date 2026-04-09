@@ -19,12 +19,40 @@ function useDocuments() {
   return useQuery({
     queryKey: ["documents"],
     queryFn: async () => {
-      const { data, error } = await supabase.storage.from("documents").list("", {
+      // List root-level files
+      const { data: rootFiles, error: rootErr } = await supabase.storage.from("documents").list("", {
         limit: 100,
         sortBy: { column: "created_at", order: "desc" },
       });
-      if (error) throw error;
-      return (data || []).filter((f) => f.name !== ".emptyFolderPlaceholder") as StorageFile[];
+      if (rootErr) throw rootErr;
+      const root = (rootFiles || [])
+        .filter((f) => f.name !== ".emptyFolderPlaceholder" && !f.id?.startsWith("folder"))
+        .map((f) => ({ ...f, displayPath: f.name } as StorageFile & { displayPath: string }));
+
+      // List project subfolders
+      const { data: projectFolders } = await supabase.storage.from("documents").list("projects", { limit: 100 });
+      const projectFiles: (StorageFile & { displayPath: string })[] = [];
+
+      if (projectFolders) {
+        for (const folder of projectFolders.filter((f) => f.name !== ".emptyFolderPlaceholder")) {
+          const { data: files } = await supabase.storage.from("documents").list(`projects/${folder.name}`, {
+            limit: 100,
+            sortBy: { column: "created_at", order: "desc" },
+          });
+          if (files) {
+            for (const f of files.filter((f) => f.name !== ".emptyFolderPlaceholder")) {
+              projectFiles.push({
+                ...f,
+                displayPath: `projects/${folder.name}/${f.name}`,
+              } as StorageFile & { displayPath: string });
+            }
+          }
+        }
+      }
+
+      return [...root, ...projectFiles].sort((a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
     },
   });
 }
@@ -71,19 +99,19 @@ export default function Documents() {
     setUploading(false);
   }, [queryClient]);
 
-  const downloadFile = async (name: string) => {
-    const { data, error } = await supabase.storage.from("documents").download(name);
+  const downloadFile = async (file: StorageFile & { displayPath: string }) => {
+    const { data, error } = await supabase.storage.from("documents").download(file.displayPath);
     if (error) { toast.error(error.message); return; }
     const url = URL.createObjectURL(data);
     const a = document.createElement("a");
     a.href = url;
-    a.download = name.replace(/^\d+_/, "");
+    a.download = file.name.replace(/^\d+_/, "");
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  const deleteFile = async (name: string) => {
-    const { error } = await supabase.storage.from("documents").remove([name]);
+  const deleteFile = async (displayPath: string) => {
+    const { error } = await supabase.storage.from("documents").remove([displayPath]);
     if (error) { toast.error(error.message); return; }
     toast.success("File deleted");
     queryClient.invalidateQueries({ queryKey: ["documents"] });
