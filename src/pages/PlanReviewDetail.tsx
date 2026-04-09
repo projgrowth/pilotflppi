@@ -69,7 +69,7 @@ interface PlanReviewRow {
   project?: ProjectInfo | null;
 }
 
-type RightPanelMode = "findings" | "checklist" | "letter";
+type RightPanelMode = "findings" | "checklist" | "letter" | "county";
 
 function groupFindingsByDiscipline(findings: Finding[]): Record<string, Finding[]> {
   const groups: Record<string, Finding[]> = {};
@@ -709,7 +709,7 @@ export default function PlanReviewDetail() {
                 <Button size="icon" variant="ghost" className="h-6 w-6 mr-1" onClick={() => setRightPanelCollapsed(true)} title="Collapse panel">
                   <PanelRightClose className="h-3.5 w-3.5" />
                 </Button>
-                {(["findings", "checklist", "letter"] as RightPanelMode[]).map((mode) => (
+                {(["findings", "checklist", "letter", "county"] as RightPanelMode[]).map((mode) => (
                   <button
                     key={mode}
                     onClick={() => setRightPanel(mode)}
