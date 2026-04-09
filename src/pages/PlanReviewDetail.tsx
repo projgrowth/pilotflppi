@@ -70,6 +70,9 @@ interface PlanReviewRow {
   finding_statuses?: Record<string, string> | null;
   previous_findings?: unknown;
   project?: ProjectInfo | null;
+  qc_status?: string;
+  qc_reviewer_id?: string | null;
+  qc_notes?: string;
 }
 
 type RightPanelMode = "findings" | "checklist" | "letter" | "county";
