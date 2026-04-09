@@ -194,6 +194,28 @@ The email should:
 - Be professional but convey urgency for overdue buildings
 - Include next steps (schedule an assessment)`,
 
+  extract_zoning_data: `You are analyzing a site plan / survey / zoning sheet image from a Florida construction project. Extract every zoning and lot data point you can find on the sheet.
+
+Look for:
+- Zoning district designation (e.g. C-2, R-3, PUD, etc.)
+- Lot area / parcel area in square feet
+- Building footprint area
+- Total building area (gross floor area)
+- Number of stories / floors
+- Maximum FAR (Floor Area Ratio) if noted
+- Maximum lot coverage percentage
+- Maximum building height in feet
+- Maximum stories allowed
+- Setbacks: front, side, rear (in feet)
+- Parking ratio (spaces per sqft of building area)
+- Landscape buffer width in feet
+- Lot frontage in linear feet
+- Signage ratio (sqft per linear foot of frontage)
+- Occupancy groups (IBC/FBC codes like B, M, S-1, A-2, etc.)
+- Any zoning notes or variance information
+
+Extract numerical values as numbers, not strings. If a value is not visible or not present on the sheet, return null for that field. For occupancy_groups return an array of code strings. For notes, include any relevant zoning text you find.`,
+
   answer_code_question: `You are an expert on the Florida Building Code (FBC) 2023 edition, including all referenced standards (ASCE 7, ACI 318, NEC, etc.). Answer code questions accurately and cite specific sections.
 
 Always:
@@ -292,14 +314,48 @@ const EXTRACT_PROJECT_TOOL = {
   },
 };
 
+const EXTRACT_ZONING_TOOL = {
+  type: "function" as const,
+  function: {
+    name: "extract_zoning_data",
+    description: "Extract zoning and lot data from a site plan image",
+    parameters: {
+      type: "object",
+      properties: {
+        zoning_district: { type: "string", description: "Zoning district code" },
+        lot_area_sqft: { type: "number", description: "Lot area in square feet" },
+        building_footprint_sqft: { type: "number", description: "Building footprint in sqft" },
+        total_building_area_sqft: { type: "number", description: "Total building area in sqft" },
+        stories: { type: "number", description: "Number of stories" },
+        max_far: { type: "number", description: "Maximum FAR" },
+        max_lot_coverage_pct: { type: "number", description: "Max lot coverage percentage" },
+        max_height_ft: { type: "number", description: "Max building height in feet" },
+        max_stories: { type: "number", description: "Max stories allowed" },
+        setback_front_ft: { type: "number", description: "Front setback in feet" },
+        setback_side_ft: { type: "number", description: "Side setback in feet" },
+        setback_rear_ft: { type: "number", description: "Rear setback in feet" },
+        parking_ratio_per_sqft: { type: "number", description: "Parking ratio: 1 space per X sqft" },
+        landscape_buffer_ft: { type: "number", description: "Landscape buffer in feet" },
+        frontage_lf: { type: "number", description: "Lot frontage in linear feet" },
+        signage_ratio_sqft_per_lf: { type: "number", description: "Signage ratio sqft per LF" },
+        occupancy_groups: { type: "array", items: { type: "string" }, description: "Occupancy group codes" },
+        notes: { type: "string", description: "Any zoning notes found" },
+      },
+      required: ["zoning_district"],
+      additionalProperties: false,
+    },
+  },
+};
+
 // Actions that use multimodal (vision) capabilities
-const MULTIMODAL_ACTIONS = new Set(["plan_review_check_visual", "extract_project_info"]);
+const MULTIMODAL_ACTIONS = new Set(["plan_review_check_visual", "extract_project_info", "extract_zoning_data"]);
 
 // Actions that use tool calling for structured output
 const TOOL_CALL_ACTIONS: Record<string, typeof PLAN_REVIEW_TOOL> = {
   plan_review_check: PLAN_REVIEW_TOOL,
   plan_review_check_visual: PLAN_REVIEW_TOOL,
   extract_project_info: EXTRACT_PROJECT_TOOL,
+  extract_zoning_data: EXTRACT_ZONING_TOOL,
 };
 
 serve(async (req) => {
@@ -443,8 +499,8 @@ serve(async (req) => {
       if (toolCall?.function?.arguments) {
         try {
           const parsed = JSON.parse(toolCall.function.arguments);
-          // For extract_project_info, return the object directly
-          if (action === "extract_project_info") {
+          // For extract_project_info and extract_zoning_data, return the object directly
+          if (action === "extract_project_info" || action === "extract_zoning_data") {
             return new Response(JSON.stringify({ content: JSON.stringify(parsed) }), {
               headers: { ...corsHeaders, "Content-Type": "application/json" },
             });
