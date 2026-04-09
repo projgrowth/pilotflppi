@@ -79,17 +79,39 @@ export default function ProjectDetail() {
   const { data: planReviewFiles } = usePlanReviewFilesByProject(id);
   const { data: reviews } = useProjectReviews(id || "");
   const [uploading, setUploading] = useState(false);
+  const [docFilter, setDocFilter] = useState<string>("all");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const DOC_CATEGORIES = [
+    { value: "all", label: "All" },
+    { value: "plans", label: "Plans" },
+    { value: "letters", label: "Letters" },
+    { value: "checklists", label: "Checklists" },
+    { value: "certificates", label: "Certificates" },
+    { value: "plan-review", label: "Plan Review" },
+    { value: "other", label: "Other" },
+  ];
+
+  function inferCategory(name: string, source: string): string {
+    if (source === "plan-review") return "plan-review";
+    const lower = name.toLowerCase();
+    if (/\.(dwg|dxf)$/.test(lower) || /plan|drawing|sheet|floor|site|elevation|section|detail/i.test(lower)) return "plans";
+    if (/letter|comment|correspondence|memo/i.test(lower)) return "letters";
+    if (/checklist|inspection.*form|review.*form/i.test(lower)) return "checklists";
+    if (/certificate|cert|co\b|cco|completion/i.test(lower)) return "certificates";
+    return "other";
+  }
 
   // Merge storage documents + plan review files into a unified list
   const allDocuments = (() => {
-    const items: { key: string; name: string; date: string; source: string; storagePath?: string }[] = [];
+    const items: { key: string; name: string; date: string; source: string; storagePath?: string; category: string }[] = [];
     for (const doc of documents || []) {
-      items.push({ key: `storage-${doc.name}`, name: doc.name, date: doc.created_at, source: "upload", storagePath: `projects/${id}/${doc.name}` });
+      const cat = inferCategory(doc.name, "upload");
+      items.push({ key: `storage-${doc.name}`, name: doc.name, date: doc.created_at, source: "upload", storagePath: `projects/${id}/${doc.name}`, category: cat });
     }
     for (const f of planReviewFiles || []) {
       const fileName = f.file_path.split("/").pop() || f.file_path;
-      items.push({ key: `prf-${f.id}`, name: `R${f.round} — ${fileName}`, date: f.uploaded_at, source: "plan-review", storagePath: f.file_path });
+      items.push({ key: `prf-${f.id}`, name: `R${f.round} — ${fileName}`, date: f.uploaded_at, source: "plan-review", storagePath: f.file_path, category: "plan-review" });
     }
     items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return items;
