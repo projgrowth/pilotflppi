@@ -295,11 +295,23 @@ serve(async (req) => {
     const useToolCalling = !!toolDef && !stream;
 
     // Build messages
+    let systemContent = systemPrompt;
+
+    // For fbc_county_chat, inject county context into system prompt
+    if (action === "fbc_county_chat" && payload?.county_context) {
+      systemContent += `\n\n## Current County Context\n${JSON.stringify(payload.county_context, null, 2)}`;
+    }
+
     const messages: Array<Record<string, unknown>> = [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: systemContent },
     ];
 
-    if (isMultimodal && payload?.images && Array.isArray(payload.images)) {
+    // For fbc_county_chat, use conversation history
+    if (action === "fbc_county_chat" && payload?.conversation && Array.isArray(payload.conversation)) {
+      for (const msg of payload.conversation) {
+        messages.push({ role: msg.role, content: msg.content });
+      }
+    } else if (isMultimodal && payload?.images && Array.isArray(payload.images)) {
       // Multimodal: send images as content parts
       const contentParts: Array<Record<string, unknown>> = [];
 
