@@ -123,6 +123,45 @@ export type Database = {
           },
         ]
       }
+      fee_schedules: {
+        Row: {
+          base_fee: number
+          county: string
+          created_at: string
+          description: string
+          id: string
+          is_active: boolean
+          service_type: string
+          trade_type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          base_fee?: number
+          county?: string
+          created_at?: string
+          description?: string
+          id?: string
+          is_active?: boolean
+          service_type?: string
+          trade_type?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          base_fee?: number
+          county?: string
+          created_at?: string
+          description?: string
+          id?: string
+          is_active?: boolean
+          service_type?: string
+          trade_type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       finding_status_history: {
         Row: {
           changed_at: string
@@ -255,6 +294,128 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "inspections_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_line_items: {
+        Row: {
+          created_at: string
+          description: string
+          id: string
+          invoice_id: string
+          quantity: number
+          service_type: string | null
+          sort_order: number
+          total: number
+          unit_price: number
+        }
+        Insert: {
+          created_at?: string
+          description?: string
+          id?: string
+          invoice_id: string
+          quantity?: number
+          service_type?: string | null
+          sort_order?: number
+          total?: number
+          unit_price?: number
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          id?: string
+          invoice_id?: string
+          quantity?: number
+          service_type?: string | null
+          sort_order?: number
+          total?: number
+          unit_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_line_items_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoices: {
+        Row: {
+          amount_paid: number
+          contractor_id: string | null
+          created_at: string
+          custom_footer: string
+          due_at: string | null
+          id: string
+          invoice_number: string
+          issued_at: string | null
+          notes: string
+          paid_at: string | null
+          project_id: string
+          status: string
+          subtotal: number
+          tax_amount: number
+          tax_rate: number
+          total: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          amount_paid?: number
+          contractor_id?: string | null
+          created_at?: string
+          custom_footer?: string
+          due_at?: string | null
+          id?: string
+          invoice_number?: string
+          issued_at?: string | null
+          notes?: string
+          paid_at?: string | null
+          project_id: string
+          status?: string
+          subtotal?: number
+          tax_amount?: number
+          tax_rate?: number
+          total?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          amount_paid?: number
+          contractor_id?: string | null
+          created_at?: string
+          custom_footer?: string
+          due_at?: string | null
+          id?: string
+          invoice_number?: string
+          issued_at?: string | null
+          notes?: string
+          paid_at?: string | null
+          project_id?: string
+          status?: string
+          subtotal?: number
+          tax_amount?: number
+          tax_rate?: number
+          total?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoices_contractor_id_fkey"
+            columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "contractors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_project_id_fkey"
             columns: ["project_id"]
             isOneToOne: false
             referencedRelation: "projects"
@@ -609,6 +770,7 @@ export type Database = {
         Args: { business_days: number; start_date: string }
         Returns: string
       }
+      generate_invoice_number: { Args: never; Returns: string }
     }
     Enums: {
       inspection_result: "pass" | "fail" | "partial" | "pending"
