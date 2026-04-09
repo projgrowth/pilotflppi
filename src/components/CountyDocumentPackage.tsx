@@ -10,7 +10,7 @@ import {
 import { FileDown, Package, FileText, ClipboardList, Shield, Zap, ChevronDown } from "lucide-react";
 import type { Finding } from "@/components/FindingCard";
 import { getCountyRequirements, getSupplementalSectionLabel, type SupplementalSection } from "@/lib/county-requirements";
-import { CommentLetterExport } from "@/components/CommentLetterExport";
+import { CommentLetterExport, type FirmInfo } from "@/components/CommentLetterExport";
 
 interface CountyDocumentPackageProps {
   projectName: string;
@@ -21,6 +21,7 @@ interface CountyDocumentPackageProps {
   round: number;
   findings: Finding[];
   findingStatuses: Record<number, string>;
+  firmInfo?: FirmInfo | null;
 }
 
 function buildProductChecklistHTML(props: CountyDocumentPackageProps): string {
