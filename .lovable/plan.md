@@ -1,48 +1,67 @@
 
 
-# Fix: Edge Function Crash on Empty Request Body
+# Redesign: AI Briefing Page Layout
 
-## Problem
+## Current Issues
 
-The `ai` edge function crashes with `SyntaxError: Unexpected end of JSON input` when it receives a request with no body (or an empty body). This happens at `await req.json()` (line 274) — before the CORS check can handle it. The error causes a blank screen because the function returns a 500 instead of a proper error response.
+The page has three panels crammed into a 3/5 + 2/5 grid with poor space usage:
+- Activity feed takes prime real estate but shows minimal data (just timestamps)
+- Two separate AI input areas (Quick Code Q&A + County Chatbot) compete for attention
+- The chatbot is squeezed into a narrow 2/5 column
+- No KPI summary or at-a-glance intelligence
+- No visual hierarchy — everything looks the same weight
 
-The edge function logs confirm this:
+## Proposed Layout
+
+Restructure into a **dashboard-style intelligence hub** with clear visual hierarchy:
+
+```text
+┌─────────────────────────────────────────────────┐
+│  AI Briefing                                     │
+│  "3 projects nearing statutory deadline"  banner │
+├──────────┬──────────┬──────────┬────────────────┤
+│ Active   │ Pending  │ Statutory│ Reviews This   │
+│ Reviews  │ Comments │ Alerts   │ Month          │
+├──────────┴──────────┴──────────┴────────────────┤
+│                                                  │
+│  ┌─── County Code Assistant (full width) ──────┐│
+│  │  County picker + HVHZ/CCCL badges           ││
+│  │  Quick question chips                        ││
+│  │  Chat area (taller, more room)               ││
+│  │  Input bar                                   ││
+│  └──────────────────────────────────────────────┘│
+│                                                  │
+│  ┌─── Two columns below ───────────────────────┐│
+│  │  Quick Code Q&A          │  Activity Feed    ││
+│  │  (General FBC questions) │  (compact sidebar)││
+│  └──────────────────────────┴───────────────────┘│
+└──────────────────────────────────────────────────┘
 ```
-AI function error: SyntaxError: Unexpected end of JSON input
-```
 
-## Fix
+## Key Changes
 
-Wrap `await req.json()` in a try-catch to handle empty/malformed request bodies gracefully, returning a 400 error with a clear message instead of crashing.
+### 1. Add KPI row at the top
+Pull stats from `useDashboardStats` — show Active Reviews, Pending Comments, Statutory Alerts, and Completed MTD as compact KPI cards, matching the Dashboard style.
 
-## File Changed
+### 2. Promote County Chatbot to full-width hero
+The chatbot is the primary tool on this page. Give it the full width with a taller height (~500px), making the chat area much more usable.
+
+### 3. Demote Activity Feed to compact sidebar
+Move the activity feed into a smaller right column below the chatbot, matching the Dashboard's `CompactActivityFeed` pattern. It's useful context but not the main action.
+
+### 4. Keep Quick Code Q&A as a secondary card
+Place it in the left column below the chatbot — same width as the activity feed column.
+
+### 5. Visual polish
+- Add a contextual alert banner when statutory deadlines are approaching (reuse overdue pattern from Dashboard)
+- Use the same `KpiCard` component from Dashboard for consistency
+- Give the chatbot card a subtle accent border to signal it's the primary interaction
+
+## Files Changed
 
 | File | Change |
 |------|--------|
-| `supabase/functions/ai/index.ts` | Wrap `req.json()` in try-catch at line 274, return 400 on parse failure |
+| `src/pages/AIBriefing.tsx` | Restructure layout: KPI row, full-width chatbot, two-column bottom section |
 
-## Code Change (line 273-274)
-
-Replace:
-```typescript
-const { action, payload } = await req.json();
-```
-
-With:
-```typescript
-let action: string;
-let payload: any;
-try {
-  const body = await req.json();
-  action = body.action;
-  payload = body.payload;
-} catch {
-  return new Response(
-    JSON.stringify({ error: "Invalid or empty request body" }),
-    { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-  );
-}
-```
-
-This is a one-line-scope fix — no other files or migrations needed. After deploying, the function will return a clean 400 instead of crashing on empty requests.
+No new components, hooks, or database changes needed — just reorganizing existing pieces and importing `KpiCard` + `useDashboardStats`.
 
