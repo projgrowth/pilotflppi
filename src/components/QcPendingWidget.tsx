@@ -51,7 +51,7 @@ export function QcPendingWidget() {
 
   if (isLoading) {
     return (
-      <Card className="shadow-subtle border">
+      <Card className="shadow-subtle">
         <CardContent className="p-4">
           <div className="flex items-center gap-2 mb-3">
             <div className="h-4 w-4 rounded bg-muted animate-pulse" />
@@ -70,7 +70,7 @@ export function QcPendingWidget() {
   const count = pendingReviews?.length ?? 0;
 
   return (
-    <Card className="shadow-subtle border">
+    <Card className="shadow-subtle">
       <CardContent className="p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">

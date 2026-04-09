@@ -66,7 +66,7 @@ export default function PlanReview() {
   const totalFindings = reviews?.reduce((sum, r) => sum + (Array.isArray(r.ai_findings) ? (r.ai_findings as Finding[]).length : 0), 0) || 0;
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl">
+    <div className="p-8 md:p-10 max-w-7xl">
       <PageHeader
         title="Plan Review"
         subtitle="AI-powered code compliance analysis"
@@ -80,23 +80,23 @@ export default function PlanReview() {
       <NewPlanReviewWizard open={wizardOpen} onOpenChange={setWizardOpen} onComplete={handleWizardComplete} />
 
       {totalReviews > 0 && (
-        <div className="grid grid-cols-3 gap-3 mb-6">
-          <Card className="shadow-subtle border">
-            <CardContent className="p-4 text-center">
-              <p className="text-2xl font-semibold text-foreground">{totalReviews}</p>
-              <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Total Reviews</p>
+        <div className="grid grid-cols-3 gap-4 mb-8">
+          <Card className="shadow-subtle">
+            <CardContent className="p-5 text-center">
+              <p className="text-3xl font-semibold text-foreground">{totalReviews}</p>
+              <p className="text-[11px] text-muted-foreground uppercase tracking-wide mt-1">Total Reviews</p>
             </CardContent>
           </Card>
-          <Card className="shadow-subtle border">
-            <CardContent className="p-4 text-center">
-              <p className="text-2xl font-semibold text-success">{completedReviews}</p>
-              <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Completed</p>
+          <Card className="shadow-subtle">
+            <CardContent className="p-5 text-center">
+              <p className="text-3xl font-semibold text-success">{completedReviews}</p>
+              <p className="text-[11px] text-muted-foreground uppercase tracking-wide mt-1">Completed</p>
             </CardContent>
           </Card>
-          <Card className="shadow-subtle border">
-            <CardContent className="p-4 text-center">
-              <p className="text-2xl font-semibold text-foreground">{totalFindings}</p>
-              <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Total Findings</p>
+          <Card className="shadow-subtle">
+            <CardContent className="p-5 text-center">
+              <p className="text-3xl font-semibold text-foreground">{totalFindings}</p>
+              <p className="text-[11px] text-muted-foreground uppercase tracking-wide mt-1">Total Findings</p>
             </CardContent>
           </Card>
         </div>
@@ -117,9 +117,9 @@ export default function PlanReview() {
           onAction={() => setWizardOpen(true)}
         />
       ) : (
-        <Card className="shadow-subtle border">
+        <Card className="shadow-subtle">
           {/* Column headers */}
-          <div className="hidden md:grid grid-cols-[1fr_100px_120px_60px_80px_100px_80px_24px] gap-4 px-5 py-2.5 text-[10px] uppercase tracking-widest text-muted-foreground font-semibold border-b bg-muted/30">
+          <div className="hidden md:grid grid-cols-[1fr_100px_120px_60px_80px_100px_80px_24px] gap-4 px-5 py-3 text-[11px] uppercase tracking-widest text-muted-foreground font-semibold border-b bg-muted/20">
             <span>Project</span>
             <span>Trade</span>
             <span>County</span>

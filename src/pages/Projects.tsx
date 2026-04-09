@@ -120,7 +120,7 @@ export default function Projects() {
   });
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl">
+    <div className="p-8 md:p-10 max-w-7xl">
       <PageHeader
         title="Projects"
         actions={
@@ -130,18 +130,13 @@ export default function Projects() {
         }
       />
 
-      <div className="mb-4 flex flex-wrap items-center gap-4">
-        <div className="flex gap-1 rounded-lg bg-muted/50 p-1">
+      <div className="mb-5 flex flex-wrap items-center gap-4">
+        <div className="filter-pills">
           {filters.map((f) => (
             <button
               key={f}
               onClick={() => setActiveFilter(f)}
-              className={cn(
-                "px-3 py-1.5 text-sm rounded-md transition-all duration-150",
-                activeFilter === f
-                  ? "bg-background text-foreground font-medium shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
+              className={cn("filter-pill", activeFilter === f && "filter-pill-active")}
             >
               {f}
             </button>
@@ -153,11 +148,11 @@ export default function Projects() {
         </div>
       </div>
 
-      <Card className="shadow-subtle border">
+      <Card className="shadow-subtle">
         {isLoading ? (
           <div className="divide-y">
             {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4 px-5 py-3.5">
+              <div key={i} className="flex items-center gap-4 px-5 py-4">
                 <div className="h-10 w-10 rounded-full bg-muted animate-pulse" />
                 <div className="flex-1 space-y-2">
                   <div className="h-4 w-48 rounded bg-muted animate-pulse" />
@@ -175,7 +170,7 @@ export default function Projects() {
         ) : (
           <div className="divide-y">
             {/* Column headers */}
-            <div className="hidden md:grid grid-cols-[40px_1fr_100px_80px_80px_120px_80px_20px] gap-4 px-5 py-2.5 text-[10px] uppercase tracking-widest text-muted-foreground font-semibold border-b bg-muted/30">
+            <div className="hidden md:grid grid-cols-[40px_1fr_100px_80px_80px_120px_80px_20px] gap-4 px-5 py-3 text-[11px] uppercase tracking-widest text-muted-foreground font-semibold border-b bg-muted/20">
               <span />
               <span>Project</span>
               <span>Contractor</span>

@@ -137,7 +137,7 @@ export default function Inspections() {
   const checklist = tradeChecklists[tradeType] || tradeChecklists.general;
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl">
+    <div className="p-8 md:p-10 max-w-7xl">
       <PageHeader title="Inspections" />
 
       {/* Week navigation */}

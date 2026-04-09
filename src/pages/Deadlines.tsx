@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
+import { PageHeader } from "@/components/PageHeader";
 import { useProjects, getDaysElapsed, getDaysRemaining } from "@/hooks/useProjects";
 import { getStatutoryStatus } from "@/lib/statutory-deadlines";
 import { cn } from "@/lib/utils";
@@ -35,16 +36,17 @@ export default function Deadlines() {
   });
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl">
-      <h1 className="text-2xl font-medium mb-6">Deadlines</h1>
-      <div className="mb-6 flex gap-1">
+    <div className="p-8 md:p-10 max-w-7xl">
+      <PageHeader title="Deadlines" />
+
+      <div className="mb-6 filter-pills w-fit">
         {filters.map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
             className={cn(
-              "px-3 py-1.5 text-sm rounded-md transition-colors flex items-center gap-1",
-              filter === f ? "bg-accent/10 text-accent font-medium" : "text-muted-foreground hover:text-foreground"
+              "filter-pill flex items-center gap-1",
+              filter === f && "filter-pill-active"
             )}
           >
             {f === "Statutory" && <Gavel className="h-3 w-3" />}
@@ -53,11 +55,11 @@ export default function Deadlines() {
         ))}
       </div>
 
-      <Card className="shadow-subtle border">
+      <Card className="shadow-subtle">
         <CardContent className="p-0 divide-y">
           {isLoading ? (
             Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4 px-5 py-4">
+              <div key={i} className="flex items-center gap-4 px-5 py-5">
                 <div className="w-40 space-y-1">
                   <div className="h-4 w-32 rounded bg-muted animate-pulse" />
                   <div className="h-3 w-24 rounded bg-muted animate-pulse" />
@@ -67,7 +69,7 @@ export default function Deadlines() {
               </div>
             ))
           ) : filtered.length === 0 ? (
-            <div className="py-12 text-center text-sm text-muted-foreground">No deadlines match this filter</div>
+            <div className="py-16 text-center text-sm text-muted-foreground">No deadlines match this filter</div>
           ) : (
             filtered.map((d) => {
               const progress = Math.min(d.daysElapsed / 21, 1);
@@ -84,13 +86,13 @@ export default function Deadlines() {
                 <div
                   key={d.id}
                   onClick={() => navigate(`/projects/${d.id}`)}
-                  className={cn("flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-muted/30 transition-colors", isOverdue && "bg-destructive/5")}
+                  className={cn("flex items-center gap-4 px-5 py-5 cursor-pointer hover:bg-muted/30 transition-colors", isOverdue && "bg-destructive/5")}
                 >
-                  <div className="w-40 shrink-0">
+                  <div className="w-44 shrink-0">
                     <p className="text-sm font-medium truncate">{d.name}</p>
-                    <p className="text-xs text-muted-foreground truncate">{d.address}</p>
+                    <p className="text-xs text-muted-foreground truncate mt-0.5">{d.address}</p>
                   </div>
-                  <div className="flex-1 space-y-1.5">
+                  <div className="flex-1 space-y-2">
                     {/* Contractual deadline */}
                     <div className="h-3 rounded-full bg-muted overflow-hidden">
                       <div className={cn("h-full rounded-full transition-all", barColor)} style={{ width: `${progress * 100}%` }} />

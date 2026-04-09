@@ -3,7 +3,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/StatusChip";
 import { DeadlineRing } from "@/components/DeadlineRing";
-import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { KpiCard } from "@/components/KpiCard";
 import { useProjects, getDaysElapsed } from "@/hooks/useProjects";
@@ -39,9 +38,9 @@ function ProjectTable({ projects, navigate }: { projects: any[]; navigate: (path
   if (rows.length === 0) return null;
 
   return (
-    <Card className="shadow-subtle border">
+    <Card className="shadow-subtle">
       {/* Header row */}
-      <div className="grid grid-cols-[1fr_120px_100px_32px] gap-2 px-5 py-2.5 border-b text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+      <div className="grid grid-cols-[1fr_120px_100px_32px] gap-2 px-5 py-3 border-b text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
         <span>Project</span>
         <span>Status</span>
         <span className="text-right">Deadline</span>
@@ -82,7 +81,7 @@ function ProjectTable({ projects, navigate }: { projects: any[]; navigate: (path
 function CompactActivityFeed({ activity, loading, navigate }: { activity: any[]; loading: boolean; navigate: (path: string) => void }) {
   if (loading) {
     return (
-      <div className="space-y-2">
+      <div className="space-y-3">
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="flex items-start gap-2">
             <div className="mt-1 h-1.5 w-1.5 rounded-full bg-muted animate-pulse" />
@@ -97,20 +96,20 @@ function CompactActivityFeed({ activity, loading, navigate }: { activity: any[];
   }
 
   if (!activity || activity.length === 0) {
-    return <p className="text-xs text-muted-foreground text-center py-4">No recent activity</p>;
+    return <p className="text-xs text-muted-foreground text-center py-6">No recent activity</p>;
   }
 
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-3">
       {activity.map((item) => (
         <div
           key={item.id}
           className={`flex items-start gap-2 ${item.project_id ? "cursor-pointer hover:bg-muted/30 -mx-1 px-1 rounded transition-colors" : ""}`}
           onClick={() => item.project_id && navigate(`/projects/${item.project_id}`)}
         >
-          <div className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${getEventColor(item.event_type)}`} />
+          <div className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${getEventColor(item.event_type)}`} />
           <div className="flex-1">
-            <p className="text-xs leading-snug">{item.description}</p>
+            <p className="text-xs leading-relaxed">{item.description}</p>
             <p className="text-[10px] text-muted-foreground mt-0.5">
               {formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}
             </p>
@@ -149,24 +148,17 @@ export default function Dashboard() {
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const displayName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "there";
 
-  const quickActions = [
-    { label: "New Intake", icon: Plus, variant: "default" as const, onClick: () => navigate("/projects?action=new") },
-    { label: "Schedule Inspection", icon: CalendarPlus, variant: "outline" as const, onClick: () => navigate("/inspections") },
-    { label: "Run AI Check", icon: Sparkles, variant: "outline" as const, onClick: () => navigate("/plan-review") },
-    { label: "Find Leads", icon: Radar, variant: "outline" as const, onClick: () => navigate("/lead-radar") },
-  ];
-
   return (
-    <div className="p-6 md:p-8 max-w-7xl">
+    <div className="p-8 md:p-10 max-w-7xl">
       {/* Overdue banner */}
       {overdueProjects && overdueProjects.length > 0 && (
-        <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 flex items-center gap-3 animate-pulse">
-          <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
+        <div className="mb-6 rounded-lg border-l-4 border-l-destructive bg-destructive/5 px-5 py-4 flex items-center gap-4">
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0 animate-pulse" />
           <div className="flex-1">
             <p className="text-sm font-semibold text-destructive">
               {overdueProjects.length} project{overdueProjects.length > 1 ? "s" : ""} overdue
             </p>
-            <p className="text-xs text-destructive/70">
+            <p className="text-xs text-destructive/70 mt-0.5">
               {overdueProjects.slice(0, 3).map(p => p.name).join(", ")}
               {overdueProjects.length > 3 ? ` +${overdueProjects.length - 3} more` : ""}
             </p>
@@ -178,15 +170,15 @@ export default function Dashboard() {
       )}
 
       {/* Compact header: greeting + date on one line */}
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">
+      <div className="mb-8">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           {greeting}, {displayName}.
-          <span className="ml-2 text-sm font-normal text-muted-foreground">{format(now, "EEEE, MMM d")}</span>
         </h1>
+        <p className="text-sm text-muted-foreground mt-1">{format(now, "EEEE, MMMM d, yyyy")}</p>
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
         <KpiCard
           label="Active"
           value={stats?.activeProjects ?? 0}
@@ -226,40 +218,47 @@ export default function Dashboard() {
       </div>
 
       {/* Quick Actions */}
-      <div className="mb-6 flex flex-wrap gap-2">
-        {quickActions.map((action) => (
-          <Button
-            key={action.label}
-            variant={action.variant}
-            onClick={action.onClick}
-            size="sm"
-            className={action.variant === "default" ? "bg-primary text-primary-foreground hover:bg-primary/90" : ""}
-          >
-            <action.icon className="h-4 w-4 mr-1.5" />
-            {action.label}
-          </Button>
-        ))}
+      <div className="mb-8 flex flex-wrap items-center gap-3">
+        <Button
+          onClick={() => navigate("/projects?action=new")}
+          className="bg-primary text-primary-foreground hover:bg-primary/90"
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          New Intake
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => navigate("/inspections")}>
+          <CalendarPlus className="h-4 w-4 mr-1.5" />
+          Schedule Inspection
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => navigate("/plan-review")}>
+          <Sparkles className="h-4 w-4 mr-1.5" />
+          Run AI Check
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => navigate("/lead-radar")}>
+          <Radar className="h-4 w-4 mr-1.5" />
+          Find Leads
+        </Button>
       </div>
 
       {/* QC Pending Reviews */}
-      <div className="mb-6">
+      <div className="mb-8">
         <QcPendingWidget />
       </div>
 
       {/* Two-column: project table + activity sidebar */}
-      <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
+      <div className="grid gap-8 lg:grid-cols-[1fr_300px]">
         <div>
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-4 flex items-center justify-between">
             <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">All Active Projects</h2>
             <Button variant="ghost" size="sm" className="text-xs text-accent" onClick={() => navigate("/projects")}>
               View all →
             </Button>
           </div>
           {projectsLoading ? (
-            <Card className="shadow-subtle border">
+            <Card className="shadow-subtle">
               <div className="divide-y">
                 {Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} className="flex items-center gap-4 px-5 py-3.5">
+                  <div key={i} className="flex items-center gap-4 px-5 py-4">
                     <div className="h-8 w-8 rounded-full bg-muted animate-pulse" />
                     <div className="flex-1 space-y-2">
                       <div className="h-4 w-40 rounded bg-muted animate-pulse" />
@@ -284,9 +283,9 @@ export default function Dashboard() {
 
         {/* Activity sidebar */}
         <div>
-          <h2 className="mb-3 text-xs font-semibold text-muted-foreground uppercase tracking-widest">Activity</h2>
-          <Card className="shadow-subtle border">
-            <CardContent className="p-4">
+          <h2 className="mb-4 text-xs font-semibold text-muted-foreground uppercase tracking-widest">Activity</h2>
+          <Card className="shadow-subtle">
+            <CardContent className="p-5">
               <CompactActivityFeed activity={activity || []} loading={activityLoading} navigate={navigate} />
             </CardContent>
           </Card>

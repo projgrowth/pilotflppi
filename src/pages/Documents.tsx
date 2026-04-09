@@ -124,17 +124,19 @@ export default function Documents() {
   };
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-medium">Documents</h1>
-        <label>
+    <div className="p-8 md:p-10 max-w-7xl">
+      <PageHeader
+        title="Documents"
+        actions={
+          <label>
+            <input type="file" multiple className="hidden" onChange={(e) => e.target.files && uploadFiles(e.target.files)} />
+            <Button asChild className="bg-accent text-accent-foreground hover:bg-accent/90 cursor-pointer">
+              <span><Upload className="h-4 w-4 mr-2" /> Upload Files</span>
+            </Button>
+          </label>
+        }
+      />
           <input type="file" multiple className="hidden" onChange={(e) => e.target.files && uploadFiles(e.target.files)} />
-          <Button asChild className="bg-accent text-accent-foreground hover:bg-accent/90 cursor-pointer">
-            <span><Upload className="h-4 w-4 mr-2" /> Upload Files</span>
-          </Button>
-        </label>
-      </div>
-
       {/* Drop zone */}
       <div
         onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
