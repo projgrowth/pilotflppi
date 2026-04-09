@@ -881,10 +881,50 @@ export default function PlanReviewDetail() {
 
                 {rightPanel === "letter" && (
                   <div className="p-3 space-y-3">
+                    {/* QC Status Bar */}
+                    {hasFindings && review.ai_check_status === "complete" && (
+                      <div className={cn(
+                        "rounded-lg border px-3 py-2 flex items-center justify-between",
+                        review.qc_status === "qc_approved" ? "border-success/30 bg-success/5" :
+                        review.qc_status === "qc_rejected" ? "border-destructive/30 bg-destructive/5" :
+                        "border-[hsl(var(--warning))]/30 bg-[hsl(var(--warning))]/5"
+                      )}>
+                        <div className="flex items-center gap-2">
+                          <div className={cn("h-2 w-2 rounded-full",
+                            review.qc_status === "qc_approved" ? "bg-success" :
+                            review.qc_status === "qc_rejected" ? "bg-destructive" :
+                            "bg-[hsl(var(--warning))]"
+                          )} />
+                          <span className="text-[11px] font-semibold">
+                            {review.qc_status === "qc_approved" ? "QC Approved" :
+                             review.qc_status === "qc_rejected" ? "QC Rejected" : "Pending QC Review"}
+                          </span>
+                        </div>
+                        {review.qc_status === "pending_qc" && (
+                          <div className="flex gap-1">
+                            <Button size="sm" variant="outline" className="h-6 text-[10px] text-destructive border-destructive/30"
+                              onClick={async () => {
+                                await supabase.from("plan_reviews").update({ qc_status: "qc_rejected", qc_reviewer_id: user?.id }).eq("id", review.id);
+                                await supabase.from("activity_log").insert({ event_type: "qc_rejected", description: "Plan review QC rejected", project_id: review.project_id, actor_id: user?.id, actor_type: "user" });
+                                queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+                                toast.error("QC rejected");
+                              }}>Reject</Button>
+                            <Button size="sm" className="h-6 text-[10px] bg-success text-success-foreground hover:bg-success/90"
+                              onClick={async () => {
+                                await supabase.from("plan_reviews").update({ qc_status: "qc_approved", qc_reviewer_id: user?.id }).eq("id", review.id);
+                                await supabase.from("activity_log").insert({ event_type: "qc_approved", description: "Plan review QC approved", project_id: review.project_id, actor_id: user?.id, actor_type: "user" });
+                                queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+                                toast.success("QC approved — exports unlocked");
+                              }}>Approve</Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Comment Letter</span>
                       <div className="flex items-center gap-1.5">
-                        {hasFindings && (
+                        {hasFindings && review.qc_status === "qc_approved" && (
                           <CountyDocumentPackage
                             projectName={review.project?.name || ""}
                             address={review.project?.address || ""}
@@ -896,6 +936,9 @@ export default function PlanReviewDetail() {
                             findingStatuses={Object.fromEntries(Object.entries(findingStatuses).map(([k, v]) => [Number(k), v]))}
                             firmInfo={firmSettings}
                           />
+                        )}
+                        {hasFindings && review.qc_status !== "qc_approved" && (
+                          <span className="text-[9px] text-muted-foreground italic">QC approval required for export</span>
                         )}
                         {commentLetter && !generatingLetter && (
                           <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={copyLetter}>
@@ -934,7 +977,10 @@ export default function PlanReviewDetail() {
                             <Button size="sm" variant="outline" className="text-xs flex-1" onClick={() => generateCommentLetter(review)}>
                               <Sparkles className="h-3 w-3 mr-1" /> Regenerate
                             </Button>
-                            <Button size="sm" className="text-xs flex-1 bg-accent text-accent-foreground hover:bg-accent/90">
+                            <Button size="sm" className="text-xs flex-1 bg-accent text-accent-foreground hover:bg-accent/90"
+                              disabled={review.qc_status !== "qc_approved"}
+                              title={review.qc_status !== "qc_approved" ? "QC approval required" : ""}
+                            >
                               <Send className="h-3 w-3 mr-1" /> Send to Contractor
                             </Button>
                           </div>
