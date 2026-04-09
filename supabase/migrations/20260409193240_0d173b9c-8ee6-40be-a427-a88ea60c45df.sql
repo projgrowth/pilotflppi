@@ -1,0 +1,1 @@
+ALTER TABLE public.projects ADD COLUMN zoning_data jsonb DEFAULT '{}'::jsonb;

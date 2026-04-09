@@ -25,6 +25,7 @@ export interface Project {
   review_clock_paused_at: string | null;
   inspection_clock_started_at: string | null;
   hold_reason: string | null;
+  zoning_data: Record<string, unknown> | null;
 }
 
 export function useProjects() {

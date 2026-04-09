@@ -493,6 +493,7 @@ export type Database = {
           statutory_review_days: number
           trade_type: string
           updated_at: string
+          zoning_data: Json | null
         }
         Insert: {
           address: string
@@ -516,6 +517,7 @@ export type Database = {
           statutory_review_days?: number
           trade_type?: string
           updated_at?: string
+          zoning_data?: Json | null
         }
         Update: {
           address?: string
@@ -539,6 +541,7 @@ export type Database = {
           statutory_review_days?: number
           trade_type?: string
           updated_at?: string
+          zoning_data?: Json | null
         }
         Relationships: [
           {

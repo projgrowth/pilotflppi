@@ -12,7 +12,9 @@ import { HorizontalStepper } from "@/components/HorizontalStepper";
 import { PageHeader } from "@/components/PageHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { FileText, ClipboardCheck, Activity, Upload, Loader2, Download } from "lucide-react";
+import { FileText, ClipboardCheck, Activity, Upload, Loader2, Download, Building2 } from "lucide-react";
+import { ZoningAnalysisPanel } from "@/components/ZoningAnalysisPanel";
+import { ZoningData } from "@/lib/zoning-utils";
 import { StatutoryClockCard } from "@/components/StatutoryClockCard";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -235,6 +237,9 @@ export default function ProjectDetail() {
                   <span className="ml-1 text-[10px] bg-accent/15 text-accent rounded-full px-1.5 py-0.5 font-semibold">{allDocuments.length}</span>
                 )}
               </TabsTrigger>
+              <TabsTrigger value="zoning" className="gap-1.5">
+                <Building2 className="h-3.5 w-3.5" />Zoning
+              </TabsTrigger>
               <TabsTrigger value="plan-review" className="gap-1.5">
                 <ClipboardCheck className="h-3.5 w-3.5" />Plan Review
                 {findingsCount > 0 && (
@@ -311,6 +316,14 @@ export default function ProjectDetail() {
                   )}
                 </CardContent>
               </Card>
+            </TabsContent>
+
+            <TabsContent value="zoning">
+              <ZoningAnalysisPanel
+                projectId={project.id}
+                initialData={(project.zoning_data as unknown as ZoningData) ?? null}
+                onSaved={() => queryClient.invalidateQueries({ queryKey: ["project", id] })}
+              />
             </TabsContent>
 
             <TabsContent value="plan-review">
