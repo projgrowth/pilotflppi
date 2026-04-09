@@ -121,6 +121,8 @@ export default function PlanReviewDetail() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { firmSettings } = useFirmSettings();
+  const { user } = useAuth();
+  const { data: findingHistory, refetch: refetchHistory } = useFindingHistory(id);
 
   const { data: review, isLoading } = useQuery({
     queryKey: ["plan-review", id],
