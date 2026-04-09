@@ -137,7 +137,6 @@ export default function Documents() {
           </label>
         }
       />
-          <input type="file" multiple className="hidden" onChange={(e) => e.target.files && uploadFiles(e.target.files)} />
       {/* Drop zone */}
       <div
         onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}

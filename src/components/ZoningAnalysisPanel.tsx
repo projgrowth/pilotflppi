@@ -67,9 +67,9 @@ export function ZoningAnalysisPanel({ projectId, initialData, onSaved }: ZoningA
 
   const toggleOccupancy = useCallback((code: string) => {
     setZ((prev) => {
-      const groups = prev.occupancy_groups.includes(code)
-        ? prev.occupancy_groups.filter((g) => g !== code)
-        : [...prev.occupancy_groups, code];
+      const groups = (prev.occupancy_groups ?? []).includes(code)
+        ? (prev.occupancy_groups ?? []).filter((g) => g !== code)
+        : [...(prev.occupancy_groups ?? []), code];
       return { ...prev, occupancy_groups: groups };
     });
   }, []);

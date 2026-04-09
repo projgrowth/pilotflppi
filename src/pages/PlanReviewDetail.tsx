@@ -286,6 +286,7 @@ export default function PlanReviewDetail() {
       const allImages: PDFPageImage[] = [];
       for (let fi = 0; fi < r.file_urls.length; fi++) {
         const storedPath = r.file_urls[fi];
+        if (!storedPath) continue; // skip null/undefined entries
         // If it's a full URL (legacy public URL), extract the path; otherwise use as-is
         const filePath = storedPath.includes('/storage/v1/')
           ? storedPath.split('/documents/').pop() || storedPath
