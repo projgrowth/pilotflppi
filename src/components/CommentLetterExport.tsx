@@ -3,6 +3,8 @@ import { FileDown, Printer } from "lucide-react";
 import type { Finding } from "@/components/FindingCard";
 import { getDisciplineLabel, getCountyLabel, DISCIPLINE_ORDER } from "@/lib/county-utils";
 import { getCountyRequirements, getSupplementalSectionLabel, type CountyRequirements, type SupplementalSection } from "@/lib/county-requirements";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 export interface FirmInfo {
   firm_name: string;
@@ -15,6 +17,7 @@ export interface FirmInfo {
 }
 
 interface CommentLetterExportProps {
+  projectId?: string;
   projectName: string;
   address: string;
   county: string;
@@ -353,6 +356,16 @@ function printViaIframe(html: string) {
   };
 }
 
+async function persistToStorage(html: string, projectId: string | undefined, filename: string) {
+  if (!projectId) return;
+  try {
+    const blob = new Blob([html], { type: "text/html" });
+    await supabase.storage.from("documents").upload(`projects/${projectId}/${filename}`, blob, { upsert: true });
+  } catch {
+    // silent — download still works even if storage save fails
+  }
+}
+
 export function CommentLetterExport(props: CommentLetterExportProps) {
   const handlePrint = () => {
     const html = buildLetterHTML(props);
@@ -361,13 +374,16 @@ export function CommentLetterExport(props: CommentLetterExportProps) {
 
   const handleDownloadHTML = () => {
     const html = buildLetterHTML(props);
+    const filename = `Comment-Letter-R${props.round}-${props.projectName.replace(/\s+/g, "_")}.html`;
     const blob = new Blob([html], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `Comment-Letter-R${props.round}-${props.projectName.replace(/\s+/g, "_")}.html`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+    // Also persist to storage
+    persistToStorage(html, props.projectId, filename);
   };
 
   return (
