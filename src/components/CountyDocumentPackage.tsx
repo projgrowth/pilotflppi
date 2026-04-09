@@ -12,6 +12,7 @@ import type { Finding } from "@/components/FindingCard";
 import { getCountyRequirements, getSupplementalSectionLabel, type SupplementalSection } from "@/lib/county-requirements";
 import { CommentLetterExport, type FirmInfo } from "@/components/CommentLetterExport";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 interface CountyDocumentPackageProps {
   projectId?: string;
@@ -24,6 +25,7 @@ interface CountyDocumentPackageProps {
   findings: Finding[];
   findingStatuses: Record<number, string>;
   firmInfo?: FirmInfo | null;
+  onDocumentGenerated?: () => void;
 }
 
 function buildProductChecklistHTML(props: CountyDocumentPackageProps): string {
@@ -113,17 +115,32 @@ function buildInspectionReadinessHTML(props: CountyDocumentPackageProps): string
 </body></html>`;
 }
 
-function downloadHTML(html: string, filename: string, projectId?: string) {
-  const blob = new Blob([html], { type: "text/html" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-  // Also persist to storage
+function printViaIframe(html: string) {
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.left = "-9999px";
+  iframe.style.top = "-9999px";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  document.body.appendChild(iframe);
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!doc) { document.body.removeChild(iframe); return; }
+  doc.open();
+  doc.write(html);
+  doc.close();
+  iframe.onload = () => {
+    setTimeout(() => {
+      iframe.contentWindow?.print();
+      setTimeout(() => document.body.removeChild(iframe), 1000);
+    }, 300);
+  };
+}
+
+async function persistAndNotify(html: string, filename: string, projectId?: string, onDone?: () => void) {
   if (projectId) {
-    supabase.storage.from("documents").upload(`projects/${projectId}/${filename}`, blob, { upsert: true }).catch(() => {});
+    const blob = new Blob([html], { type: "text/html" });
+    await supabase.storage.from("documents").upload(`projects/${projectId}/${filename}`, blob, { upsert: true }).catch(() => {});
+    onDone?.();
   }
 }
 
@@ -134,19 +151,23 @@ export function CountyDocumentPackage(props: CountyDocumentPackageProps) {
 
   const handleDownloadProductChecklist = () => {
     const html = buildProductChecklistHTML(props);
-    downloadHTML(html, `Product-Checklist-${safeName}.html`, props.projectId);
+    printViaIframe(html);
+    toast.info('Select "Save as PDF" in the print dialog to download.');
+    persistAndNotify(html, `Product-Checklist-${safeName}.html`, props.projectId, props.onDocumentGenerated);
   };
 
   const handleDownloadInspectionPacket = () => {
     const html = buildInspectionReadinessHTML(props);
-    downloadHTML(html, `Inspection-Readiness-${safeName}.html`, props.projectId);
+    printViaIframe(html);
+    toast.info('Select "Save as PDF" in the print dialog to download.');
+    persistAndNotify(html, `Inspection-Readiness-${safeName}.html`, props.projectId, props.onDocumentGenerated);
   };
 
   const handleFullPackage = async () => {
     setDownloading(true);
     try {
       handleDownloadProductChecklist();
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 500));
       handleDownloadInspectionPacket();
     } finally {
       setDownloading(false);
@@ -155,7 +176,7 @@ export function CountyDocumentPackage(props: CountyDocumentPackageProps) {
 
   return (
     <div className="flex items-center gap-1.5">
-      <CommentLetterExport {...props} />
+      <CommentLetterExport {...props} onDocumentGenerated={props.onDocumentGenerated} />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

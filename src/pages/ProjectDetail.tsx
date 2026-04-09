@@ -4,6 +4,19 @@ import { useProjectActivityLog, getEventColor } from "@/hooks/useActivityLog";
 import { usePlanReviewFilesByProject } from "@/hooks/usePlanReviewFiles";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
+
+/** Extract the relative storage path from a full Supabase URL or return as-is */
+function getRelativeStoragePath(filePath: string): string {
+  const markers = [
+    "/storage/v1/object/public/documents/",
+    "/storage/v1/object/documents/",
+  ];
+  for (const marker of markers) {
+    const idx = filePath.indexOf(marker);
+    if (idx !== -1) return decodeURIComponent(filePath.substring(idx + marker.length));
+  }
+  return filePath;
+}
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/StatusChip";
@@ -110,22 +123,28 @@ export default function ProjectDetail() {
       items.push({ key: `storage-${doc.name}`, name: doc.name, date: doc.created_at, source: "upload", storagePath: `projects/${id}/${doc.name}`, category: cat });
     }
     for (const f of planReviewFiles || []) {
-      const fileName = f.file_path.split("/").pop() || f.file_path;
-      items.push({ key: `prf-${f.id}`, name: `R${f.round} — ${fileName}`, date: f.uploaded_at, source: "plan-review", storagePath: f.file_path, category: "plan-review" });
+      const relativePath = getRelativeStoragePath(f.file_path);
+      const fileName = relativePath.split("/").pop() || relativePath;
+      items.push({ key: `prf-${f.id}`, name: `R${f.round} — ${decodeURIComponent(fileName)}`, date: f.uploaded_at, source: "plan-review", storagePath: relativePath, category: "plan-review" });
     }
     items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return items;
   })();
 
   const handleDownloadDoc = async (storagePath: string, displayName: string) => {
-    const { data, error } = await supabase.storage.from("documents").download(storagePath);
-    if (error) { toast.error(error.message); return; }
-    const url = URL.createObjectURL(data);
+    // Use signed URL since the documents bucket is private
+    const { data: signedData, error: signError } = await supabase.storage
+      .from("documents")
+      .createSignedUrl(storagePath, 3600);
+    if (signError || !signedData?.signedUrl) {
+      toast.error(signError?.message || "Could not generate download link");
+      return;
+    }
     const a = document.createElement("a");
-    a.href = url;
+    a.href = signedData.signedUrl;
     a.download = displayName;
+    a.target = "_blank";
     a.click();
-    URL.revokeObjectURL(url);
   };
 
   const handleUpload = async (files: FileList | null) => {
@@ -198,13 +217,23 @@ export default function ProjectDetail() {
             <Button variant="outline" size="sm" className="text-xs" onClick={() => fileInputRef.current?.click()}>
               <Upload className="h-3.5 w-3.5 mr-1" /> Upload
             </Button>
-            <Button
-              size="sm"
-              className="text-xs bg-accent text-accent-foreground hover:bg-accent/90"
-              onClick={() => navigate("/plan-review")}
-            >
-              <ClipboardCheck className="h-3.5 w-3.5 mr-1" /> Review
-            </Button>
+            {reviews && reviews.length > 0 ? (
+              <Button
+                size="sm"
+                className="text-xs bg-accent text-accent-foreground hover:bg-accent/90"
+                onClick={() => navigate(`/plan-review/${reviews[0].id}`)}
+              >
+                <ClipboardCheck className="h-3.5 w-3.5 mr-1" /> Review
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                className="text-xs bg-accent text-accent-foreground hover:bg-accent/90"
+                onClick={() => navigate("/plan-review")}
+              >
+                <ClipboardCheck className="h-3.5 w-3.5 mr-1" /> Review
+              </Button>
+            )}
             <StatusChip status={project.status} />
           </div>
         }
@@ -398,7 +427,7 @@ export default function ProjectDetail() {
                           <div
                             key={r.id}
                             className="flex items-center justify-between rounded-lg border p-3 hover:bg-muted/30 cursor-pointer transition-colors"
-                            onClick={() => navigate("/plan-review")}
+                            onClick={() => navigate(`/plan-review/${r.id}`)}
                           >
                             <div className="flex items-center gap-3">
                               <Badge variant="secondary" className="text-xs">R{r.round}</Badge>

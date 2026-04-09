@@ -366,31 +366,29 @@ async function persistToStorage(html: string, projectId: string | undefined, fil
   }
 }
 
-export function CommentLetterExport(props: CommentLetterExportProps) {
+export function CommentLetterExport(props: CommentLetterExportProps & { onDocumentGenerated?: () => void }) {
   const handlePrint = () => {
     const html = buildLetterHTML(props);
     printViaIframe(html);
+    // Persist HTML to storage and notify
+    const filename = `Comment-Letter-R${props.round}-${props.projectName.replace(/\s+/g, "_")}.html`;
+    persistToStorage(html, props.projectId, filename).then(() => props.onDocumentGenerated?.());
   };
 
-  const handleDownloadHTML = () => {
+  const handleSaveAsPDF = () => {
     const html = buildLetterHTML(props);
+    // Use print dialog — user selects "Save as PDF" in browser
+    printViaIframe(html);
     const filename = `Comment-Letter-R${props.round}-${props.projectName.replace(/\s+/g, "_")}.html`;
-    const blob = new Blob([html], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-    // Also persist to storage
-    persistToStorage(html, props.projectId, filename);
+    persistToStorage(html, props.projectId, filename).then(() => props.onDocumentGenerated?.());
+    toast.info('In the print dialog, select "Save as PDF" as the destination to download a PDF.');
   };
 
   return (
     <div className="flex gap-2">
-      <Button size="sm" variant="outline" onClick={handleDownloadHTML} className="gap-1.5">
+      <Button size="sm" variant="outline" onClick={handleSaveAsPDF} className="gap-1.5">
         <FileDown className="h-3.5 w-3.5" />
-        Download
+        Save as PDF
       </Button>
       <Button size="sm" variant="outline" onClick={handlePrint} className="gap-1.5">
         <Printer className="h-3.5 w-3.5" />

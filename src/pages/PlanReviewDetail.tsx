@@ -943,6 +943,7 @@ export default function PlanReviewDetail() {
                             findings={findings}
                             findingStatuses={Object.fromEntries(Object.entries(findingStatuses).map(([k, v]) => [Number(k), v]))}
                             firmInfo={firmSettings}
+                            onDocumentGenerated={() => queryClient.invalidateQueries({ queryKey: ["project-documents", review.project_id] })}
                           />
                         )}
                         {hasFindings && review.qc_status !== "qc_approved" && (
