@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Building2, Users, MapPin, Plus, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/PageHeader";
 
 const defaultJurisdictions = [
   "City of Miami", "City of Miami Beach", "City of Fort Lauderdale", "City of Boca Raton",
