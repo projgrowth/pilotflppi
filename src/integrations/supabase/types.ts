@@ -172,6 +172,7 @@ export type Database = {
           email: string | null
           firm_name: string
           id: string
+          jurisdictions: Json | null
           license_number: string | null
           logo_url: string | null
           phone: string | null
@@ -185,6 +186,7 @@ export type Database = {
           email?: string | null
           firm_name?: string
           id?: string
+          jurisdictions?: Json | null
           license_number?: string | null
           logo_url?: string | null
           phone?: string | null
@@ -198,6 +200,7 @@ export type Database = {
           email?: string | null
           firm_name?: string
           id?: string
+          jurisdictions?: Json | null
           license_number?: string | null
           logo_url?: string | null
           phone?: string | null
@@ -307,6 +310,7 @@ export type Database = {
       permit_leads: {
         Row: {
           address: string
+          contractor_id: string | null
           contractor_name: string | null
           county: string
           created_at: string
@@ -319,6 +323,7 @@ export type Database = {
         }
         Insert: {
           address: string
+          contractor_id?: string | null
           contractor_name?: string | null
           county?: string
           created_at?: string
@@ -331,6 +336,7 @@ export type Database = {
         }
         Update: {
           address?: string
+          contractor_id?: string | null
           contractor_name?: string | null
           county?: string
           created_at?: string
@@ -341,7 +347,15 @@ export type Database = {
           project_value?: number | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "permit_leads_contractor_id_fkey"
+            columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "contractors"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       plan_review_files: {
         Row: {
