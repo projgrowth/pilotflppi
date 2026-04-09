@@ -6,8 +6,9 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/EmptyState";
 import { Users, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useForm } from "react-hook-form";
@@ -87,13 +88,15 @@ export default function Contractors() {
   };
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-medium">Contractors</h1>
-        <Button className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={openAdd}>+ Add Contractor</Button>
-      </div>
+    <div className="p-8 md:p-10 max-w-7xl">
+      <PageHeader
+        title="Contractors"
+        actions={
+          <Button className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={openAdd}>+ Add Contractor</Button>
+        }
+      />
 
-      <Card className="shadow-subtle border">
+      <Card className="shadow-subtle">
         {isLoading ? (
           <div className="divide-y">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -107,11 +110,13 @@ export default function Contractors() {
             ))}
           </div>
         ) : (contractors || []).length === 0 ? (
-          <div className="flex flex-col items-center py-16">
-            <Users className="h-10 w-10 text-muted-foreground/40 mb-3" />
-            <h3 className="text-sm font-medium">No contractors yet</h3>
-            <p className="text-xs text-muted-foreground mt-1">Add your first contractor to get started</p>
-          </div>
+          <EmptyState
+            icon={Users}
+            title="No contractors yet"
+            description="Add your first contractor to get started"
+            actionLabel="Add Contractor"
+            onAction={openAdd}
+          />
         ) : (
           <div className="divide-y">
             {(contractors || []).map((c) => (
@@ -141,7 +146,6 @@ export default function Contractors() {
         )}
       </Card>
 
-      {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>

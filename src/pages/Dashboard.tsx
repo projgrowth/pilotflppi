@@ -226,17 +226,9 @@ export default function Dashboard() {
           <Plus className="h-4 w-4 mr-2" />
           New Intake
         </Button>
-        <Button variant="outline" size="sm" onClick={() => navigate("/inspections")}>
-          <CalendarPlus className="h-4 w-4 mr-1.5" />
-          Schedule Inspection
-        </Button>
         <Button variant="outline" size="sm" onClick={() => navigate("/plan-review")}>
           <Sparkles className="h-4 w-4 mr-1.5" />
           Run AI Check
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => navigate("/lead-radar")}>
-          <Radar className="h-4 w-4 mr-1.5" />
-          Find Leads
         </Button>
       </div>
 

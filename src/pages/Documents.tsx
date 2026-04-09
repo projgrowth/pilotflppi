@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/EmptyState";
 import { FileText, Upload, Download, Trash2, File, Image, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -155,7 +156,7 @@ export default function Documents() {
       </div>
 
       {/* File list */}
-      <Card className="shadow-subtle border">
+      <Card className="shadow-subtle">
         {isLoading ? (
           <div className="divide-y">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -169,11 +170,11 @@ export default function Documents() {
             ))}
           </div>
         ) : (files || []).length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <FileText className="h-10 w-10 text-muted-foreground/40 mb-3" />
-            <h3 className="text-sm font-medium">No documents yet</h3>
-            <p className="text-xs text-muted-foreground mt-1">Upload plans, certificates, and reports</p>
-          </div>
+          <EmptyState
+            icon={FileText}
+            title="No documents yet"
+            description="Upload plans, certificates, and reports"
+          />
         ) : (
           <div className="divide-y">
             {(files || []).map((file) => {

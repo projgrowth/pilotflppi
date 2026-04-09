@@ -5,6 +5,8 @@ import { callAI } from "@/lib/ai";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/EmptyState";
 import { Radar, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -73,7 +75,6 @@ export default function LeadRadar() {
       setEmailContent(result);
       setEmailDialogOpen(true);
 
-      // Update outreach status
       if (lead.outreach_status === "new") {
         await supabase.from("permit_leads").update({ outreach_status: "contacted" }).eq("id", lead.id);
         queryClient.invalidateQueries({ queryKey: ["permit-leads"] });
@@ -86,10 +87,10 @@ export default function LeadRadar() {
   };
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl">
-      <h1 className="text-2xl font-medium mb-6">Lead Radar</h1>
+    <div className="p-8 md:p-10 max-w-7xl">
+      <PageHeader title="Lead Radar" subtitle="Permit leads detected from public filings" />
 
-      <Card className="shadow-subtle border">
+      <Card className="shadow-subtle">
         {isLoading ? (
           <div className="divide-y">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -102,11 +103,11 @@ export default function LeadRadar() {
             ))}
           </div>
         ) : (leads || []).length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <Radar className="h-10 w-10 text-muted-foreground/40 mb-3" />
-            <h3 className="text-sm font-medium">No permit leads detected</h3>
-            <p className="text-xs text-muted-foreground mt-1">New leads will appear here as permits are detected</p>
-          </div>
+          <EmptyState
+            icon={Radar}
+            title="No permit leads detected"
+            description="New leads will appear here as permits are detected"
+          />
         ) : (
           <div className="divide-y">
             {(leads || []).map((lead) => (
@@ -142,7 +143,6 @@ export default function LeadRadar() {
         )}
       </Card>
 
-      {/* Email preview */}
       <Dialog open={emailDialogOpen} onOpenChange={setEmailDialogOpen}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>

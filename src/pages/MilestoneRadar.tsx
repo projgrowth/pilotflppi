@@ -5,6 +5,8 @@ import { callAI } from "@/lib/ai";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { PageHeader } from "@/components/PageHeader";
+import { EmptyState } from "@/components/EmptyState";
 import { Building2, Mail, Phone, Loader2, AlertTriangle, Clock, CheckCircle2 } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
 import { toast } from "sonner";
@@ -77,8 +79,8 @@ export default function MilestoneRadar() {
   };
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl">
-      <h1 className="text-2xl font-medium mb-6">Milestone Radar</h1>
+    <div className="p-8 md:p-10 max-w-7xl">
+      <PageHeader title="Milestone Radar" subtitle="Track building milestone inspection deadlines" />
 
       {isLoading ? (
         <div className="grid gap-4 md:grid-cols-2">
@@ -87,18 +89,18 @@ export default function MilestoneRadar() {
           ))}
         </div>
       ) : (buildings || []).length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <Building2 className="h-12 w-12 text-muted-foreground/30 mb-4" />
-          <h2 className="text-lg font-medium">No milestone buildings tracked</h2>
-          <p className="text-sm text-muted-foreground mt-1">Add buildings to monitor their milestone inspection deadlines</p>
-        </div>
+        <EmptyState
+          icon={Building2}
+          title="No milestone buildings tracked"
+          description="Add buildings to monitor their milestone inspection deadlines"
+        />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {(buildings || []).map((b) => {
             const status = getStatusInfo(b);
             const StatusIcon = status.icon;
             return (
-              <Card key={b.id} className={cn("shadow-subtle border", b.status === "overdue" && "border-destructive/30")}>
+              <Card key={b.id} className={cn("shadow-subtle", b.status === "overdue" && "border-destructive/30")}>
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between mb-3">
                     <div>
@@ -148,7 +150,6 @@ export default function MilestoneRadar() {
         </div>
       )}
 
-      {/* Email preview dialog */}
       <Dialog open={emailDialogOpen} onOpenChange={setEmailDialogOpen}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>

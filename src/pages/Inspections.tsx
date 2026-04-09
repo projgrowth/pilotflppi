@@ -233,7 +233,7 @@ export default function Inspections() {
 
           {selectedInspection && (
             <div className="mt-6 space-y-6">
-              <Card className="shadow-subtle border">
+              <Card className="shadow-subtle">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-xs uppercase tracking-widest text-muted-foreground">Project Brief</CardTitle>
                 </CardHeader>

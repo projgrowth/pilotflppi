@@ -136,7 +136,7 @@ export default function SettingsPage() {
         </TabsList>
 
         <TabsContent value="profile">
-          <Card className="shadow-subtle border">
+          <Card className="shadow-subtle">
             <CardHeader>
               <CardTitle className="text-base">Your Profile</CardTitle>
             </CardHeader>
@@ -175,7 +175,7 @@ export default function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="firm">
-          <Card className="shadow-subtle border">
+          <Card className="shadow-subtle">
             <CardHeader>
               <CardTitle className="text-base">Firm Information</CardTitle>
             </CardHeader>
@@ -238,7 +238,7 @@ export default function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="jurisdictions">
-          <Card className="shadow-subtle border">
+          <Card className="shadow-subtle">
             <CardHeader>
               <CardTitle className="text-base">Jurisdictions</CardTitle>
             </CardHeader>
