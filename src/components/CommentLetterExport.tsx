@@ -153,7 +153,8 @@ function buildSupplementalSections(config: CountyRequirements): string {
 }
 
 function buildLetterHTML(props: CommentLetterExportProps): string {
-  const { projectName, address, county, jurisdiction, tradeType, round, findings, findingStatuses } = props;
+  const { projectName, address, county, jurisdiction, tradeType, round, findings, findingStatuses, firmInfo } = props;
+  const firm = firmInfo || { firm_name: "FLORIDA PRIVATE PROVIDERS", license_number: "PVP-XXXXX", email: "", phone: "", address: "", logo_url: "", closing_language: "" };
   const config = getCountyRequirements(county);
   const date = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
   const grouped = groupByDiscipline(findings);
