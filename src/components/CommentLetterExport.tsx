@@ -304,7 +304,7 @@ ${buildSupplementalSections(config)}
   
   ${config.amendments.length > 0 ? `<p class="body-text">This review incorporates ${config.label} County local amendments to the Florida Building Code, 8th Edition (2023), including: ${config.amendments.map(a => a.ref).join("; ")}.</p>` : ""}
   
-  <p class="body-text">Should you have any questions regarding this comment letter, please contact our office at your earliest convenience.</p>
+  ${firm.closing_language ? `<p class="body-text">${firm.closing_language}</p>` : '<p class="body-text">Should you have any questions regarding this comment letter, please contact our office at your earliest convenience.</p>'}
   
   <p class="body-text">Respectfully submitted,</p>
 </div>
@@ -312,13 +312,13 @@ ${buildSupplementalSections(config)}
 <div class="signature-block">
   <div class="signature-line">
     Plan Review Engineer<br>
-    Florida Private Providers, Inc.<br>
-    License # PVP-XXXXX
+    ${firm.firm_name || "Florida Private Providers, Inc."}<br>
+    License # ${firm.license_number || "PVP-XXXXX"}
   </div>
 </div>
 
 <div class="footer">
-  Florida Private Providers, Inc. | Licensed Private Provider under F.S. 553.791 | This document is confidential and intended for the addressee only.
+  ${firm.firm_name || "Florida Private Providers, Inc."} | Licensed Private Provider under F.S. 553.791 | This document is confidential and intended for the addressee only.
 </div>
 
 </body></html>`;
