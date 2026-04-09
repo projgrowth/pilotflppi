@@ -188,11 +188,12 @@ export default function Documents() {
                       {file.metadata?.size ? formatSize(file.metadata.size) : "—"} · {format(new Date(file.created_at), "MMM d, yyyy")}
                     </p>
                   </div>
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => downloadFile(file.name)}>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => downloadFile(file)}>
                     <Download className="h-3.5 w-3.5" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => deleteFile(file.name)}>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => deleteFile(file.displayPath)}>
                     <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
                   </Button>
                 </div>
               );
