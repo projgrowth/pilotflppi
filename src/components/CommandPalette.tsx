@@ -12,13 +12,14 @@ import {
 } from "@/components/ui/command";
 import {
   LayoutDashboard, FolderKanban, ClipboardCheck,
-  Building2, Radar, Users, Settings,
+  Building2, Radar, Users, Settings, Receipt,
   Sparkles,
 } from "lucide-react";
 
 const navItems = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
   { label: "Projects", path: "/projects", icon: FolderKanban },
+  { label: "Invoices", path: "/invoices", icon: Receipt },
   { label: "Inspections", path: "/inspections", icon: ClipboardCheck },
   { label: "Contractors", path: "/contractors", icon: Users },
   { label: "Lead Radar", path: "/lead-radar", icon: Radar },

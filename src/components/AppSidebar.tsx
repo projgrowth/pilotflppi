@@ -12,6 +12,7 @@ import {
   LogOut,
   Search,
   PanelLeftClose,
+  Receipt,
   PanelLeftOpen,
   Sparkles,
 } from "lucide-react";
@@ -32,6 +33,7 @@ interface NavItem {
 const coreNav: NavItem[] = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
   { label: "Projects", path: "/projects", icon: FolderKanban },
+  { label: "Invoices", path: "/invoices", icon: Receipt },
   { label: "Inspections", path: "/inspections", icon: ClipboardCheck },
   { label: "Contractors", path: "/contractors", icon: Users },
 ];

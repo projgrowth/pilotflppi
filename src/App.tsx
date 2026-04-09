@@ -18,6 +18,7 @@ import Contractors from "./pages/Contractors";
 import SettingsPage from "./pages/Settings";
 import ProjectDetail from "./pages/ProjectDetail";
 import NotFound from "./pages/NotFound";
+import Invoices from "./pages/Invoices";
 
 const queryClient = new QueryClient();
 
@@ -53,6 +54,7 @@ const App = () => (
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/projects" element={<Projects />} />
               <Route path="/projects/:id" element={<ProjectDetail />} />
+              <Route path="/invoices" element={<Invoices />} />
               <Route path="/plan-review/:id" element={<PlanReviewDetail />} />
               <Route path="/inspections" element={<Inspections />} />
               <Route path="/lead-radar" element={<LeadRadar />} />
