@@ -206,11 +206,18 @@ export default function PlanReviewDetail() {
 
   const updateFindingStatus = useCallback((index: number, status: FindingStatus) => {
     setFindingStatuses((prev) => {
+      const oldStatus = prev[index] || "open";
       const next = { ...prev, [index]: status };
-      if (review) persistFindingStatuses(review.id, next);
+      if (review) {
+        persistFindingStatuses(review.id, next);
+        if (user && oldStatus !== status) {
+          logFindingStatusChange(review.id, index, oldStatus, status, user.id)
+            .then(() => refetchHistory());
+        }
+      }
       return next;
     });
-  }, [review, persistFindingStatuses]);
+  }, [review, persistFindingStatuses, user, refetchHistory]);
 
   useEffect(() => {
     if (!aiRunning) { setScanStep(0); return; }
