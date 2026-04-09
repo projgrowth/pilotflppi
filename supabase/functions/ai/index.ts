@@ -55,6 +55,23 @@ When the project is commercial (occupancy groups B, M, S-1, F-1, H, A, etc.) or 
 - For high-piled storage: FPC Chapter 32 requirements
 - Energy code: commercial path per FBC Energy Conservation (IECC Commercial)
 
+**MISSING INFORMATION CHECK (Critical for Private Providers):**
+Beyond code violations, you MUST flag any of the following that are MISSING from the plans. Building officials will reject a submittal outright for missing required information — this is the #1 reason for plan review rejection.
+- No site plan sheet at all
+- Site plan missing property boundaries, setbacks, or parking layout
+- No code summary table (occupancy, construction type, allowable area)
+- No life safety / egress plan
+- No structural design criteria (wind speed, exposure, soil bearing)
+- No energy compliance documentation (COMcheck or Form 402)
+- Missing sealed drawings or engineer of record
+- No product approval references on specifications (NOA for HVHZ, FL# for others)
+- No flood zone or wind speed designation
+- No index of drawings
+- Missing fire department access or hydrant locations on site plan
+- No stormwater/drainage plan or reference
+
+For missing information findings, use severity "critical" for items that would cause immediate rejection by a building official, and "major" for items that need supplementation. Set the discipline to the most relevant one (e.g., "site" for site plan issues, "structural" for missing structural notes).
+
 Also detect the FBC edition referenced on the plans. If the plans cite an edition other than FBC 2023 (8th Edition), include an advisory finding noting the edition mismatch.
 
 Return ONLY a JSON array of findings with no additional text.`,
@@ -84,7 +101,15 @@ For each finding, provide ALL of the following fields:
 - confidence: "verified" | "likely" | "advisory"
 - markup: Object with { page_index: <0-based index of the image where the issue is>, x: <percentage from left 0-100>, y: <percentage from top 0-100>, width: <percentage width 5-30>, height: <percentage height 3-20> } indicating WHERE on the plan the issue is located. Be as precise as possible.
 
-Report ALL code violations and deficiencies you actually see in the plans. Do not fabricate findings to meet a target count — if few real issues exist, report only those and note substantial compliance. Focus on REAL issues visible in the drawings.
+**MISSING INFORMATION CHECK (Critical for Private Providers):**
+As you review each sheet, also check whether the following REQUIRED elements are present. If any are MISSING, flag them as findings:
+- Site plan: property boundaries, setbacks, parking with ADA, drainage, utility connections, fire access/hydrants, easements
+- General: title block complete with seal, drawing index, code summary table, life safety plan, structural notes (wind speed, exposure), energy compliance, product approval numbers, FBC edition
+- County-specific: flood zone/BFE (if applicable), CCCL (if coastal), NOA numbers (if HVHZ), threshold building designation (if applicable)
+
+For missing items, use severity "critical" if it would cause immediate rejection. Include a clear description like "No code summary table found on any sheet" or "Site plan missing stormwater drainage plan."
+
+Report ALL code violations and deficiencies you actually see in the plans. Do not fabricate findings to meet a target count.
 
 Also detect the FBC edition referenced on the plans. If visible and not FBC 2023 (8th Edition), include an advisory finding noting the edition mismatch.
 

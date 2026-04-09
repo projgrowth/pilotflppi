@@ -85,3 +85,45 @@ export const SCANNING_STEPS = [
   { discipline: "ada", label: "ADA Compliance" },
   { discipline: "site", label: "Site & Civil" },
 ];
+
+/* ── Site Plan Completeness Required Elements ── */
+
+export interface CompletenessItem {
+  id: string;
+  label: string;
+  category: "site_plan" | "general";
+  required: boolean;
+  /** Only show when county matches a condition */
+  condition?: "hvhz" | "coastal" | "flood" | "threshold" | null;
+}
+
+export const SITE_PLAN_REQUIRED_ELEMENTS: CompletenessItem[] = [
+  { id: "sp-legal", label: "Legal description and survey data", category: "site_plan", required: true },
+  { id: "sp-boundaries", label: "Property boundaries with dimensions", category: "site_plan", required: true },
+  { id: "sp-setbacks", label: "Setback lines shown and dimensioned", category: "site_plan", required: true },
+  { id: "sp-structures", label: "Existing/proposed structures with distances to property lines", category: "site_plan", required: true },
+  { id: "sp-parking", label: "Parking layout with ADA spaces, counts, and dimensions", category: "site_plan", required: true },
+  { id: "sp-driveways", label: "Driveway locations and sight triangles", category: "site_plan", required: true },
+  { id: "sp-drainage", label: "Stormwater/drainage plan or reference", category: "site_plan", required: true },
+  { id: "sp-utilities", label: "Utility connections (water, sewer, electric)", category: "site_plan", required: true },
+  { id: "sp-easements", label: "Easements and right-of-way lines", category: "site_plan", required: true },
+  { id: "sp-landscape", label: "Tree survey / landscape plan (if required)", category: "site_plan", required: false },
+  { id: "sp-flood", label: "Flood zone designation and BFE (if applicable)", category: "site_plan", required: false, condition: "flood" },
+  { id: "sp-cccl", label: "CCCL line (if coastal)", category: "site_plan", required: false, condition: "coastal" },
+  { id: "sp-trash", label: "Trash enclosure location", category: "site_plan", required: true },
+  { id: "sp-fire-access", label: "Fire department access and hydrant locations", category: "site_plan", required: true },
+];
+
+export const GENERAL_PLAN_REQUIRED_ELEMENTS: CompletenessItem[] = [
+  { id: "gp-title", label: "Title block complete (project name, address, architect/engineer, seal, date)", category: "general", required: true },
+  { id: "gp-index", label: "Index of drawings", category: "general", required: true },
+  { id: "gp-code-summary", label: "Code summary table (occupancy, construction type, area, height, sprinkler)", category: "general", required: true },
+  { id: "gp-life-safety", label: "Life safety plan (exit paths, occupant loads, exit widths)", category: "general", required: true },
+  { id: "gp-structural-notes", label: "Structural notes (design loads, wind speed, exposure category)", category: "general", required: true },
+  { id: "gp-energy", label: "Energy compliance form (Res: Form 402 / Comm: COMcheck)", category: "general", required: true },
+  { id: "gp-product-approvals", label: "Product approval numbers on specs (NOA/FL#)", category: "general", required: true },
+  { id: "gp-threshold", label: "Threshold building designation (if >3 stories or >50ft or >5000sqft/floor)", category: "general", required: false, condition: "threshold" },
+  { id: "gp-special-inspector", label: "Special inspector requirements noted", category: "general", required: true },
+  { id: "gp-fbc-edition", label: "FBC edition stated on plans", category: "general", required: true },
+  { id: "gp-noa", label: "Miami-Dade NOA numbers listed for all products", category: "general", required: true, condition: "hvhz" },
+];

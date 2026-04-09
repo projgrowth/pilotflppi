@@ -32,6 +32,7 @@ import { PlanMarkupViewer } from "@/components/PlanMarkupViewer";
 import { DeadlineRing } from "@/components/DeadlineRing";
 import { FindingStatusFilter, type FindingStatus } from "@/components/FindingStatusFilter";
 import { DisciplineChecklist } from "@/components/DisciplineChecklist";
+import { SitePlanChecklist } from "@/components/SitePlanChecklist";
 import { CommentLetterExport } from "@/components/CommentLetterExport";
 import { CountyDocumentPackage } from "@/components/CountyDocumentPackage";
 import { getCountyRequirements, getSupplementalSectionLabel } from "@/lib/county-requirements";
@@ -75,7 +76,7 @@ interface PlanReviewRow {
   qc_notes?: string;
 }
 
-type RightPanelMode = "findings" | "checklist" | "letter" | "county";
+type RightPanelMode = "findings" | "checklist" | "completeness" | "letter" | "county";
 
 function groupFindingsByDiscipline(findings: Finding[]): Record<string, Finding[]> {
   const groups: Record<string, Finding[]> = {};
@@ -755,7 +756,7 @@ export default function PlanReviewDetail() {
                 <Button size="icon" variant="ghost" className="h-6 w-6 mr-1" onClick={() => setRightPanelCollapsed(true)} title="Collapse panel">
                   <PanelRightClose className="h-3.5 w-3.5" />
                 </Button>
-                {(["findings", "checklist", "letter", "county"] as RightPanelMode[]).map((mode) => (
+                {(["findings", "checklist", "completeness", "letter", "county"] as RightPanelMode[]).map((mode) => (
                   <button
                     key={mode}
                     onClick={() => setRightPanel(mode)}
@@ -876,6 +877,12 @@ export default function PlanReviewDetail() {
                 {rightPanel === "checklist" && (
                   <div className="p-3">
                     <DisciplineChecklist tradeType={review.project?.trade_type || "building"} findings={findings} />
+                  </div>
+                )}
+
+                {rightPanel === "completeness" && (
+                  <div className="p-3">
+                    <SitePlanChecklist findings={findings} county={county} />
                   </div>
                 )}
 

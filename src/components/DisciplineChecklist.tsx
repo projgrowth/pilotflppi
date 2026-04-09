@@ -62,6 +62,12 @@ const CHECKLIST_TEMPLATES: Record<string, Record<Discipline, ChecklistItem[]>> =
     site: [
       { id: "si1", label: "Setback and lot coverage requirements met", codeRef: "Local Zoning", required: true },
       { id: "si2", label: "Flood zone compliance (if applicable)", codeRef: "FBC 3107", required: false },
+      { id: "si3", label: "Stormwater/drainage plan adequate", codeRef: "Local Ordinance", required: true },
+      { id: "si4", label: "Utility connections shown (water, sewer, electric)", codeRef: "FBC 3301", required: true },
+      { id: "si5", label: "Landscape buffer and tree preservation requirements", codeRef: "Local Zoning", required: false },
+      { id: "si6", label: "Fire department access road and hydrant locations", codeRef: "FFC 503", required: true },
+      { id: "si7", label: "Driveway and sight triangle clearance", codeRef: "Local DOT", required: true },
+      { id: "si8", label: "Easements and right-of-way delineated", codeRef: "Local Zoning", required: true },
     ],
   },
 };
