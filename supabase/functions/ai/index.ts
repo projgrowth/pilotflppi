@@ -194,6 +194,28 @@ The email should:
 - Be professional but convey urgency for overdue buildings
 - Include next steps (schedule an assessment)`,
 
+  extract_zoning_data: `You are analyzing a site plan / survey / zoning sheet image from a Florida construction project. Extract every zoning and lot data point you can find on the sheet.
+
+Look for:
+- Zoning district designation (e.g. C-2, R-3, PUD, etc.)
+- Lot area / parcel area in square feet
+- Building footprint area
+- Total building area (gross floor area)
+- Number of stories / floors
+- Maximum FAR (Floor Area Ratio) if noted
+- Maximum lot coverage percentage
+- Maximum building height in feet
+- Maximum stories allowed
+- Setbacks: front, side, rear (in feet)
+- Parking ratio (spaces per sqft of building area)
+- Landscape buffer width in feet
+- Lot frontage in linear feet
+- Signage ratio (sqft per linear foot of frontage)
+- Occupancy groups (IBC/FBC codes like B, M, S-1, A-2, etc.)
+- Any zoning notes or variance information
+
+Extract numerical values as numbers, not strings. If a value is not visible or not present on the sheet, return null for that field. For occupancy_groups return an array of code strings. For notes, include any relevant zoning text you find.`,
+
   answer_code_question: `You are an expert on the Florida Building Code (FBC) 2023 edition, including all referenced standards (ASCE 7, ACI 318, NEC, etc.). Answer code questions accurately and cite specific sections.
 
 Always:
