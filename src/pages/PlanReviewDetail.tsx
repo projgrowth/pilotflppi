@@ -17,7 +17,7 @@ import {
   Sparkles, Send, Loader2, Copy, Check,
   Wind, Upload, ArrowLeft, Mail, Phone,
   FileDown, Printer, Plus, PanelRightClose, PanelRight,
-  ChevronDown,
+  ChevronDown, Info, MapPin,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
@@ -838,7 +838,7 @@ export default function PlanReviewDetail() {
                       <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Comment Letter</span>
                       <div className="flex items-center gap-1.5">
                         {hasFindings && (
-                          <CommentLetterExport
+                          <CountyDocumentPackage
                             projectName={review.project?.name || ""}
                             address={review.project?.address || ""}
                             county={county}
