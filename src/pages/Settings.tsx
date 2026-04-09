@@ -2,10 +2,12 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useFirmSettings } from "@/hooks/useFirmSettings";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Building2, Users, MapPin, Plus, X, Loader2 } from "lucide-react";
@@ -39,16 +41,19 @@ export default function SettingsPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { data: profile, isLoading: profileLoading } = useProfile();
+  const { firmSettings, isLoading: firmLoading, saveFirmSettings, isSaving } = useFirmSettings();
 
   const [fullName, setFullName] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // Firm info — in a real app these would come from a firm_settings table
-  const [firmName, setFirmName] = useState("Florida Private Providers, LLC");
+  // Firm info — synced from DB
+  const [firmName, setFirmName] = useState("");
   const [firmEmail, setFirmEmail] = useState("");
   const [firmPhone, setFirmPhone] = useState("");
   const [firmAddress, setFirmAddress] = useState("");
   const [firmLicense, setFirmLicense] = useState("");
+  const [firmLogoUrl, setFirmLogoUrl] = useState("");
+  const [firmClosingLanguage, setFirmClosingLanguage] = useState("");
 
   const [jurisdictions, setJurisdictions] = useState(defaultJurisdictions);
   const [newJurisdiction, setNewJurisdiction] = useState("");
@@ -60,12 +65,20 @@ export default function SettingsPage() {
     }
   }, [profile]);
 
-  // Set email from user
+  // Sync firm settings from DB
   useEffect(() => {
-    if (user?.email && !firmEmail) {
+    if (firmSettings) {
+      setFirmName(firmSettings.firm_name || "");
+      setFirmEmail(firmSettings.email || "");
+      setFirmPhone(firmSettings.phone || "");
+      setFirmAddress(firmSettings.address || "");
+      setFirmLicense(firmSettings.license_number || "");
+      setFirmLogoUrl(firmSettings.logo_url || "");
+      setFirmClosingLanguage(firmSettings.closing_language || "");
+    } else if (!firmLoading && user?.email) {
       setFirmEmail(user.email);
     }
-  }, [user, firmEmail]);
+  }, [firmSettings, firmLoading, user]);
 
   const saveProfile = async () => {
     if (!user) return;
@@ -83,6 +96,18 @@ export default function SettingsPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSaveFirm = () => {
+    saveFirmSettings({
+      firm_name: firmName.trim(),
+      license_number: firmLicense.trim(),
+      email: firmEmail.trim(),
+      phone: firmPhone.trim(),
+      address: firmAddress.trim(),
+      logo_url: firmLogoUrl.trim(),
+      closing_language: firmClosingLanguage.trim(),
+    });
   };
 
   const addJurisdiction = () => {
@@ -154,31 +179,59 @@ export default function SettingsPage() {
               <CardTitle className="text-base">Firm Information</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Firm Name</Label>
-                  <Input value={firmName} onChange={(e) => setFirmName(e.target.value)} />
+              {firmLoading ? (
+                <div className="space-y-3">
+                  <div className="h-10 w-full rounded bg-muted animate-pulse" />
+                  <div className="h-10 w-full rounded bg-muted animate-pulse" />
                 </div>
-                <div className="space-y-2">
-                  <Label>License Number</Label>
-                  <Input value={firmLicense} onChange={(e) => setFirmLicense(e.target.value)} placeholder="PP-0001234" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Email</Label>
-                  <Input type="email" value={firmEmail} onChange={(e) => setFirmEmail(e.target.value)} placeholder="info@yourfirm.com" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Phone</Label>
-                  <Input value={firmPhone} onChange={(e) => setFirmPhone(e.target.value)} placeholder="(305) 555-1000" />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Address</Label>
-                <Input value={firmAddress} onChange={(e) => setFirmAddress(e.target.value)} placeholder="100 SE 2nd St, Suite 300, Miami, FL 33131" />
-              </div>
-              <Button className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={() => toast.success("Firm settings saved")}>
-                Save Changes
-              </Button>
+              ) : (
+                <>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Firm Name</Label>
+                      <Input value={firmName} onChange={(e) => setFirmName(e.target.value)} placeholder="Your firm name" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>License Number</Label>
+                      <Input value={firmLicense} onChange={(e) => setFirmLicense(e.target.value)} placeholder="PP-0001234" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Email</Label>
+                      <Input type="email" value={firmEmail} onChange={(e) => setFirmEmail(e.target.value)} placeholder="info@yourfirm.com" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Phone</Label>
+                      <Input value={firmPhone} onChange={(e) => setFirmPhone(e.target.value)} placeholder="(305) 555-1000" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Address</Label>
+                    <Input value={firmAddress} onChange={(e) => setFirmAddress(e.target.value)} placeholder="100 SE 2nd St, Suite 300, Miami, FL 33131" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Logo URL</Label>
+                    <Input value={firmLogoUrl} onChange={(e) => setFirmLogoUrl(e.target.value)} placeholder="https://yourdomain.com/logo.png" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Closing Language</Label>
+                    <Textarea
+                      value={firmClosingLanguage}
+                      onChange={(e) => setFirmClosingLanguage(e.target.value)}
+                      placeholder="Custom closing language for comment letters..."
+                      rows={3}
+                      className="text-sm"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Optional. Appears at the end of generated comment letters.</p>
+                  </div>
+                  <Button
+                    className="bg-accent text-accent-foreground hover:bg-accent/90"
+                    onClick={handleSaveFirm}
+                    disabled={isSaving}
+                  >
+                    {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : "Save Changes"}
+                  </Button>
+                </>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
