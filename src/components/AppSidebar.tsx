@@ -1,4 +1,4 @@
-import { useLocation, Link, useNavigate, useParams, matchPath } from "react-router-dom";
+import { useLocation, Link, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   FolderKanban,
@@ -15,13 +15,16 @@ import {
   Menu,
   LogOut,
   Search,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/contexts/AuthContext";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 interface NavItem {
   label: string;
@@ -49,39 +52,52 @@ const manageNav: NavItem[] = [
   { label: "Settings", path: "/settings", icon: Settings },
 ];
 
-function NavSection({ title, items, onNavigate }: { title: string; items: NavItem[]; onNavigate?: () => void }) {
+function NavSection({ title, items, onNavigate, collapsed }: { title: string; items: NavItem[]; onNavigate?: () => void; collapsed?: boolean }) {
   const location = useLocation();
   return (
     <div className="mb-6">
-      <p className="mb-2 px-4 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/50">
-        {title}
-      </p>
+      {!collapsed && (
+        <p className="mb-2 px-4 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/50">
+          {title}
+        </p>
+      )}
       <nav className="space-y-0.5">
         {items.map((item) => {
           const active = location.pathname.startsWith(item.path);
-          return (
+          const link = (
             <Link
               key={item.path}
               to={item.path}
               onClick={onNavigate}
               className={cn(
                 "flex items-center gap-3 mx-3 px-3 py-2 text-sm rounded-md transition-all duration-150",
+                collapsed && "justify-center px-0 mx-1",
                 active
                   ? "bg-sidebar-accent text-sidebar-primary font-medium shadow-sm"
                   : "text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
               )}
             >
               <item.icon className="h-4 w-4 shrink-0" />
-              <span>{item.label}</span>
+              {!collapsed && <span>{item.label}</span>}
             </Link>
           );
+
+          if (collapsed) {
+            return (
+              <Tooltip key={item.path} delayDuration={0}>
+                <TooltipTrigger asChild>{link}</TooltipTrigger>
+                <TooltipContent side="right" className="text-xs">{item.label}</TooltipContent>
+              </Tooltip>
+            );
+          }
+          return link;
         })}
       </nav>
     </div>
   );
 }
 
-function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+function SidebarContent({ onNavigate, collapsed, setCollapsed }: { onNavigate?: () => void; collapsed?: boolean; setCollapsed?: (v: boolean) => void }) {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
 
@@ -101,58 +117,107 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
-      {/* FPP Wordmark */}
-      <div className="px-4 py-6">
-        <Link to="/dashboard" className="block">
-          <p className="text-base font-semibold leading-tight text-white tracking-wide">Florida</p>
-          <div className="my-1 h-px w-16 bg-sidebar-primary" />
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-sidebar-primary">Private Providers</p>
+      {/* Header with branding + collapse toggle */}
+      <div className="px-4 py-6 flex items-start justify-between">
+        <Link to="/dashboard" className={cn("block", collapsed && "w-full text-center")}>
+          {collapsed ? (
+            <p className="text-sm font-bold text-sidebar-primary">FPP</p>
+          ) : (
+            <>
+              <p className="text-base font-semibold leading-tight text-white tracking-wide">Florida</p>
+              <div className="my-1 h-px w-16 bg-sidebar-primary" />
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-sidebar-primary">Private Providers</p>
+            </>
+          )}
         </Link>
-        <p className="mt-2 text-[9px] tracking-wide text-sidebar-foreground/40">License #AR92053 · Est. 1980</p>
+        {setCollapsed && !collapsed && (
+          <button
+            onClick={() => setCollapsed(true)}
+            className="mt-1 p-1 rounded hover:bg-sidebar-accent/50 text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors"
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </button>
+        )}
       </div>
+      {!collapsed && (
+        <p className="px-4 -mt-4 mb-2 text-[9px] tracking-wide text-sidebar-foreground/40">License #AR92053 · Est. 1980</p>
+      )}
+
+      {/* Expand button when collapsed */}
+      {collapsed && setCollapsed && (
+        <div className="flex justify-center mb-2">
+          <button
+            onClick={() => setCollapsed(false)}
+            className="p-1 rounded hover:bg-sidebar-accent/50 text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors"
+          >
+            <PanelLeftOpen className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto py-2">
-        <NavSection title="Operations" items={operationsNav} onNavigate={onNavigate} />
-        <NavSection title="Intelligence" items={intelligenceNav} onNavigate={onNavigate} />
-        <NavSection title="Manage" items={manageNav} onNavigate={onNavigate} />
+        <NavSection title="Operations" items={operationsNav} onNavigate={onNavigate} collapsed={collapsed} />
+        <NavSection title="Intelligence" items={intelligenceNav} onNavigate={onNavigate} collapsed={collapsed} />
+        <NavSection title="Manage" items={manageNav} onNavigate={onNavigate} collapsed={collapsed} />
       </div>
 
       {/* ⌘K hint */}
-      <div className="px-6 pb-2">
-        <button
-          onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
-          className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-[10px] text-sidebar-foreground/40 hover:text-sidebar-foreground/60 hover:bg-sidebar-accent/30 transition-colors"
-        >
-          <Search className="h-3 w-3" />
-          <span>Search</span>
-          <kbd className="ml-auto text-[9px] bg-sidebar-accent/20 px-1 rounded">⌘K</kbd>
-        </button>
-      </div>
+      {!collapsed && (
+        <div className="px-6 pb-2">
+          <button
+            onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
+            className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-[10px] text-sidebar-foreground/40 hover:text-sidebar-foreground/60 hover:bg-sidebar-accent/30 transition-colors"
+          >
+            <Search className="h-3 w-3" />
+            <span>Search</span>
+            <kbd className="ml-auto text-[9px] bg-sidebar-accent/20 px-1 rounded">⌘K</kbd>
+          </button>
+        </div>
+      )}
 
       {/* User chip */}
-      <div className="border-t border-sidebar-border p-4 space-y-1">
-        <Link
-          to="/settings"
-          onClick={onNavigate}
-          className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-sm hover:bg-sidebar-accent/50 transition-colors"
-        >
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground">
-            {initials}
+      <div className={cn("border-t border-sidebar-border p-4", collapsed && "p-2")}>
+        {collapsed ? (
+          <Tooltip delayDuration={0}>
+            <TooltipTrigger asChild>
+              <Link
+                to="/settings"
+                onClick={onNavigate}
+                className="flex justify-center rounded-md py-2 hover:bg-sidebar-accent/50 transition-colors"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground">
+                  {initials}
+                </div>
+              </Link>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="text-xs">{displayName}</TooltipContent>
+          </Tooltip>
+        ) : (
+          <div className="space-y-1">
+            <Link
+              to="/settings"
+              onClick={onNavigate}
+              className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-sm hover:bg-sidebar-accent/50 transition-colors"
+            >
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground">
+                {initials}
+              </div>
+              <div className="flex-1 text-left min-w-0">
+                <p className="truncate text-sm font-medium text-sidebar-accent-foreground">{displayName}</p>
+                <p className="text-[10px] text-sidebar-foreground/60 truncate">{email}</p>
+              </div>
+              <ChevronRight className="h-4 w-4 text-sidebar-foreground/40 shrink-0" />
+            </Link>
+            <button
+              onClick={handleSignOut}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[11px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Sign out
+            </button>
           </div>
-          <div className="flex-1 text-left min-w-0">
-            <p className="truncate text-sm font-medium text-sidebar-accent-foreground">{displayName}</p>
-            <p className="text-[10px] text-sidebar-foreground/60 truncate">{email}</p>
-          </div>
-          <ChevronRight className="h-4 w-4 text-sidebar-foreground/40 shrink-0" />
-        </Link>
-        <button
-          onClick={handleSignOut}
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[11px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
-        >
-          <LogOut className="h-3.5 w-3.5" />
-          Sign out
-        </button>
+        )}
       </div>
     </div>
   );
@@ -161,6 +226,13 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 export function AppSidebar() {
   const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("sidebar-collapsed") === "true"; } catch { return false; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem("sidebar-collapsed", String(collapsed)); } catch {}
+  }, [collapsed]);
 
   if (isMobile) {
     return (
@@ -183,8 +255,13 @@ export function AppSidebar() {
   }
 
   return (
-    <aside className="hidden md:flex w-[240px] shrink-0 h-screen sticky top-0">
-      <SidebarContent />
-    </aside>
+    <TooltipProvider>
+      <aside className={cn(
+        "hidden md:flex shrink-0 h-screen sticky top-0 transition-all duration-200",
+        collapsed ? "w-14" : "w-[240px]"
+      )}>
+        <SidebarContent collapsed={collapsed} setCollapsed={setCollapsed} />
+      </aside>
+    </TooltipProvider>
   );
 }
