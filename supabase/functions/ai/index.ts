@@ -270,8 +270,20 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  let action: string;
+  let payload: any;
   try {
-    const { action, payload } = await req.json();
+    const body = await req.json();
+    action = body.action;
+    payload = body.payload;
+  } catch {
+    return new Response(
+      JSON.stringify({ error: "Invalid or empty request body" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  try {
 
     if (!action || !SYSTEM_PROMPTS[action]) {
       return new Response(
