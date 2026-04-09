@@ -321,7 +321,7 @@ export default function ProjectDetail() {
             <TabsContent value="zoning">
               <ZoningAnalysisPanel
                 projectId={project.id}
-                initialData={(project.zoning_data as ZoningData) ?? null}
+                initialData={(project.zoning_data as unknown as ZoningData) ?? null}
                 onSaved={() => queryClient.invalidateQueries({ queryKey: ["project", id] })}
               />
             </TabsContent>
