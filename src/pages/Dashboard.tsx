@@ -349,6 +349,7 @@ export default function Dashboard() {
   const { data: projects, isLoading: projectsLoading } = useProjects();
   const { data: flagCounts } = useReviewFlagCounts();
   const { data: inspections } = useInspections();
+  const { data: revenueStats } = useRevenueStats();
 
   // KPI calculations
   const activeStatuses = ["intake", "plan_review", "comments_sent", "resubmitted"];
