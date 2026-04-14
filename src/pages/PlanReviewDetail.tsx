@@ -197,6 +197,21 @@ export default function PlanReviewDetail() {
     }
   }, [review]);
 
+  // Auto-trigger AI check for newly created pending reviews
+  const hasAutoTriggered = useRef(false);
+  useEffect(() => {
+    if (
+      review &&
+      review.ai_check_status === "pending" &&
+      review.file_urls?.length > 0 &&
+      !aiRunning &&
+      !hasAutoTriggered.current
+    ) {
+      hasAutoTriggered.current = true;
+      runAICheck(review);
+    }
+  }, [review]);
+
   const statusSaveTimer = useRef<NodeJS.Timeout | null>(null);
   const persistFindingStatuses = useCallback((reviewId: string, statuses: Record<number, FindingStatus>) => {
     if (statusSaveTimer.current) clearTimeout(statusSaveTimer.current);
