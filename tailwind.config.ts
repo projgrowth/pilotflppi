@@ -12,8 +12,9 @@ export default {
     },
     extend: {
       fontFamily: {
-        sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "sans-serif"],
-        mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "monospace"],
+        display: ['"DM Serif Display"', 'serif'],
+        sans: ['"IBM Plex Sans"', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        mono: ['"IBM Plex Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -71,6 +72,19 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        "fpp-navy": "hsl(var(--fpp-navy))",
+        "fpp-navy-mid": "hsl(var(--fpp-navy-mid))",
+        "fpp-teal": "hsl(var(--fpp-teal))",
+        "fpp-teal-dim": "hsl(var(--fpp-teal-dim))",
+        "fpp-gold": "hsl(var(--fpp-gold))",
+        "fpp-gray-100": "hsl(var(--fpp-gray-100))",
+        "fpp-gray-400": "hsl(var(--fpp-gray-400))",
+        "fpp-gray-600": "hsl(var(--fpp-gray-600))",
+        "status-critical": "hsl(var(--status-critical))",
+        "status-major": "hsl(var(--status-major))",
+        "status-minor": "hsl(var(--status-minor))",
+        "status-admin": "hsl(var(--status-admin))",
+        "status-pass": "hsl(var(--status-pass))",
       },
       borderRadius: {
         lg: "var(--radius)",

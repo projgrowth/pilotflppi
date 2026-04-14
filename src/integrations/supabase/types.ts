@@ -55,6 +55,50 @@ export type Database = {
           },
         ]
       }
+      ai_outputs: {
+        Row: {
+          confidence_score: number | null
+          correction_augmented: boolean | null
+          created_at: string | null
+          id: string
+          input_data: Json | null
+          model_version: string | null
+          prediction: string | null
+          project_id: string | null
+          severity: string | null
+        }
+        Insert: {
+          confidence_score?: number | null
+          correction_augmented?: boolean | null
+          created_at?: string | null
+          id?: string
+          input_data?: Json | null
+          model_version?: string | null
+          prediction?: string | null
+          project_id?: string | null
+          severity?: string | null
+        }
+        Update: {
+          confidence_score?: number | null
+          correction_augmented?: boolean | null
+          created_at?: string | null
+          id?: string
+          input_data?: Json | null
+          model_version?: string | null
+          prediction?: string | null
+          project_id?: string | null
+          severity?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_outputs_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contractors: {
         Row: {
           created_at: string
@@ -91,6 +135,50 @@ export type Database = {
         }
         Relationships: []
       }
+      corrections: {
+        Row: {
+          context_notes: string | null
+          corrected_value: string | null
+          correction_type: string | null
+          created_at: string | null
+          fbc_section: string | null
+          id: string
+          original_value: string | null
+          output_id: string | null
+          user_id: string
+        }
+        Insert: {
+          context_notes?: string | null
+          corrected_value?: string | null
+          correction_type?: string | null
+          created_at?: string | null
+          fbc_section?: string | null
+          id?: string
+          original_value?: string | null
+          output_id?: string | null
+          user_id: string
+        }
+        Update: {
+          context_notes?: string | null
+          corrected_value?: string | null
+          correction_type?: string | null
+          created_at?: string | null
+          fbc_section?: string | null
+          id?: string
+          original_value?: string | null
+          output_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "corrections_output_id_fkey"
+            columns: ["output_id"]
+            isOneToOne: false
+            referencedRelation: "ai_outputs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       deadline_alerts: {
         Row: {
           acknowledged: boolean
@@ -122,6 +210,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      deficiencies: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          discipline: string | null
+          fbc_section: string
+          id: string
+          is_florida_specific: boolean | null
+          severity: string | null
+          standard_comment_language: string | null
+          title: string
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          discipline?: string | null
+          fbc_section: string
+          id?: string
+          is_florida_specific?: boolean | null
+          severity?: string | null
+          standard_comment_language?: string | null
+          title: string
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          discipline?: string | null
+          fbc_section?: string
+          id?: string
+          is_florida_specific?: boolean | null
+          severity?: string | null
+          standard_comment_language?: string | null
+          title?: string
+        }
+        Relationships: []
       }
       fee_schedules: {
         Row: {
@@ -247,6 +371,35 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      flag_embeddings: {
+        Row: {
+          correction_id: string | null
+          created_at: string | null
+          embedding: string | null
+          id: string
+        }
+        Insert: {
+          correction_id?: string | null
+          created_at?: string | null
+          embedding?: string | null
+          id?: string
+        }
+        Update: {
+          correction_id?: string | null
+          created_at?: string | null
+          embedding?: string | null
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flag_embeddings_correction_id_fkey"
+            columns: ["correction_id"]
+            isOneToOne: false
+            referencedRelation: "corrections"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       inspections: {
         Row: {
@@ -724,6 +877,59 @@ export type Database = {
             columns: ["contractor_id"]
             isOneToOne: false
             referencedRelation: "contractors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      review_flags: {
+        Row: {
+          confidence: string | null
+          created_at: string | null
+          description: string | null
+          detail_ref: string | null
+          fbc_section: string | null
+          id: string
+          project_id: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          severity: string | null
+          sheet_ref: string | null
+          status: string | null
+        }
+        Insert: {
+          confidence?: string | null
+          created_at?: string | null
+          description?: string | null
+          detail_ref?: string | null
+          fbc_section?: string | null
+          id?: string
+          project_id?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          severity?: string | null
+          sheet_ref?: string | null
+          status?: string | null
+        }
+        Update: {
+          confidence?: string | null
+          created_at?: string | null
+          description?: string | null
+          detail_ref?: string | null
+          fbc_section?: string | null
+          id?: string
+          project_id?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          severity?: string | null
+          sheet_ref?: string | null
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "review_flags_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
             referencedColumns: ["id"]
           },
         ]

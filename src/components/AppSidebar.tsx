@@ -33,14 +33,17 @@ interface NavItem {
 const coreNav: NavItem[] = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
   { label: "Projects", path: "/projects", icon: FolderKanban },
-  { label: "Invoices", path: "/invoices", icon: Receipt },
+  { label: "Plan Review", path: "/review", icon: Search },
   { label: "Inspections", path: "/inspections", icon: ClipboardCheck },
-  { label: "Contractors", path: "/contractors", icon: Users },
+  { label: "Documents", path: "/documents", icon: Receipt },
+  { label: "Jurisdictions", path: "/jurisdictions", icon: Building2 },
+  { label: "Deficiencies", path: "/deficiencies", icon: Radar },
 ];
 
 const toolsNav: NavItem[] = [
-  { label: "Lead Radar", path: "/lead-radar", icon: Radar },
-  { label: "Milestone Radar", path: "/milestone-radar", icon: Building2 },
+  { label: "Invoices", path: "/invoices", icon: Receipt },
+  { label: "Analytics", path: "/analytics", icon: Settings },
+  { label: "Contractors", path: "/contractors", icon: Users },
   { label: "Settings", path: "/settings", icon: Settings },
 ];
 

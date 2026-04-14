@@ -19,6 +19,12 @@ import SettingsPage from "./pages/Settings";
 import ProjectDetail from "./pages/ProjectDetail";
 import NotFound from "./pages/NotFound";
 import Invoices from "./pages/Invoices";
+import Review from "./pages/Review";
+import ReviewDetail from "./pages/ReviewDetail";
+import DocumentsGen from "./pages/DocumentsGen";
+import Deficiencies from "./pages/Deficiencies";
+import Analytics from "./pages/Analytics";
+import Jurisdictions from "./pages/Jurisdictions";
 
 const queryClient = new QueryClient();
 
@@ -55,8 +61,14 @@ const App = () => (
               <Route path="/projects" element={<Projects />} />
               <Route path="/projects/:id" element={<ProjectDetail />} />
               <Route path="/invoices" element={<Invoices />} />
+              <Route path="/review" element={<Review />} />
+              <Route path="/review/:id" element={<ReviewDetail />} />
               <Route path="/plan-review/:id" element={<PlanReviewDetail />} />
               <Route path="/inspections" element={<Inspections />} />
+              <Route path="/documents" element={<DocumentsGen />} />
+              <Route path="/deficiencies" element={<Deficiencies />} />
+              <Route path="/analytics" element={<Analytics />} />
+              <Route path="/jurisdictions" element={<Jurisdictions />} />
               <Route path="/lead-radar" element={<LeadRadar />} />
               <Route path="/milestone-radar" element={<MilestoneRadar />} />
               <Route path="/contractors" element={<Contractors />} />
@@ -65,8 +77,7 @@ const App = () => (
 
             {/* Redirects for removed routes */}
             <Route path="/deadlines" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/plan-review" element={<Navigate to="/projects" replace />} />
-            <Route path="/documents" element={<Navigate to="/projects" replace />} />
+            <Route path="/plan-review" element={<Navigate to="/review" replace />} />
             <Route path="/ai-briefing" element={<Navigate to="/dashboard" replace />} />
 
             <Route path="*" element={<NotFound />} />
