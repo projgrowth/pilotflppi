@@ -1,68 +1,26 @@
 
 
-# Remaining Work — Sequential Execution Plan
+# Plan: Switch to Sans-Serif Headers + Green/White Color Refresh
 
-## Status Check: What's Done
+## What Changes
 
-Prompts 1–9 and 14–15 from the suite are implemented. The billing module (fee schedules, invoices, invoice editor, billing tab, dashboard KPIs) is complete. All routes are wired and auth-protected.
+### 1. Remove DM Serif Display, use IBM Plex Sans for all text
+- Remove the DM Serif Display Google Font import
+- Change `h1, h2, h3` from `font-family: var(--font-display)` to `font-family: var(--font-sans)` with `font-weight: 600`
+- Update `tailwind.config.ts` to remove the `display` font family (or point it to IBM Plex Sans)
+- Keep IBM Plex Sans and IBM Plex Mono as-is
 
-## What Remains
+### 2. Shift palette toward green & white
+Current primary is teal (`180 80% 27%` — dark cyan-green). Adjust to a cleaner green/white feel:
+- **Background**: Brighten to pure white (`0 0% 100%`) instead of the current off-white (`216 25% 97%`)
+- **Primary**: Shift from dark teal to a fresher green (e.g. `160 60% 38%` — a clean mid-green)
+- **Sidebar**: Keep dark navy but update `--sidebar-primary` to match the new green
+- **Ring/focus**: Match new green
+- **Accent (gold)**: Keep or soften slightly — it pairs well with green
 
-Three categories: **security fixes**, **UI polish gaps**, and **functional completeness**.
+### 3. Files touched
+- `src/index.css` — font import, heading styles, color token values
+- `tailwind.config.ts` — `fontFamily.display` update
 
----
-
-## Execution Order
-
-### Step 1 — Fix AI Edge Function Auth (Security Error)
-The `ai` edge function has no JWT validation — anyone with the anon key can burn AI credits. Fix:
-- In `supabase/functions/ai/index.ts`: extract `Authorization` header, validate user via `supabase.auth.getUser()`, reject if unauthenticated.
-- In `src/lib/ai.ts` (`streamAI`): replace the anon key with the user's session access token from `supabase.auth.getSession()`.
-
-### Step 2 — Fix Storage Bucket RLS (Security Error)
-The `documents` bucket lets any authenticated user read/delete any file. Fix via migration:
-- Drop existing permissive storage policies on `documents` bucket.
-- Create path-based ownership policies: users can only access files under their own `user_id/` prefix using `storage.foldername(name)`.
-- Update upload code to prefix file paths with `user.id`.
-
-### Step 3 — Enhance Document Generator (Prompt 10 gaps)
-Current `DocumentsGen.tsx` is a stub with cards but no actual generation. Add:
-- Pre-flight checklist dialog showing populated vs missing fields when "Generate" is clicked.
-- Comment Letter generation: pull `review_flags` for selected project, organize by discipline, render formatted HTML preview.
-- Copy-to-clipboard and basic "Download" action for generated content.
-
-### Step 4 — Enhance Deficiencies Page (Prompt 11 gaps)
-Current page works but missing:
-- "Add to Active Review" popover that lets user pick a project and INSERTs a `review_flags` row from the deficiency data.
-- Residential/Commercial filter toggle.
-- Item count badge showing filtered results count.
-
-### Step 5 — Enhance Analytics Page (Prompt 12 gaps)
-Verify all 5 charts render with real data hooks. Add:
-- Date range selector (30d / 90d / 12mo / All Time) that filters chart data.
-- Human Correction Rate table at bottom with color-coded HCR% column.
-- Review Pipeline Funnel chart (stage counts as descending bars).
-
-### Step 6 — Seed Jurisdictions Data (Prompt 13 gap)
-Check if the 12 jurisdiction rows from the prompt suite were seeded. If not, create a migration to INSERT them. Verify the Jurisdictions page displays all fields (wind zone tags, flood zone, portal links, registration status badges).
-
-### Step 7 — Mobile Polish Pass (Prompt 14 gaps)
-- Dashboard: 2-column KPI grid on mobile, card-based active reviews (not table).
-- ReviewDetail: "View Plans" bottom sheet toggle, "Field Mode" switch filtering to Critical/Major only, persisted in localStorage.
-- All tables: horizontal scroll wrapper on mobile.
-
-### Step 8 — Final Verification
-- TypeScript build check (`tsc --noEmit`).
-- Navigate all routes, confirm no console errors.
-- Re-run security scan to verify fixes landed.
-
----
-
-## Technical Notes
-
-- Each step is self-contained and verifiable before moving to the next.
-- Steps 1–2 are security fixes (highest priority).
-- Steps 3–7 are UI/feature completeness from the prompt suite.
-- Step 8 is the post-implementation checklist rerun.
-- All work uses existing patterns (hooks, shared components, Supabase client).
+No structural or component changes needed — everything uses CSS variables so the tokens propagate automatically.
 
