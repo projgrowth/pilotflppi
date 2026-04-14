@@ -203,8 +203,8 @@ export default function Analytics() {
           </Card>
         ))}
       </div>
+      )}
 
-      {/* Charts */}
       <Card className="shadow-subtle">
         <CardContent className="p-5">
           <h3 className="text-sm font-semibold mb-4">Review Volume</h3>
