@@ -72,7 +72,10 @@ export default function Projects() {
   };
 
   const handleCreate = async () => {
-    if (!name.trim() || !address.trim()) {
+    const trimmedName = name.trim().slice(0, 200);
+    const trimmedAddress = address.trim().slice(0, 500);
+    const trimmedJurisdiction = jurisdiction.trim().slice(0, 200);
+    if (!trimmedName || !trimmedAddress) {
       toast.error("Name and address are required");
       return;
     }
@@ -82,10 +85,10 @@ export default function Projects() {
       const { data, error } = await supabase
         .from("projects")
         .insert({
-          name: name.trim(),
-          address: address.trim(),
+          name: trimmedName,
+          address: trimmedAddress,
           county: county || "",
-          jurisdiction: jurisdiction || "",
+          jurisdiction: trimmedJurisdiction,
           trade_type: tradeType,
           contractor_id: contractorId || null,
           status: "intake" as const,
