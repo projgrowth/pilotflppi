@@ -351,6 +351,23 @@ export default function Dashboard() {
   const { data: inspections } = useInspections();
   const { data: revenueStats } = useRevenueStats();
 
+  // Fetch latest plan_review id per project for direct linking
+  const { data: latestReviews } = useQuery({
+    queryKey: ["latest-plan-reviews"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("plan_reviews")
+        .select("id, project_id, round")
+        .order("round", { ascending: false });
+      if (error) throw error;
+      const map: Record<string, string> = {};
+      for (const r of data || []) {
+        if (!map[r.project_id]) map[r.project_id] = r.id;
+      }
+      return map;
+    },
+  });
+
   // KPI calculations
   const activeStatuses = ["intake", "plan_review", "comments_sent", "resubmitted"];
   const activeReviews = useMemo(() => (projects || []).filter((p) => activeStatuses.includes(p.status)), [projects]);
