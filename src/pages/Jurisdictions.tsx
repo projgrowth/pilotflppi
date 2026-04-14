@@ -61,7 +61,7 @@ export default function Jurisdictions() {
 
   return (
     <div className="page-enter space-y-6">
-      <h1 className="font-display text-3xl text-foreground">Jurisdiction Tracker</h1>
+      <h1 className="text-3xl font-semibold text-foreground">Jurisdiction Tracker</h1>
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-md">

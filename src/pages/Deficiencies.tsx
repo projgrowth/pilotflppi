@@ -67,7 +67,7 @@ export default function Deficiencies() {
     <div className="page-enter space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="font-display text-3xl text-foreground">Deficiency Library</h1>
+          <h1 className="text-3xl font-semibold text-foreground">Deficiency Library</h1>
           <p className="text-sm text-fpp-gray-600 mt-1">Pre-written Florida Building Code deficiencies with professional comment language.</p>
         </div>
         <Badge variant="secondary" className="text-xs font-mono">{filtered.length} / {deficiencies?.length || 0}</Badge>
