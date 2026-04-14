@@ -99,7 +99,7 @@ const NavSection = React.forwardRef<HTMLDivElement, { title: string; items: NavI
       </nav>
     </div>
   );
-}
+});
 
 function SidebarContent({ onNavigate, collapsed, setCollapsed, onOpenAI }: { onNavigate?: () => void; collapsed?: boolean; setCollapsed?: (v: boolean) => void; onOpenAI?: () => void }) {
   const { user, signOut } = useAuth();
