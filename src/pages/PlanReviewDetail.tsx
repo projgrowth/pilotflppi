@@ -845,206 +845,46 @@ export default function PlanReviewDetail() {
                 )}
 
                 {rightPanel === "letter" && (
-                  <div className="p-3 space-y-3">
-                    {/* QC Status Bar */}
-                    {hasFindings && review.ai_check_status === "complete" && (
-                      <div className={cn(
-                        "rounded-lg border px-3 py-2 flex items-center justify-between",
-                        review.qc_status === "qc_approved" ? "border-success/30 bg-success/5" :
-                        review.qc_status === "qc_rejected" ? "border-destructive/30 bg-destructive/5" :
-                        "border-[hsl(var(--warning))]/30 bg-[hsl(var(--warning))]/5"
-                      )}>
-                        <div className="flex items-center gap-2">
-                          <div className={cn("h-2 w-2 rounded-full",
-                            review.qc_status === "qc_approved" ? "bg-success" :
-                            review.qc_status === "qc_rejected" ? "bg-destructive" :
-                            "bg-[hsl(var(--warning))]"
-                          )} />
-                          <span className="text-[11px] font-semibold">
-                            {review.qc_status === "qc_approved" ? "QC Approved" :
-                             review.qc_status === "qc_rejected" ? "QC Rejected" : "Pending QC Review"}
-                          </span>
-                        </div>
-                        {review.qc_status === "pending_qc" && (
-                          <div className="flex gap-1">
-                            <Button size="sm" variant="outline" className="h-6 text-[10px] text-destructive border-destructive/30"
-                              onClick={async () => {
-                                await supabase.from("plan_reviews").update({ qc_status: "qc_rejected", qc_reviewer_id: user?.id }).eq("id", review.id);
-                                await supabase.from("activity_log").insert({ event_type: "qc_rejected", description: "Plan review QC rejected", project_id: review.project_id, actor_id: user?.id, actor_type: "user" });
-                                queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
-                                toast.error("QC rejected");
-                              }}>Reject</Button>
-                            <Button size="sm" className="h-6 text-[10px] bg-success text-success-foreground hover:bg-success/90"
-                              onClick={async () => {
-                                await supabase.from("plan_reviews").update({ qc_status: "qc_approved", qc_reviewer_id: user?.id }).eq("id", review.id);
-                                await supabase.from("activity_log").insert({ event_type: "qc_approved", description: "Plan review QC approved", project_id: review.project_id, actor_id: user?.id, actor_type: "user" });
-                                queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
-                                toast.success("QC approved — exports unlocked");
-                              }}>Approve</Button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Comment Letter</span>
-                      <div className="flex items-center gap-1.5">
-                        {hasFindings && review.qc_status === "qc_approved" && (
-                          <CountyDocumentPackage
-                            projectId={review.project_id}
-                            projectName={review.project?.name || ""}
-                            address={review.project?.address || ""}
-                            county={county}
-                            jurisdiction={review.project?.jurisdiction || ""}
-                            tradeType={review.project?.trade_type || ""}
-                            round={review.round}
-                            findings={findings}
-                            findingStatuses={Object.fromEntries(Object.entries(findingStatuses).map(([k, v]) => [Number(k), v]))}
-                            firmInfo={firmSettings}
-                            onDocumentGenerated={() => queryClient.invalidateQueries({ queryKey: ["project-documents", review.project_id] })}
-                          />
-                        )}
-                        {hasFindings && review.qc_status !== "qc_approved" && (
-                          <span className="text-[9px] text-muted-foreground italic">QC approval required for export</span>
-                        )}
-                        {commentLetter && !generatingLetter && (
-                          <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={copyLetter}>
-                            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                    {!hasFindings && (
-                      <div className="text-center py-12">
-                        <p className="text-xs text-muted-foreground">Run AI check first to generate findings</p>
-                      </div>
-                    )}
-                    {hasFindings && !commentLetter && !generatingLetter && (
-                      <Button variant="outline" className="w-full h-10 text-xs" onClick={() => generateCommentLetter(review)}>
-                        <Sparkles className="h-3.5 w-3.5 mr-1.5" /> Generate Comment Letter
-                      </Button>
-                    )}
-                    {(commentLetter || generatingLetter) && (
-                      <>
-                        <div className="rounded-lg border bg-background overflow-hidden">
-                          <div className="border-b bg-muted/30 px-4 py-2 flex items-center justify-between">
-                            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">FLPPI — Comment Letter</span>
-                            {generatingLetter && <Loader2 className="h-3 w-3 text-accent animate-spin" />}
-                          </div>
-                          <Textarea
-                            value={commentLetter}
-                            onChange={(e) => setCommentLetter(e.target.value)}
-                            rows={18}
-                            className="font-mono text-[11px] border-0 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-y"
-                            placeholder={generatingLetter ? "Generating..." : ""}
-                          />
-                        </div>
-                        {commentLetter && !generatingLetter && (
-                          <div className="flex gap-2">
-                            <Button size="sm" variant="outline" className="text-xs flex-1" onClick={() => generateCommentLetter(review)}>
-                              <Sparkles className="h-3 w-3 mr-1" /> Regenerate
-                            </Button>
-                            <Button size="sm" className="text-xs flex-1 bg-accent text-accent-foreground hover:bg-accent/90"
-                              disabled={review.qc_status !== "qc_approved"}
-                              title={review.qc_status !== "qc_approved" ? "QC approval required" : ""}
-                            >
-                              <Send className="h-3 w-3 mr-1" /> Send to Contractor
-                            </Button>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
+                  <LetterPanel
+                    reviewId={review.id}
+                    projectId={review.project_id}
+                    projectName={review.project?.name || ""}
+                    address={review.project?.address || ""}
+                    county={county}
+                    jurisdiction={review.project?.jurisdiction || ""}
+                    tradeType={review.project?.trade_type || ""}
+                    round={review.round}
+                    aiCheckStatus={review.ai_check_status}
+                    qcStatus={review.qc_status || "pending_qc"}
+                    hasFindings={hasFindings}
+                    findings={findings}
+                    findingStatuses={findingStatuses}
+                    firmSettings={firmSettings}
+                    commentLetter={commentLetter}
+                    generatingLetter={generatingLetter}
+                    copied={copied}
+                    userId={user?.id}
+                    onGenerateLetter={() => generateCommentLetter(review)}
+                    onCopyLetter={copyLetter}
+                    onLetterChange={setCommentLetter}
+                    onQcApprove={async () => {
+                      await supabase.from("plan_reviews").update({ qc_status: "qc_approved", qc_reviewer_id: user?.id }).eq("id", review.id);
+                      await supabase.from("activity_log").insert({ event_type: "qc_approved", description: "Plan review QC approved", project_id: review.project_id, actor_id: user?.id, actor_type: "user" });
+                      queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+                      toast.success("QC approved — exports unlocked");
+                    }}
+                    onQcReject={async () => {
+                      await supabase.from("plan_reviews").update({ qc_status: "qc_rejected", qc_reviewer_id: user?.id }).eq("id", review.id);
+                      await supabase.from("activity_log").insert({ event_type: "qc_rejected", description: "Plan review QC rejected", project_id: review.project_id, actor_id: user?.id, actor_type: "user" });
+                      queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+                      toast.error("QC rejected");
+                    }}
+                    onDocumentGenerated={() => queryClient.invalidateQueries({ queryKey: ["project-documents", review.project_id] })}
+                  />
                 )}
 
                 {rightPanel === "county" && (
-                  <div className="p-3 space-y-3">
-                    {(() => {
-                      const config = getCountyRequirements(county);
-                      return (
-                        <>
-                          <div className="flex items-center gap-2 mb-1">
-                            <MapPin className="h-4 w-4 text-accent" />
-                            <span className="text-sm font-semibold">{config.label} County Requirements</span>
-                            {config.hvhz && (
-                              <span className="text-[9px] font-bold text-destructive bg-destructive/10 px-1.5 py-0.5 rounded">HVHZ</span>
-                            )}
-                          </div>
-
-                          <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
-                            <div className="text-[11px]">
-                              <span className="text-muted-foreground">Design Wind Speed:</span>{" "}
-                              <span className="font-medium">{config.designWindSpeed}</span>
-                            </div>
-                            <div className="text-[11px]">
-                              <span className="text-muted-foreground">Product Approval:</span>{" "}
-                              <span className="font-medium">{config.productApprovalFormat === "NOA" ? "Miami-Dade NOA Required" : "Florida Product Approval (FL#)"}</span>
-                            </div>
-                            <div className="text-[11px]">
-                              <span className="text-muted-foreground">Resubmission:</span>{" "}
-                              <span className="font-medium">{config.resubmissionDays} calendar days</span>
-                            </div>
-                            <div className="text-[11px]">
-                              <span className="text-muted-foreground">Energy Path:</span>{" "}
-                              <span className="font-medium capitalize">{config.energyCodePath}</span>
-                            </div>
-                            {config.cccl && (
-                              <div className="text-[11px]">
-                                <span className="text-muted-foreground">CCCL:</span>{" "}
-                                <span className="font-medium text-destructive">Coastal Construction Control Line may apply</span>
-                              </div>
-                            )}
-                          </div>
-
-                          {config.amendments.length > 0 && (
-                            <div className="space-y-1.5">
-                              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Local Amendments</h4>
-                              {config.amendments.map((a, i) => (
-                                <div key={i} className="rounded border bg-background p-2">
-                                  <p className="text-[11px] font-medium text-accent">{a.ref}</p>
-                                  <p className="text-[10px] text-muted-foreground">{a.description}</p>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {config.submissionNotes.length > 0 && (
-                            <div className="space-y-1.5">
-                              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Submission Notes</h4>
-                              <ul className="space-y-1">
-                                {config.submissionNotes.map((note, i) => (
-                                  <li key={i} className="text-[10px] text-muted-foreground flex gap-1.5">
-                                    <Info className="h-3 w-3 text-accent shrink-0 mt-0.5" />
-                                    {note}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-
-                          <div className="space-y-1.5">
-                            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Required Document Sections</h4>
-                            <div className="flex flex-wrap gap-1">
-                              {config.supplementalSections.map((s) => (
-                                <span key={s} className="text-[9px] bg-accent/10 text-accent px-2 py-0.5 rounded-full">
-                                  {getSupplementalSectionLabel(s)}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-
-                          {config.buildingDepartment.address && (
-                            <div className="rounded-lg border bg-background p-3">
-                              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Building Department</h4>
-                              <p className="text-[11px] font-medium">{config.buildingDepartment.name}</p>
-                              <p className="text-[10px] text-muted-foreground">{config.buildingDepartment.officialTitle}</p>
-                              <p className="text-[10px] text-muted-foreground">{config.buildingDepartment.address}</p>
-                            </div>
-                          )}
-                        </>
-                      );
-                    })()}
-                  </div>
+                  <CountyPanel county={county} />
                 )}
               </div>
             </div>
