@@ -15,6 +15,7 @@ import {
   Receipt,
   PanelLeftOpen,
   Sparkles,
+  FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,14 @@ const toolsNav: NavItem[] = [
   { label: "Settings", path: "/settings", icon: Settings },
 ];
 
+// Bottom tab bar items for mobile
+const bottomTabs: NavItem[] = [
+  { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
+  { label: "Review", path: "/review", icon: Search },
+  { label: "Inspections", path: "/inspections", icon: ClipboardCheck },
+  { label: "Documents", path: "/documents", icon: FileText },
+];
+
 function NavSection({ title, items, onNavigate, collapsed }: { title: string; items: NavItem[]; onNavigate?: () => void; collapsed?: boolean }) {
   const location = useLocation();
   return (
@@ -65,7 +74,7 @@ function NavSection({ title, items, onNavigate, collapsed }: { title: string; it
               to={item.path}
               onClick={onNavigate}
               className={cn(
-                "flex items-center gap-3 mx-3 px-3 py-2 text-sm rounded-md transition-all duration-150",
+                "flex items-center gap-3 mx-3 px-3 py-2 text-sm rounded-md transition-all duration-150 min-h-[44px]",
                 collapsed && "justify-center px-0 mx-1",
                 active
                   ? "bg-sidebar-accent text-sidebar-primary font-medium shadow-sm"
@@ -162,7 +171,7 @@ function SidebarContent({ onNavigate, collapsed, setCollapsed, onOpenAI }: { onN
           {onOpenAI && (
             <button
               onClick={() => { onOpenAI(); onNavigate?.(); }}
-              className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-[10px] text-sidebar-foreground/50 hover:text-sidebar-foreground/70 hover:bg-sidebar-accent/30 transition-colors"
+              className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-[10px] text-sidebar-foreground/50 hover:text-sidebar-foreground/70 hover:bg-sidebar-accent/30 transition-colors min-h-[44px]"
             >
               <Sparkles className="h-3 w-3" />
               <span>AI Assistant</span>
@@ -170,7 +179,7 @@ function SidebarContent({ onNavigate, collapsed, setCollapsed, onOpenAI }: { onN
           )}
           <button
             onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
-            className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-[10px] text-sidebar-foreground/40 hover:text-sidebar-foreground/60 hover:bg-sidebar-accent/30 transition-colors"
+            className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-[10px] text-sidebar-foreground/40 hover:text-sidebar-foreground/60 hover:bg-sidebar-accent/30 transition-colors min-h-[44px]"
           >
             <Search className="h-3 w-3" />
             <span>Search</span>
@@ -185,7 +194,7 @@ function SidebarContent({ onNavigate, collapsed, setCollapsed, onOpenAI }: { onN
             <TooltipTrigger asChild>
               <button
                 onClick={() => { onOpenAI(); onNavigate?.(); }}
-                className="p-2 rounded hover:bg-sidebar-accent/50 text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors"
+                className="p-2 rounded hover:bg-sidebar-accent/50 text-sidebar-foreground/40 hover:text-sidebar-foreground/70 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
               >
                 <Sparkles className="h-4 w-4" />
               </button>
@@ -217,7 +226,7 @@ function SidebarContent({ onNavigate, collapsed, setCollapsed, onOpenAI }: { onN
             <Link
               to="/settings"
               onClick={onNavigate}
-              className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-sm hover:bg-sidebar-accent/50 transition-colors"
+              className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-sm hover:bg-sidebar-accent/50 transition-colors min-h-[44px]"
             >
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground">
                 {initials}
@@ -230,13 +239,48 @@ function SidebarContent({ onNavigate, collapsed, setCollapsed, onOpenAI }: { onN
             </Link>
             <button
               onClick={handleSignOut}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[11px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[11px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors min-h-[44px]"
             >
               <LogOut className="h-3.5 w-3.5" />
               Sign out
             </button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Mobile Bottom Tab Bar ── */
+function MobileBottomBar({ onOpenMenu }: { onOpenMenu: () => void }) {
+  const location = useLocation();
+
+  return (
+    <div className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-card border-t safe-bottom">
+      <div className="flex items-stretch">
+        {bottomTabs.map((tab) => {
+          const active = location.pathname.startsWith(tab.path);
+          return (
+            <Link
+              key={tab.path}
+              to={tab.path}
+              className={cn(
+                "flex-1 flex flex-col items-center justify-center py-2 min-h-[56px] transition-colors",
+                active ? "text-primary" : "text-muted-foreground"
+              )}
+            >
+              <tab.icon className="h-5 w-5" />
+              <span className="text-[10px] mt-0.5 font-medium">{tab.label}</span>
+            </Link>
+          );
+        })}
+        <button
+          onClick={onOpenMenu}
+          className="flex-1 flex flex-col items-center justify-center py-2 min-h-[56px] text-muted-foreground transition-colors"
+        >
+          <Menu className="h-5 w-5" />
+          <span className="text-[10px] mt-0.5 font-medium">Menu</span>
+        </button>
       </div>
     </div>
   );
@@ -256,16 +300,11 @@ export function AppSidebar({ onOpenAI }: { onOpenAI?: () => void }) {
   if (isMobile) {
     return (
       <>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="fixed left-3 top-3 z-50 md:hidden"
-          onClick={() => setOpen(true)}
-        >
-          <Menu className="h-5 w-5" />
-        </Button>
+        {/* Mobile bottom tab bar */}
+        <MobileBottomBar onOpenMenu={() => setOpen(true)} />
+        {/* Full menu sheet from bottom */}
         <Sheet open={open} onOpenChange={setOpen}>
-          <SheetContent side="left" className="w-[240px] p-0 border-0">
+          <SheetContent side="bottom" className="h-[85vh] p-0 border-0 rounded-t-xl">
             <SidebarContent onNavigate={() => setOpen(false)} onOpenAI={onOpenAI} />
           </SheetContent>
         </Sheet>
