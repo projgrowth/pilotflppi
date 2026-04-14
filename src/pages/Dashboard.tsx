@@ -110,7 +110,7 @@ function ActiveReviewsQueue({ projects, navigate, latestReviews }: { projects: a
               <tr
                 key={p.id}
                 className="hover:bg-muted/30 cursor-pointer transition-colors"
-                onClick={() => navigate(`/review/${p.id}`)}
+                onClick={() => { const rid = latestReviews?.[p.id]; navigate(rid ? `/plan-review/${rid}` : `/review/${p.id}`); }}
               >
                 <td className="px-4 py-3">
                   <p className="font-medium truncate max-w-[200px]">{p.name}</p>
