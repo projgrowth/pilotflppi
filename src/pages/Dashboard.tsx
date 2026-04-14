@@ -34,7 +34,7 @@ function DashKpi({
     <Card className="shadow-subtle">
       <CardContent className="p-6 relative">
         <Icon className="absolute top-5 right-5 h-6 w-6" style={{ color: iconColor }} />
-        <p className="font-display text-5xl font-bold tracking-tight text-foreground">{displayed}</p>
+        <p className="text-5xl font-bold tracking-tight text-foreground">{displayed}</p>
         <p className="text-[13px] font-medium text-muted-foreground uppercase tracking-widest mt-1">{label}</p>
         {subRow && <p className="text-xs font-mono text-muted-foreground/80 mt-2">{subRow}</p>}
       </CardContent>
