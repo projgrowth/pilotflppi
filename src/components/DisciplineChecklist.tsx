@@ -111,14 +111,14 @@ export function DisciplineChecklist({ tradeType, findings, className }: Discipli
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold">Compliance Checklist</span>
-          <Badge variant="outline" className="text-[10px]">{completionPct}% Complete</Badge>
+          <Badge variant="outline" className="text-2xs">{completionPct}% Complete</Badge>
         </div>
-        <span className="text-[10px] text-muted-foreground">{checkedCount}/{totalItems} items verified</span>
+        <span className="text-2xs text-muted-foreground">{checkedCount}/{totalItems} items verified</span>
       </div>
 
       <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
         <div
-          className={cn("h-full rounded-full transition-all duration-500", completionPct === 100 ? "bg-[hsl(var(--success))]" : "bg-accent")}
+          className={cn("h-full rounded-full transition-all duration-500", completionPct === 100 ? "bg-success" : "bg-accent")}
           style={{ width: `${completionPct}%` }}
         />
       </div>
@@ -130,12 +130,12 @@ export function DisciplineChecklist({ tradeType, findings, className }: Discipli
         const allChecked = items.every((item) => checked[item.id] || autoFilled.has(item.id));
 
         return (
-          <Card key={discipline} className={cn("shadow-subtle border", allChecked && "border-[hsl(var(--success))]/30 bg-[hsl(var(--success))]/5")}>
+          <Card key={discipline} className={cn("shadow-subtle border", allChecked && "border-success/30 bg-success/5")}>
             <CardContent className="p-3">
               <div className="flex items-center gap-2 mb-2">
                 <Icon className={cn("h-3.5 w-3.5", getDisciplineColor(discipline))} />
                 <span className="text-xs font-semibold">{getDisciplineLabel(discipline)}</span>
-                {allChecked && <CheckCircle2 className="h-3.5 w-3.5 text-[hsl(var(--success))]" />}
+                {allChecked && <CheckCircle2 className="h-3.5 w-3.5 text-success" />}
               </div>
               <div className="space-y-1.5">
                 {items.map((item) => {
@@ -149,13 +149,13 @@ export function DisciplineChecklist({ tradeType, findings, className }: Discipli
                         className="mt-0.5"
                       />
                       <div className="flex-1 min-w-0">
-                        <p className={cn("text-[11px] leading-relaxed", isChecked && "line-through text-muted-foreground/60")}>
+                        <p className={cn("text-xs leading-relaxed", isChecked && "line-through text-muted-foreground/60")}>
                           {item.label}
                         </p>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <code className="text-[9px] font-mono text-muted-foreground bg-muted/60 px-1 rounded">{item.codeRef}</code>
+                          <code className="text-caption font-mono text-muted-foreground bg-muted/60 px-1 rounded">{item.codeRef}</code>
                           {isAutoFilled && (
-                            <span className="flex items-center gap-0.5 text-[9px] text-destructive">
+                            <span className="flex items-center gap-0.5 text-caption text-destructive">
                               <AlertTriangle className="h-2.5 w-2.5" /> AI flagged
                             </span>
                           )}
