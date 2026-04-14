@@ -11,7 +11,7 @@ export function AppLayout() {
   return (
     <div className="flex min-h-screen w-full">
       <AppSidebar onOpenAI={() => setAiDrawerOpen(true)} />
-      <main className="flex-1 overflow-x-hidden pt-14 md:pt-0">
+      <main className="flex-1 overflow-x-hidden pb-16 md:pb-0">
         <ErrorBoundary>
           <Outlet />
         </ErrorBoundary>
