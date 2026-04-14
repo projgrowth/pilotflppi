@@ -28,19 +28,19 @@ export function StatutoryClockCard({ project }: StatutoryClockCardProps) {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-1.5">
             <Gavel className="h-3.5 w-3.5 text-muted-foreground" />
-            <h3 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
               F.S. 553.791 Clock
             </h3>
           </div>
           {stat.isDeemedApproved ? (
-            <Badge variant="destructive" className="text-[10px] gap-1">
+            <Badge variant="destructive" className="text-2xs gap-1">
               <AlertTriangle className="h-2.5 w-2.5" /> DEEMED APPROVED
             </Badge>
           ) : (
             <Badge
               variant="outline"
               className={cn(
-                "text-[10px] gap-1",
+                "text-2xs gap-1",
                 stat.clockRunning ? "text-success border-success/30" : "text-warning border-warning/30"
               )}
             >
@@ -69,13 +69,13 @@ export function StatutoryClockCard({ project }: StatutoryClockCardProps) {
         )}
 
         {stat.isDeemedApproved && (
-          <p className="mt-2 text-[10px] text-destructive font-semibold animate-pulse">
+          <p className="mt-2 text-2xs text-destructive font-semibold animate-pulse">
             ⚠ Per F.S. 553.791(4)(b), plans are DEEMED APPROVED — 30 business days expired without action
           </p>
         )}
 
         {stat.isOverdue && !stat.isDeemedApproved && (
-          <p className="mt-2 text-[10px] text-destructive font-semibold animate-pulse">
+          <p className="mt-2 text-2xs text-destructive font-semibold animate-pulse">
             ⚠ Statutory deadline exceeded — potential F.S. 553.791 violation
           </p>
         )}

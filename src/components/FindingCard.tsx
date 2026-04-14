@@ -36,8 +36,8 @@ const severityConfig: Record<string, { icon: typeof AlertTriangle; dot: string; 
   },
   major: {
     icon: AlertCircle,
-    dot: "bg-[hsl(var(--warning))]",
-    badge: "bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))] border-[hsl(var(--warning))]/20",
+    dot: "bg-warning",
+    badge: "bg-warning/10 text-warning border-warning/20",
   },
   minor: {
     icon: Info,
@@ -48,8 +48,8 @@ const severityConfig: Record<string, { icon: typeof AlertTriangle; dot: string; 
 
 const statusOptions: { value: FindingStatus; icon: typeof Clock; label: string; className: string }[] = [
   { value: "open", icon: Clock, label: "Open", className: "text-destructive" },
-  { value: "resolved", icon: CheckCheck, label: "Resolved", className: "text-[hsl(var(--success))]" },
-  { value: "deferred", icon: ArrowRightLeft, label: "Deferred", className: "text-[hsl(var(--warning))]" },
+  { value: "resolved", icon: CheckCheck, label: "Resolved", className: "text-success" },
+  { value: "deferred", icon: ArrowRightLeft, label: "Deferred", className: "text-warning" },
 ];
 
 interface FindingCardProps {
@@ -107,18 +107,18 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
             <div className={cn("h-1.5 w-1.5 rounded-full shrink-0", sev.dot, isResolved && "opacity-30")} />
 
             {/* Number */}
-            <span className="text-[9px] font-mono text-muted-foreground/50 w-3 text-right shrink-0">
+            <span className="text-caption font-mono text-muted-foreground/50 w-3 text-right shrink-0">
               {displayIndex + 1}
             </span>
 
             {/* Code ref */}
-            <code className="text-[10px] font-mono text-foreground/70 shrink-0">
+            <code className="text-2xs font-mono text-foreground/70 shrink-0">
               {finding.code_ref}
             </code>
 
             {/* Description truncated */}
             <span className={cn(
-              "text-[11px] text-foreground/75 truncate flex-1 min-w-0",
+              "text-xs text-foreground/75 truncate flex-1 min-w-0",
               isResolved && "line-through decoration-muted-foreground/30"
             )}>
               {finding.description}
@@ -126,7 +126,7 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
 
             {/* Status badge (non-open only) */}
             {status !== "open" && (
-              <span className={cn("text-[8px] font-semibold shrink-0", currentStatusOption.className)}>
+              <span className={cn("text-caption font-semibold shrink-0", currentStatusOption.className)}>
                 {currentStatusOption.label}
               </span>
             )}
@@ -144,12 +144,12 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
           <div className="px-3 py-2 space-y-1.5">
             {/* Meta chips */}
             <div className="flex items-center gap-1.5 flex-wrap">
-              <Badge className={cn("text-[9px] uppercase font-semibold border h-4 px-1", sev.badge)}>
+              <Badge className={cn("text-caption uppercase font-semibold border h-4 px-1", sev.badge)}>
                 {finding.severity}
               </Badge>
               {finding.confidence && (
-                <Badge variant="outline" className={cn("text-[8px] font-medium h-3.5 px-1",
-                  finding.confidence === "verified" ? "border-[hsl(var(--success))]/40 text-[hsl(var(--success))]" :
+                <Badge variant="outline" className={cn("text-caption font-medium h-3.5 px-1",
+                  finding.confidence === "verified" ? "border-success/40 text-success" :
                   finding.confidence === "likely" ? "border-accent/40 text-accent" :
                   "border-muted-foreground/30 text-muted-foreground"
                 )}>
@@ -157,10 +157,10 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
                 </Badge>
               )}
               {finding.page && (
-                <span className="text-[9px] text-muted-foreground">pg {finding.page}</span>
+                <span className="text-caption text-muted-foreground">pg {finding.page}</span>
               )}
               {finding.county_specific && (
-                <Badge variant="outline" className="text-[8px] font-medium border-accent text-accent bg-accent/5 h-3.5 px-1">
+                <Badge variant="outline" className="text-caption font-medium border-accent text-accent bg-accent/5 h-3.5 px-1">
                   County
                 </Badge>
               )}
@@ -177,8 +177,8 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
             {/* Recommendation */}
             {finding.recommendation && (
               <div className="rounded bg-muted/40 border border-border/40 px-2.5 py-2">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Recommendation</p>
-                <p className="text-[11px] text-foreground/75 leading-relaxed">{finding.recommendation}</p>
+                <p className="text-2xs font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Recommendation</p>
+                <p className="text-xs text-foreground/75 leading-relaxed">{finding.recommendation}</p>
               </div>
             )}
 
@@ -186,7 +186,7 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
             <div className="flex items-center gap-1 pt-0.5">
               {finding.markup && onLocateClick && (
                 <button
-                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-muted-foreground hover:text-accent hover:bg-accent/10 transition-colors"
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs text-muted-foreground hover:text-accent hover:bg-accent/10 transition-colors"
                   onClick={(e) => { e.stopPropagation(); onLocateClick(); }}
                 >
                   <MapPin className="h-3 w-3" /> Locate
@@ -194,7 +194,7 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
               )}
               <button
                 className={cn(
-                  "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors",
+                  "flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs transition-colors",
                   currentStatusOption.className, "opacity-60 hover:opacity-100 hover:bg-muted/50"
                 )}
                 onClick={(e) => { e.stopPropagation(); cycleStatus(); }}
@@ -204,7 +204,7 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
               </button>
               {history.length > 0 && (
                 <button
-                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors ml-auto"
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors ml-auto"
                   onClick={(e) => { e.stopPropagation(); setShowHistory(!showHistory); }}
                 >
                   <History className="h-3 w-3" /> {history.length}
@@ -215,9 +215,9 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
             {/* History log */}
             {showHistory && history.length > 0 && (
               <div className="border-t border-border/30 pt-1.5 mt-1 space-y-1">
-                <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">Audit Trail</p>
+                <p className="text-caption font-semibold text-muted-foreground uppercase tracking-wide">Audit Trail</p>
                 {history.slice(0, 10).map((h) => (
-                  <div key={h.id} className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
+                  <div key={h.id} className="flex items-center gap-1.5 text-caption text-muted-foreground">
                     <span className="font-mono">{new Date(h.changed_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
                     <span className="text-muted-foreground/50">•</span>
                     <span className="capitalize">{h.old_status}</span>

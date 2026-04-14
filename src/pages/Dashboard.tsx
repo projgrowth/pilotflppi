@@ -35,7 +35,7 @@ function DashKpi({
       <CardContent className="p-6 relative">
         <Icon className="absolute top-5 right-5 h-6 w-6" style={{ color: iconColor }} />
         <p className="text-5xl font-bold tracking-tight text-foreground">{displayed}</p>
-        <p className="text-[13px] font-medium text-muted-foreground uppercase tracking-widest mt-1">{label}</p>
+        <p className="text-sm font-medium text-muted-foreground uppercase tracking-widest mt-1">{label}</p>
         {subRow && <p className="text-xs font-mono text-muted-foreground/80 mt-2">{subRow}</p>}
       </CardContent>
     </Card>
@@ -88,7 +88,7 @@ function ActiveReviewsQueue({ projects, navigate, latestReviews }: { projects: a
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+            <tr className="border-b text-xs font-semibold text-muted-foreground uppercase tracking-wider">
               <th className="text-left px-4 py-3">Project</th>
               <th className="text-left px-4 py-3 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort("jurisdiction")}>
                 Jurisdiction<SortIcon k="jurisdiction" />
@@ -114,7 +114,7 @@ function ActiveReviewsQueue({ projects, navigate, latestReviews }: { projects: a
               >
                 <td className="px-4 py-3">
                   <p className="font-medium truncate max-w-[200px]">{p.name}</p>
-                  <p className="text-[11px] text-muted-foreground truncate">{p.address}</p>
+                  <p className="text-xs text-muted-foreground truncate">{p.address}</p>
                 </td>
                 <td className="px-4 py-3 text-xs text-muted-foreground">{p.jurisdiction || p.county || "—"}</td>
                 <td className="px-4 py-3"><StatusChip status={p.status} /></td>
@@ -163,7 +163,7 @@ function DeadlinesPanel({ projects, navigate }: { projects: any[]; navigate: (p:
 
   const getDotColor = (d: Date) => {
     if (isPast(d) && !isToday(d)) return "bg-destructive";
-    if (isToday(d)) return "bg-[hsl(var(--warning))]";
+    if (isToday(d)) return "bg-warning";
     return "bg-accent";
   };
 
@@ -184,16 +184,16 @@ function DeadlinesPanel({ projects, navigate }: { projects: any[]; navigate: (p:
                 className="flex items-start gap-3 cursor-pointer hover:bg-muted/30 -mx-2 px-2 py-1 rounded transition-colors"
                 onClick={() => navigate(`/projects/${item.id}`)}
               >
-                <span className="text-[11px] font-mono text-muted-foreground uppercase w-[70px] pt-0.5 shrink-0">
+                <span className="text-xs font-mono text-muted-foreground uppercase w-[70px] pt-0.5 shrink-0">
                   {getDayLabel(item.deadlineDate)}
                 </span>
                 <div className={cn("mt-1.5 h-2 w-2 rounded-full shrink-0", getDotColor(item.deadlineDate))} />
-                <span className="text-[13px] text-foreground">{item.name}</span>
+                <span className="text-sm text-foreground">{item.name}</span>
               </div>
             ))}
           </div>
         )}
-        <Button variant="link" className="text-accent text-[13px] p-0 mt-3 h-auto" onClick={() => navigate("/deadlines")}>
+        <Button variant="link" className="text-accent text-sm p-0 mt-3 h-auto" onClick={() => navigate("/deadlines")}>
           View calendar →
         </Button>
       </CardContent>
@@ -231,15 +231,15 @@ function AIActivityFeed() {
 
   const severityDot: Record<string, string> = {
     critical: "bg-destructive",
-    major: "bg-[hsl(var(--warning))]",
-    minor: "bg-[hsl(var(--status-minor))]",
-    admin: "bg-[hsl(var(--status-admin))]",
+    major: "bg-warning",
+    minor: "bg-status-minor",
+    admin: "bg-status-admin",
   };
 
   return (
     <Card className="shadow-subtle">
       <div className="px-5 py-4 border-b flex items-center gap-2">
-        <Zap className="h-4 w-4 text-[hsl(var(--fpp-gold))]" />
+        <Zap className="h-4 w-4 text-fpp-gold" />
         <span className="text-[15px] font-semibold text-foreground">AI Activity</span>
       </div>
       <CardContent className="p-5">
@@ -254,7 +254,7 @@ function AIActivityFeed() {
                   <p className="text-xs text-foreground/80">
                     {item.prediction || "AI check"} • <span className="text-muted-foreground">{item.projectName}</span>
                   </p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                  <p className="text-2xs text-muted-foreground mt-0.5">
                     {formatDistanceToNow(new Date(item.created_at!), { addSuffix: true })}
                   </p>
                 </div>
@@ -281,7 +281,7 @@ function RevenuKpi({
         <p className="text-4xl font-bold tracking-tight text-foreground">
           ${displayed.toLocaleString()}
         </p>
-        <p className="text-[13px] font-medium text-muted-foreground uppercase tracking-widest mt-1">{label}</p>
+        <p className="text-sm font-medium text-muted-foreground uppercase tracking-widest mt-1">{label}</p>
         {subRow && <p className="text-xs font-mono text-muted-foreground/80 mt-2">{subRow}</p>}
       </CardContent>
     </Card>
@@ -302,7 +302,7 @@ function AccountsReceivableWidget({ navigate }: { navigate: (p: string) => void 
   return (
     <Card className="shadow-subtle">
       <div className="px-5 py-4 border-b flex items-center gap-2">
-        <DollarSign className="h-4 w-4 text-[hsl(var(--fpp-gold))]" />
+        <DollarSign className="h-4 w-4 text-fpp-gold" />
         <span className="text-[15px] font-semibold text-foreground">Accounts Receivable</span>
       </div>
       <CardContent className="p-5">
@@ -320,8 +320,8 @@ function AccountsReceivableWidget({ navigate }: { navigate: (p: string) => void 
                   onClick={() => navigate(`/projects/${inv.project_id}`)}
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="text-[13px] font-medium truncate">{inv.project?.name || inv.invoice_number}</p>
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-sm font-medium truncate">{inv.project?.name || inv.invoice_number}</p>
+                    <p className="text-2xs text-muted-foreground">
                       {inv.invoice_number}
                       {inv.due_at && <> · Due {format(new Date(inv.due_at), "MMM d")}</>}
                     </p>
@@ -334,7 +334,7 @@ function AccountsReceivableWidget({ navigate }: { navigate: (p: string) => void 
             })}
           </div>
         )}
-        <Button variant="link" className="text-accent text-[13px] p-0 mt-3 h-auto" onClick={() => navigate("/invoices")}>
+        <Button variant="link" className="text-accent text-sm p-0 mt-3 h-auto" onClick={() => navigate("/invoices")}>
           View all invoices →
         </Button>
       </CardContent>

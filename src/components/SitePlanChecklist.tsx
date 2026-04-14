@@ -108,7 +108,7 @@ export function SitePlanChecklist({ findings, county = "", className }: SitePlan
   const readinessPct = applicableCount > 0 ? Math.round((presentCount / applicableCount) * 100) : 100;
 
   const stateIcons: Record<ItemState, React.ReactNode> = {
-    present: <CheckCircle2 className="h-3.5 w-3.5 text-[hsl(var(--success))]" />,
+    present: <CheckCircle2 className="h-3.5 w-3.5 text-success" />,
     missing: <XCircle className="h-3.5 w-3.5 text-destructive" />,
     na: <MinusCircle className="h-3.5 w-3.5 text-muted-foreground/40" />,
   };
@@ -119,7 +119,7 @@ export function SitePlanChecklist({ findings, county = "", className }: SitePlan
         <div className="flex items-center gap-2 mb-2">
           {icon}
           <span className="text-xs font-semibold">{title}</span>
-          <Badge variant="outline" className="text-[9px] ml-auto">
+          <Badge variant="outline" className="text-caption ml-auto">
             {items.filter((i) => getState(i.id) === "missing").length} missing
           </Badge>
         </div>
@@ -140,20 +140,20 @@ export function SitePlanChecklist({ findings, county = "", className }: SitePlan
                 {stateIcons[state]}
                 <div className="flex-1 min-w-0">
                   <p className={cn(
-                    "text-[11px] leading-relaxed",
+                    "text-xs leading-relaxed",
                     state === "na" && "line-through text-muted-foreground/50",
                     state === "missing" && "text-destructive"
                   )}>
                     {item.label}
                   </p>
                   {isAiFlagged && (
-                    <span className="flex items-center gap-0.5 text-[9px] text-destructive mt-0.5">
+                    <span className="flex items-center gap-0.5 text-caption text-destructive mt-0.5">
                       <AlertTriangle className="h-2.5 w-2.5" /> AI flagged as missing
                     </span>
                   )}
                 </div>
                 {item.required && state !== "na" && (
-                  <span className="text-[8px] font-semibold text-muted-foreground/60 shrink-0 mt-0.5">REQ</span>
+                  <span className="text-caption font-semibold text-muted-foreground/60 shrink-0 mt-0.5">REQ</span>
                 )}
               </button>
             );
@@ -174,15 +174,15 @@ export function SitePlanChecklist({ findings, county = "", className }: SitePlan
             <Badge
               variant="outline"
               className={cn(
-                "text-[10px]",
-                readinessPct === 100 && "border-[hsl(var(--success))]/40 text-[hsl(var(--success))]",
+                "text-2xs",
+                readinessPct === 100 && "border-success/40 text-success",
                 readinessPct < 80 && missingCount > 0 && "border-destructive/40 text-destructive"
               )}
             >
               {readinessPct}% Ready
             </Badge>
           </div>
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-2xs text-muted-foreground">
             {presentCount}/{applicableCount} present · {missingCount} missing
           </span>
         </div>
@@ -190,7 +190,7 @@ export function SitePlanChecklist({ findings, county = "", className }: SitePlan
           <div
             className={cn(
               "h-full rounded-full transition-all duration-500",
-              readinessPct === 100 ? "bg-[hsl(var(--success))]" : readinessPct >= 80 ? "bg-accent" : "bg-destructive"
+              readinessPct === 100 ? "bg-success" : readinessPct >= 80 ? "bg-accent" : "bg-destructive"
             )}
             style={{ width: `${readinessPct}%` }}
           />
@@ -202,13 +202,13 @@ export function SitePlanChecklist({ findings, county = "", className }: SitePlan
         <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2">
           <div className="flex items-center gap-1.5 mb-1">
             <FileWarning className="h-3.5 w-3.5 text-destructive" />
-            <span className="text-[11px] font-semibold text-destructive">
+            <span className="text-xs font-semibold text-destructive">
               {missingCount} item{missingCount > 1 ? "s" : ""} missing — likely rejection by building official
             </span>
           </div>
           <ul className="space-y-0.5">
             {allItems.filter((i) => getState(i.id) === "missing").map((item) => (
-              <li key={item.id} className="text-[10px] text-destructive/80 flex gap-1.5">
+              <li key={item.id} className="text-2xs text-destructive/80 flex gap-1.5">
                 <span>•</span> {item.label}
               </li>
             ))}
@@ -217,7 +217,7 @@ export function SitePlanChecklist({ findings, county = "", className }: SitePlan
       )}
 
       {/* Click hint */}
-      <p className="text-[9px] text-muted-foreground italic">Click items to cycle: Present → Missing → N/A</p>
+      <p className="text-caption text-muted-foreground italic">Click items to cycle: Present → Missing → N/A</p>
 
       {renderSection("Site Plan Elements", siteItems, <ClipboardList className="h-3.5 w-3.5 text-accent" />)}
       {renderSection("General Plan Requirements", generalItems, <ClipboardList className="h-3.5 w-3.5 text-accent" />)}

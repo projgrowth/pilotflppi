@@ -25,6 +25,12 @@
     --status-admin: 209 37% 54%;
     --status-pass: 149 47% 33%;
 
+    /* Light status backgrounds */
+    --success-bg: 149 60% 95%;
+    --warning-bg: 43 100% 95%;
+    --destructive-bg: 1 65% 95%;
+    --admin-bg: 209 60% 95%;
+
     /* Confidence colors */
     --conf-high: 149 47% 33%;
     --conf-medium: 43 72% 46%;
@@ -111,6 +117,11 @@
     --warning-foreground: 0 0% 100%;
     --success: 149 47% 33%;
     --success-foreground: 0 0% 100%;
+
+    --success-bg: 149 40% 15%;
+    --warning-bg: 43 60% 15%;
+    --destructive-bg: 1 45% 15%;
+    --admin-bg: 209 40% 15%;
     --border: 210 53% 18%;
     --input: 210 53% 18%;
     --ring: 37 66% 47%;
@@ -175,7 +186,7 @@
 
   /* Severity badges */
   .badge-critical {
-    background: hsl(1 65% 95%);
+    background: hsl(var(--destructive-bg));
     color: hsl(var(--status-critical));
     border: 1px solid hsl(var(--status-critical));
     font-family: var(--font-mono);
@@ -187,7 +198,7 @@
     text-transform: uppercase;
   }
   .badge-major {
-    background: hsl(27 100% 95%);
+    background: hsl(var(--warning-bg));
     color: hsl(var(--status-major));
     border: 1px solid hsl(var(--status-major));
     font-family: var(--font-mono);
@@ -199,7 +210,7 @@
     text-transform: uppercase;
   }
   .badge-minor {
-    background: hsl(43 100% 95%);
+    background: hsl(var(--warning-bg));
     color: hsl(var(--status-minor));
     border: 1px solid hsl(var(--status-minor));
     font-family: var(--font-mono);
@@ -211,7 +222,7 @@
     text-transform: uppercase;
   }
   .badge-admin {
-    background: hsl(209 60% 95%);
+    background: hsl(var(--admin-bg));
     color: hsl(var(--status-admin));
     border: 1px solid hsl(var(--status-admin));
     font-family: var(--font-mono);
@@ -223,7 +234,7 @@
     text-transform: uppercase;
   }
   .badge-pass {
-    background: hsl(149 60% 95%);
+    background: hsl(var(--success-bg));
     color: hsl(var(--status-pass));
     border: 1px solid hsl(var(--status-pass));
     font-family: var(--font-mono);
@@ -235,17 +246,17 @@
     text-transform: uppercase;
   }
   .badge-conf-high {
-    background: hsl(149 60% 95%);
+    background: hsl(var(--success-bg));
     color: hsl(var(--conf-high));
     border: 1px solid hsl(var(--conf-high));
   }
   .badge-conf-medium {
-    background: hsl(43 100% 95%);
+    background: hsl(var(--warning-bg));
     color: hsl(var(--conf-medium));
     border: 1px solid hsl(var(--conf-medium));
   }
   .badge-conf-low {
-    background: hsl(27 100% 95%);
+    background: hsl(var(--warning-bg));
     color: hsl(var(--conf-low));
     border: 1px solid hsl(var(--conf-low));
   }

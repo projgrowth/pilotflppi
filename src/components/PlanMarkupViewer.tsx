@@ -216,7 +216,7 @@ export function PlanMarkupViewer({
               key={preset}
               onClick={() => setZoom(preset)}
               className={cn(
-                "px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors",
+                "px-1.5 py-0.5 rounded text-2xs font-medium transition-colors",
                 Math.abs(zoom - preset) < 0.05
                   ? "bg-accent text-accent-foreground"
                   : "text-muted-foreground hover:bg-muted"
@@ -239,7 +239,7 @@ export function PlanMarkupViewer({
                   <Columns className="h-3.5 w-3.5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-[10px]">Fit Width (0)</TooltipContent>
+              <TooltipContent side="bottom" className="text-2xs">Fit Width (0)</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -247,7 +247,7 @@ export function PlanMarkupViewer({
                   <Maximize className="h-3.5 w-3.5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-[10px]">Fit Page</TooltipContent>
+              <TooltipContent side="bottom" className="text-2xs">Fit Page</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -255,7 +255,7 @@ export function PlanMarkupViewer({
                   <Keyboard className="h-3.5 w-3.5" />
                 </div>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-[10px] space-y-0.5">
+              <TooltipContent side="bottom" className="text-2xs space-y-0.5">
                 <p>← → Page nav</p>
                 <p>+ / − Zoom</p>
                 <p>0 Fit width</p>
@@ -288,7 +288,7 @@ export function PlanMarkupViewer({
                   className="w-full h-auto block"
                   draggable={false}
                 />
-                <div className="text-[9px] text-muted-foreground text-center py-0.5 bg-muted/30">
+                <div className="text-caption text-muted-foreground text-center py-0.5 bg-muted/30">
                   {idx + 1}
                 </div>
               </button>
@@ -369,7 +369,7 @@ export function PlanMarkupViewer({
                   >
                     <div
                       className={cn(
-                        "absolute -top-3 -left-3 h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold shadow-md",
+                        "absolute -top-3 -left-3 h-6 w-6 rounded-full flex items-center justify-center text-2xs font-bold shadow-md",
                         isActive
                           ? "bg-destructive text-destructive-foreground"
                           : "bg-destructive/80 text-destructive-foreground"

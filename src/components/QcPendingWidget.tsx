@@ -74,12 +74,12 @@ export function QcPendingWidget() {
       <CardContent className="p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-amber-500" />
+            <ShieldCheck className="h-4 w-4 text-warning" />
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
               QC Pending
             </span>
             {count > 0 && (
-              <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4">
+              <Badge variant="destructive" className="text-2xs px-1.5 py-0 h-4">
                 {count}
               </Badge>
             )}
@@ -116,15 +116,15 @@ export function QcPendingWidget() {
                       {review.project?.name ?? "Unknown project"}
                     </p>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-2xs text-muted-foreground">
                         R{review.round}
                       </span>
-                      <span className="text-[10px] text-muted-foreground">•</span>
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-2xs text-muted-foreground">•</span>
+                      <span className="text-2xs text-muted-foreground">
                         {findingCount} finding{findingCount !== 1 ? "s" : ""}
                       </span>
-                      <span className="text-[10px] text-muted-foreground">•</span>
-                      <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                      <span className="text-2xs text-muted-foreground">•</span>
+                      <span className="text-2xs text-muted-foreground flex items-center gap-0.5">
                         <Clock className="h-2.5 w-2.5" />
                         {formatDistanceToNow(new Date(review.created_at), { addSuffix: true })}
                       </span>

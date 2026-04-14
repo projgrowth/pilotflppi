@@ -26,7 +26,7 @@ export function HorizontalStepper({ steps, currentStepIndex, className }: Horizo
               <div className="flex flex-col items-center gap-1.5">
                 <div
                   className={cn(
-                    "h-7 w-7 rounded-full flex items-center justify-center text-[10px] font-semibold transition-all shrink-0",
+                    "h-7 w-7 rounded-full flex items-center justify-center text-2xs font-semibold transition-all shrink-0",
                     isComplete
                       ? "bg-success text-success-foreground"
                       : isCurrent
@@ -38,7 +38,7 @@ export function HorizontalStepper({ steps, currentStepIndex, className }: Horizo
                 </div>
                 <span
                   className={cn(
-                    "text-[10px] font-medium whitespace-nowrap",
+                    "text-2xs font-medium whitespace-nowrap",
                     isComplete
                       ? "text-success"
                       : isCurrent

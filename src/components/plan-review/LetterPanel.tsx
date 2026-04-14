@@ -47,25 +47,25 @@ export function LetterPanel({
           "rounded-lg border px-3 py-2 flex items-center justify-between",
           qcStatus === "qc_approved" ? "border-success/30 bg-success/5" :
           qcStatus === "qc_rejected" ? "border-destructive/30 bg-destructive/5" :
-          "border-[hsl(var(--warning))]/30 bg-[hsl(var(--warning))]/5"
+          "border-warning/30 bg-warning/5"
         )}>
           <div className="flex items-center gap-2">
             <div className={cn("h-2 w-2 rounded-full",
               qcStatus === "qc_approved" ? "bg-success" :
               qcStatus === "qc_rejected" ? "bg-destructive" :
-              "bg-[hsl(var(--warning))]"
+              "bg-warning"
             )} />
-            <span className="text-[11px] font-semibold">
+            <span className="text-xs font-semibold">
               {qcStatus === "qc_approved" ? "QC Approved" :
                qcStatus === "qc_rejected" ? "QC Rejected" : "Pending QC Review"}
             </span>
           </div>
           {qcStatus === "pending_qc" && (
             <div className="flex gap-1">
-              <Button size="sm" variant="outline" className="h-6 text-[10px] text-destructive border-destructive/30" onClick={onQcReject}>
+              <Button size="sm" variant="outline" className="h-6 text-2xs text-destructive border-destructive/30" onClick={onQcReject}>
                 Reject
               </Button>
-              <Button size="sm" className="h-6 text-[10px] bg-success text-success-foreground hover:bg-success/90" onClick={onQcApprove}>
+              <Button size="sm" className="h-6 text-2xs bg-success text-success-foreground hover:bg-success/90" onClick={onQcApprove}>
                 Approve
               </Button>
             </div>
@@ -92,10 +92,10 @@ export function LetterPanel({
             />
           )}
           {hasFindings && qcStatus !== "qc_approved" && (
-            <span className="text-[9px] text-muted-foreground italic">QC approval required for export</span>
+            <span className="text-caption text-muted-foreground italic">QC approval required for export</span>
           )}
           {commentLetter && !generatingLetter && (
-            <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={onCopyLetter}>
+            <Button size="sm" variant="ghost" className="h-7 text-2xs" onClick={onCopyLetter}>
               {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
             </Button>
           )}
@@ -115,14 +115,14 @@ export function LetterPanel({
         <>
           <div className="rounded-lg border bg-background overflow-hidden">
             <div className="border-b bg-muted/30 px-4 py-2 flex items-center justify-between">
-              <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">FLPPI — Comment Letter</span>
+              <span className="text-2xs font-semibold uppercase tracking-widest text-muted-foreground">FLPPI — Comment Letter</span>
               {generatingLetter && <Loader2 className="h-3 w-3 text-accent animate-spin" />}
             </div>
             <Textarea
               value={commentLetter}
               onChange={(e) => onLetterChange(e.target.value)}
               rows={18}
-              className="font-mono text-[11px] border-0 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-y"
+              className="font-mono text-xs border-0 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-y"
               placeholder={generatingLetter ? "Generating..." : ""}
             />
           </div>

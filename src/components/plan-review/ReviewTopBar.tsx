@@ -50,14 +50,14 @@ export function ReviewTopBar({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="text-sm font-semibold truncate">{projectName || "Plan Review"}</h1>
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] font-medium capitalize shrink-0">{tradeType}</span>
+            <span className="rounded bg-muted px-1.5 py-0.5 text-caption font-medium capitalize shrink-0">{tradeType}</span>
             {hvhz && (
-              <span className="flex items-center gap-0.5 text-[9px] font-semibold text-destructive shrink-0">
+              <span className="flex items-center gap-0.5 text-caption font-semibold text-destructive shrink-0">
                 <Wind className="h-3 w-3" /> HVHZ
               </span>
             )}
           </div>
-          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <span className="truncate">{address}</span>
             <span>{getCountyLabel(county)} County</span>
             {contractor && <ContractorHoverCard contractor={contractor} />}
@@ -66,7 +66,7 @@ export function ReviewTopBar({
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-accent text-accent-foreground shrink-0">
+            <button className="flex items-center gap-1 px-2 py-0.5 rounded-full text-2xs font-semibold bg-accent text-accent-foreground shrink-0">
               R{round}
               <ChevronDown className="h-3 w-3" />
             </button>
@@ -80,7 +80,7 @@ export function ReviewTopBar({
               >
                 R{r.round}
                 {r.findingsCount > 0 && (
-                  <span className="ml-auto text-[9px] text-muted-foreground">{r.findingsCount} findings</span>
+                  <span className="ml-auto text-caption text-muted-foreground">{r.findingsCount} findings</span>
                 )}
               </DropdownMenuItem>
             ))}
@@ -99,7 +99,7 @@ export function ReviewTopBar({
           className={cn(
             "h-8 text-xs shrink-0 transition-all",
             aiCompleteFlash !== null
-              ? "bg-[hsl(var(--success))] text-[hsl(var(--success-foreground))]"
+              ? "bg-success text-success-foreground"
               : !hasFindings && !aiRunning
               ? "bg-accent text-accent-foreground hover:bg-accent/90 animate-pulse"
               : "bg-accent text-accent-foreground hover:bg-accent/90"

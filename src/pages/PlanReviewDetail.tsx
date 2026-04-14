@@ -602,7 +602,7 @@ export default function PlanReviewDetail() {
           <div className="max-w-lg">
             {renderingPages && (
               <div className="mb-2 space-y-1">
-                <p className="text-[11px] text-accent font-medium">Rendering plan pages for visual analysis...</p>
+                <p className="text-xs text-accent font-medium">Rendering plan pages for visual analysis...</p>
                 <Progress value={renderProgress} className="h-1" />
               </div>
             )}
@@ -626,7 +626,7 @@ export default function PlanReviewDetail() {
               onClick={() => setMobileTab("findings")}
               className={cn("px-4 py-1.5 rounded-md text-xs font-medium transition-all", mobileTab === "findings" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted/50")}
             >
-              Findings {hasFindings && <span className="ml-1 text-[9px] opacity-70">{findings.length}</span>}
+              Findings {hasFindings && <span className="ml-1 text-caption opacity-70">{findings.length}</span>}
             </button>
           </div>
           {mobileTab === "plans" ? (
@@ -663,7 +663,7 @@ export default function PlanReviewDetail() {
                 {(["findings", "checklist", "completeness", "letter", "county"] as RightPanelMode[]).map((mode) => (
                   <button key={mode} onClick={() => setRightPanel(mode)} className={cn("px-3 py-1 rounded-md text-xs font-medium transition-all capitalize whitespace-nowrap", rightPanel === mode ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted/50")}>
                     {mode}
-                    {mode === "findings" && hasFindings && <span className="ml-1 text-[9px] opacity-70">{findings.length}</span>}
+                    {mode === "findings" && hasFindings && <span className="ml-1 text-caption opacity-70">{findings.length}</span>}
                   </button>
                 ))}
               </div>
@@ -697,7 +697,7 @@ export default function PlanReviewDetail() {
                                   <div className="flex items-center gap-2">
                                     <Icon className={cn("h-3.5 w-3.5", getDisciplineColor(discipline))} />
                                     <span className="font-medium">{getDisciplineLabel(discipline)}</span>
-                                    <Badge variant="secondary" className="text-[9px] h-4 px-1">{group.length}</Badge>
+                                    <Badge variant="secondary" className="text-caption h-4 px-1">{group.length}</Badge>
                                   </div>
                                 </AccordionTrigger>
                                 <AccordionContent className="px-3 pb-3 space-y-1.5">
@@ -753,19 +753,19 @@ export default function PlanReviewDetail() {
                 )}
                 <div className="shrink-0 border-t bg-muted/20 px-3 py-1.5 flex items-center gap-2 overflow-x-auto">
                   {uploadSuccess && (
-                    <span className="flex items-center gap-1 text-[10px] text-[hsl(var(--success))] font-medium animate-in fade-in">
+                    <span className="flex items-center gap-1 text-2xs text-success font-medium animate-in fade-in">
                       <Check className="h-3 w-3" /> Uploaded
                     </span>
                   )}
                   {fileUrls.map((url, i) => {
                     const name = decodeURIComponent(url.split("/").pop() || `Doc ${i + 1}`);
                     return (
-                      <span key={i} className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded truncate max-w-[200px]">
+                      <span key={i} className="text-2xs text-muted-foreground bg-muted px-2 py-0.5 rounded truncate max-w-[200px]">
                         {name}
                       </span>
                     );
                   })}
-                  <button className="text-[10px] text-accent hover:text-accent/80 transition-colors shrink-0" onClick={() => fileInputRef.current?.click()}>
+                  <button className="text-2xs text-accent hover:text-accent/80 transition-colors shrink-0" onClick={() => fileInputRef.current?.click()}>
                     + Add file
                   </button>
                   <input ref={fileInputRef} type="file" accept=".pdf" multiple className="hidden" onChange={(e) => handleFileUpload(e.target.files)} />
@@ -801,7 +801,7 @@ export default function PlanReviewDetail() {
               <PanelRight className="h-3.5 w-3.5" />
             </Button>
             {hasFindings && (
-              <span className="text-[9px] font-semibold text-muted-foreground" style={{ writingMode: "vertical-rl" }}>
+              <span className="text-caption font-semibold text-muted-foreground" style={{ writingMode: "vertical-rl" }}>
                 {findings.length} findings
               </span>
             )}
@@ -825,13 +825,13 @@ export default function PlanReviewDetail() {
                     )}
                   >
                     {mode}
-                    {mode === "findings" && hasFindings && <span className="ml-1 text-[9px] opacity-70">{findings.length}</span>}
+                    {mode === "findings" && hasFindings && <span className="ml-1 text-caption opacity-70">{findings.length}</span>}
                   </button>
                 ))}
                 {hasFindings && rightPanel === "findings" && (
                   <div className="ml-auto flex items-center gap-1.5">
                     <SeverityDonut critical={criticalCount} major={majorCount} minor={minorCount} size={24} />
-                    <span className="text-[10px] text-muted-foreground">{openCount} open</span>
+                    <span className="text-2xs text-muted-foreground">{openCount} open</span>
                   </div>
                 )}
               </div>
@@ -872,7 +872,7 @@ export default function PlanReviewDetail() {
                           onFilterChange={setStatusFilter}
                         />
                         {showDiff && previousFindings.length > 0 && (
-                          <div className="flex items-center gap-3 text-[10px] bg-muted/30 rounded-md px-2 py-1">
+                          <div className="flex items-center gap-3 text-2xs bg-muted/30 rounded-md px-2 py-1">
                             <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-accent" /> New</span>
                             <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40" /> Carried</span>
                           </div>
@@ -891,7 +891,7 @@ export default function PlanReviewDetail() {
                                     <Badge variant="secondary" className="text-[9px] h-4 px-1">{group.length}</Badge>
                                     <div className={cn("h-1.5 w-1.5 rounded-full", {
                                       "bg-destructive": worst === "critical",
-                                      "bg-[hsl(var(--warning))]": worst === "major",
+                                      "bg-warning": worst === "major",
                                       "bg-muted-foreground/40": worst === "minor",
                                     })} />
                                   </div>

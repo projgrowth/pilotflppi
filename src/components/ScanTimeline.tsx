@@ -29,12 +29,12 @@ export const ScanTimeline = forwardRef<HTMLDivElement, ScanTimelineProps>(functi
             {/* Status indicator */}
             <div className={cn(
               "h-6 w-6 rounded-full flex items-center justify-center shrink-0 transition-all duration-500",
-              done && "bg-[hsl(var(--success))]/15",
+              done && "bg-success/15",
               active && "bg-accent/15",
               !active && !done && "bg-muted"
             )}>
               {done ? (
-                <Check className="h-3.5 w-3.5 text-[hsl(var(--success))]" />
+                <Check className="h-3.5 w-3.5 text-success" />
               ) : active ? (
                 <Loader2 className="h-3.5 w-3.5 text-accent animate-spin" />
               ) : (
@@ -47,7 +47,7 @@ export const ScanTimeline = forwardRef<HTMLDivElement, ScanTimelineProps>(functi
               <p className={cn(
                 "text-xs font-medium transition-colors",
                 active && "text-accent",
-                done && "text-[hsl(var(--success))]",
+                done && "text-success",
                 !active && !done && "text-muted-foreground/50"
               )}>
                 {step.label}
@@ -58,7 +58,7 @@ export const ScanTimeline = forwardRef<HTMLDivElement, ScanTimelineProps>(functi
             <Icon className={cn(
               "h-3.5 w-3.5 shrink-0 transition-all",
               active && getDisciplineColor(step.discipline),
-              done && "text-[hsl(var(--success))]/60",
+              done && "text-success/60",
               !active && !done && "text-muted-foreground/20"
             )} />
           </div>

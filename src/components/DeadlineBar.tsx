@@ -16,24 +16,24 @@ export function DeadlineBar({ daysElapsed, totalDays = 21, className, statutory,
 
   const colorClass =
     remaining <= 3
-      ? "[&>div]:bg-destructive"
-      : remaining <= 6
-        ? "[&>div]:bg-[hsl(var(--warning))]"
+       ? "[&>div]:bg-destructive"
+       : remaining <= 6
+         ? "[&>div]:bg-warning"
         : "[&>div]:bg-success";
 
   return (
     <div className={cn("space-y-1.5", className)}>
       {label && (
-        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{label}</span>
+        <span className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">{label}</span>
       )}
       <div className="flex items-center justify-between">
         <span className={cn(
           "text-sm font-semibold font-mono",
-          remaining <= 0 ? "text-destructive animate-pulse" : remaining <= 3 ? "text-destructive" : remaining <= 6 ? "text-[hsl(var(--warning))]" : "text-success"
+          remaining <= 0 ? "text-destructive animate-pulse" : remaining <= 3 ? "text-destructive" : remaining <= 6 ? "text-warning" : "text-success"
         )}>
           {remaining <= 0 ? "OVERDUE" : `${remaining} ${statutory ? "biz" : ""} days left`}
         </span>
-        <span className="text-[10px] text-muted-foreground font-mono">
+        <span className="text-2xs text-muted-foreground font-mono">
           {statutory ? "Biz Day" : "Day"} {Math.min(daysElapsed, totalDays)}/{totalDays}
         </span>
       </div>

@@ -24,7 +24,7 @@ export default function ReviewStagePipeline({ currentStage, compact = false, cla
   if (compact) {
     const stage = stages[currentIdx] || stages[0];
     return (
-      <span className="badge-admin font-mono text-[11px]">
+      <span className="badge-admin font-mono text-xs">
         {stage.label}
       </span>
     );
@@ -50,7 +50,7 @@ export default function ReviewStagePipeline({ currentStage, compact = false, cla
             <div className="flex flex-col items-center gap-1">
               <div
                 className={cn(
-                  "flex h-5 w-5 items-center justify-center rounded-full text-[10px]",
+                  "flex h-5 w-5 items-center justify-center rounded-full text-2xs",
                   isCompleted && "bg-primary text-primary-foreground",
                   isCurrent && "bg-primary text-primary-foreground animate-pulse",
                   isUpcoming && "border border-fpp-gray-100 text-fpp-gray-400"
@@ -60,7 +60,7 @@ export default function ReviewStagePipeline({ currentStage, compact = false, cla
               </div>
               <span
                 className={cn(
-                  "text-[10px] font-sans whitespace-nowrap",
+                  "text-2xs font-sans whitespace-nowrap",
                   isCurrent ? "text-foreground font-medium" : "text-fpp-gray-400"
                 )}
               >
