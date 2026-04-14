@@ -992,6 +992,7 @@ export default function PlanReviewDetail() {
           </ResizablePanel>
         )}
       </ResizablePanelGroup>
+      )}
     </div>
   );
 }
