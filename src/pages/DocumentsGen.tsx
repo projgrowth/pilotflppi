@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import DOMPurify from "dompurify";
 import { useProjects } from "@/hooks/useProjects";
 import { useReviewFlags } from "@/hooks/useReviewData";
 import { useFirmSettings } from "@/hooks/useFirmSettings";

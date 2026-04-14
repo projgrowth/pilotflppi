@@ -302,7 +302,7 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
           .from("documents")
           .upload(path, uf.file, { upsert: true });
         if (uploadError) {
-          console.error("Upload error:", uploadError);
+          // upload error — skip this file
           continue;
         }
         // Store the path, not a public URL — bucket is private
