@@ -18,18 +18,19 @@ import { ArrowLeft, Check, X, Pencil, ExternalLink, ZoomIn, ZoomOut, Maximize } 
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
-const mockPins = [
-  { id: 1, x: 15, y: 20, severity: "critical" },
-  { id: 2, x: 35, y: 30, severity: "major" },
-  { id: 3, x: 55, y: 15, severity: "minor" },
-  { id: 4, x: 25, y: 55, severity: "critical" },
-  { id: 5, x: 70, y: 40, severity: "admin" },
-  { id: 6, x: 45, y: 65, severity: "major" },
-  { id: 7, x: 80, y: 25, severity: "minor" },
-  { id: 8, x: 60, y: 75, severity: "critical" },
-  { id: 9, x: 20, y: 80, severity: "major" },
-  { id: 10, x: 85, y: 60, severity: "admin" },
-];
+// Generate annotation pins from real review_flags data
+function flagsToPins(flags: any[]) {
+  // Use a deterministic pseudo-random layout based on flag id hash
+  return flags
+    .filter((f) => f.status === "active")
+    .map((f, i) => {
+      // Use characters from the UUID to place pins deterministically across the sheet
+      const hash = f.id.replace(/-/g, "");
+      const x = (parseInt(hash.slice(0, 4), 16) % 70) + 10; // 10-80%
+      const y = (parseInt(hash.slice(4, 8), 16) % 70) + 10; // 10-80%
+      return { id: i + 1, flagId: f.id, x, y, severity: f.severity || "admin" };
+    });
+}
 
 const pinColor: Record<string, string> = {
   critical: "#D63230", major: "#E8831A", minor: "#D4A017", admin: "#5B8DB8",
