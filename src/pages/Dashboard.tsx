@@ -1,284 +1,377 @@
-import { useState, useMemo } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusChip } from "@/components/StatusChip";
-import { DeadlineRing } from "@/components/DeadlineRing";
 import { EmptyState } from "@/components/EmptyState";
-import { KpiCard } from "@/components/KpiCard";
 import { useProjects, getDaysElapsed } from "@/hooks/useProjects";
-import { useDashboardStats } from "@/hooks/useDashboardStats";
-import { useActivityLog, getEventColor } from "@/hooks/useActivityLog";
-import { getStatutoryStatus } from "@/lib/statutory-deadlines";
-import { useQuery } from "@tanstack/react-query";
-import { useRevenueStats } from "@/hooks/useInvoices";
+import { useReviewFlagCounts } from "@/hooks/useReviewData";
+import { useInspections } from "@/hooks/useInspections";
+import { useCountUp } from "@/hooks/useCountUp";
+import ConfidenceBar from "@/components/shared/ConfidenceBar";
+import DaysActiveBadge from "@/components/shared/DaysActiveBadge";
+import SkeletonRow from "@/components/shared/SkeletonRow";
 import { supabase } from "@/integrations/supabase/client";
+import { useQuery } from "@tanstack/react-query";
 import {
-  FolderKanban, AlertTriangle, Plus,
-  ChevronRight, Timer, CheckCircle2, Briefcase, Gavel, DollarSign, Receipt, TrendingUp,
+  FileText, CheckCircle, ClipboardCheck, AlertTriangle,
+  Calendar, Zap, Eye, MessageSquare, FileCheck, Clipboard,
+  ChevronUp, ChevronDown, Plus,
 } from "lucide-react";
-import { format, formatDistanceToNow } from "date-fns";
+import { format, formatDistanceToNow, addDays, isToday, isTomorrow, isPast } from "date-fns";
 import { useNavigate } from "react-router-dom";
-import { QcPendingWidget } from "@/components/QcPendingWidget";
 import { cn } from "@/lib/utils";
 
-/* ── Unified project list ── */
+/* ── KPI Card ── */
+function DashKpi({
+  icon: Icon, iconColor, label, value, subRow, delay = 0,
+}: {
+  icon: React.ElementType; iconColor: string; label: string; value: number; subRow?: React.ReactNode; delay?: number;
+}) {
+  const displayed = useCountUp(value, 800, delay);
+  return (
+    <Card className="shadow-subtle">
+      <CardContent className="p-6 relative">
+        <Icon className="absolute top-5 right-5 h-6 w-6" style={{ color: iconColor }} />
+        <p className="font-display text-5xl font-bold tracking-tight text-foreground">{displayed}</p>
+        <p className="text-[13px] font-medium text-muted-foreground uppercase tracking-widest mt-1">{label}</p>
+        {subRow && <p className="text-xs font-mono text-muted-foreground/80 mt-2">{subRow}</p>}
+      </CardContent>
+    </Card>
+  );
+}
 
-function ProjectTable({ projects, navigate }: { projects: any[]; navigate: (path: string) => void }) {
+/* ── Active Reviews Table ── */
+type SortKey = "days" | "confidence" | "jurisdiction" | "stage";
+
+function ActiveReviewsQueue({ projects, navigate }: { projects: any[]; navigate: (p: string) => void }) {
+  const [sortKey, setSortKey] = useState<SortKey>("days");
+  const [sortAsc, setSortAsc] = useState(false);
+
   const rows = useMemo(() => {
-    const activeStatuses = ["intake", "plan_review", "comments_sent", "resubmitted", "approved", "permit_issued", "inspection_scheduled"];
-    return projects
-      .filter((p) => activeStatuses.includes(p.status))
-      .map((p) => ({
-        ...p,
-        daysElapsed: getDaysElapsed(p.notice_filed_at),
-        daysRemaining: Math.max(0, 21 - getDaysElapsed(p.notice_filed_at)),
-      }))
-      .sort((a, b) => a.daysRemaining - b.daysRemaining)
-      .slice(0, 8);
-  }, [projects]);
+    const activeStatuses = ["intake", "plan_review", "comments_sent", "resubmitted"];
+    const filtered = (projects || []).filter((p) => activeStatuses.includes(p.status));
+    return filtered
+      .map((p) => ({ ...p, daysActive: getDaysElapsed(p.notice_filed_at || p.created_at) }))
+      .sort((a, b) => {
+        let cmp = 0;
+        if (sortKey === "days") cmp = a.daysActive - b.daysActive;
+        else if (sortKey === "jurisdiction") cmp = (a.jurisdiction || "").localeCompare(b.jurisdiction || "");
+        else if (sortKey === "stage") cmp = (a.status || "").localeCompare(b.status || "");
+        return sortAsc ? cmp : -cmp;
+      });
+  }, [projects, sortKey, sortAsc]);
 
-  if (rows.length === 0) return null;
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortAsc(!sortAsc);
+    else { setSortKey(key); setSortAsc(false); }
+  };
 
-  return (
-    <Card className="shadow-subtle">
-      <div className="grid grid-cols-[1fr_120px_100px_32px] gap-2 px-5 py-3 border-b text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-        <span>Project</span>
-        <span>Status</span>
-        <span className="text-right">Deadline</span>
-        <span />
-      </div>
-      <div className="divide-y">
-        {rows.map((item) => (
-          <div
-            key={item.id}
-            onClick={() => navigate(`/projects/${item.id}`)}
-            className="list-row grid grid-cols-[1fr_120px_100px_32px] gap-2 items-center"
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <DeadlineRing daysElapsed={item.daysElapsed} size={32} />
-              <div className="min-w-0">
-                <p className="text-sm font-medium truncate">{item.name}</p>
-                <p className="text-[11px] text-muted-foreground truncate">{item.address}</p>
-              </div>
-            </div>
-            <StatusChip status={item.status} />
-            <span className={`font-mono text-xs text-right ${
-              item.daysRemaining <= 3 ? "text-destructive font-semibold" :
-              item.daysRemaining <= 6 ? "text-[hsl(var(--warning))]" :
-              "text-muted-foreground"
-            }`}>
-              {item.daysRemaining <= 0 ? "Overdue" : `${item.daysRemaining}d left`}
-            </span>
-            <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0" />
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
+  const SortIcon = ({ k }: { k: SortKey }) =>
+    sortKey === k ? (sortAsc ? <ChevronUp className="h-3 w-3 inline ml-0.5" /> : <ChevronDown className="h-3 w-3 inline ml-0.5" />) : null;
 
-/* ── Deadlines section (merged from Deadlines page) ── */
-
-function DeadlinesSection({ projects, navigate }: { projects: any[]; navigate: (path: string) => void }) {
-  const deadlineProjects = useMemo(() =>
-    (projects || [])
-      .filter((p) => p.deadline_at && !["certificate_issued", "cancelled"].includes(p.status))
-      .map((p) => {
-        const stat = getStatutoryStatus(p);
-        const daysElapsed = getDaysElapsed(p.notice_filed_at);
-        const remaining = Math.max(0, 21 - daysElapsed);
-        return { ...p, daysElapsed, remaining, statutory: stat };
-      })
-      .sort((a, b) => a.remaining - b.remaining)
-      .slice(0, 6),
-    [projects]
-  );
-
-  if (deadlineProjects.length === 0) return null;
-
-  return (
-    <Card className="shadow-subtle">
-      <div className="px-5 py-3 border-b flex items-center justify-between">
-        <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Upcoming Deadlines</span>
-      </div>
-      <div className="divide-y">
-        {deadlineProjects.map((d) => {
-          const progress = Math.min(d.daysElapsed / 21, 1);
-          const barColor = d.remaining <= 0 ? "bg-destructive" : d.remaining <= 3 ? "bg-destructive" : d.remaining <= 6 ? "bg-warning" : "bg-success";
-          const isOverdue = d.remaining <= 0;
-          const showStatutory = d.statutory.phase === "review" || d.statutory.phase === "inspection";
-          const statRemaining = d.statutory.phase === "review" ? d.statutory.reviewDaysRemaining : d.statutory.inspectionDaysRemaining;
-          const statTotal = d.statutory.phase === "review" ? d.statutory.reviewDaysTotal : d.statutory.inspectionDaysTotal;
-          const statUsed = d.statutory.phase === "review" ? d.statutory.reviewDaysUsed : d.statutory.inspectionDaysUsed;
-          const statProgress = statTotal > 0 ? Math.min(statUsed / statTotal, 1) : 0;
-          const statBarColor = statRemaining <= 3 ? "bg-destructive" : statRemaining <= 5 ? "bg-warning" : "bg-accent";
-
-          return (
-            <div
-              key={d.id}
-              onClick={() => navigate(`/projects/${d.id}`)}
-              className={cn("flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-muted/30 transition-colors", isOverdue && "bg-destructive/5")}
-            >
-              <div className="w-36 shrink-0">
-                <p className="text-sm font-medium truncate">{d.name}</p>
-                <p className="text-xs text-muted-foreground truncate mt-0.5">{d.address}</p>
-              </div>
-              <div className="flex-1 space-y-1.5">
-                <div className="h-2.5 rounded-full bg-muted overflow-hidden">
-                  <div className={cn("h-full rounded-full transition-all", barColor)} style={{ width: `${progress * 100}%` }} />
-                </div>
-                {showStatutory && (
-                  <div className="flex items-center gap-2">
-                    <Gavel className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
-                    <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div className={cn("h-full rounded-full transition-all", statBarColor)} style={{ width: `${statProgress * 100}%` }} />
-                    </div>
-                    <span className="text-[9px] font-mono text-muted-foreground w-10 text-right">{statRemaining}B</span>
-                  </div>
-                )}
-              </div>
-              <span className={cn(
-                "font-mono text-xs font-medium w-16 text-right",
-                isOverdue ? "text-destructive" : d.remaining <= 3 ? "text-destructive" : d.remaining <= 6 ? "text-warning" : "text-success"
-              )}>
-                {isOverdue ? "OVERDUE" : `${d.remaining}d`}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </Card>
-  );
-}
-
-/* ── Activity feed ── */
-
-function CompactActivityFeed({ activity, loading, navigate }: { activity: any[]; loading: boolean; navigate: (path: string) => void }) {
-  if (loading) {
+  if (rows.length === 0) {
     return (
-      <div className="space-y-3">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="flex items-start gap-2">
-            <div className="mt-1 h-1.5 w-1.5 rounded-full bg-muted animate-pulse" />
-            <div className="flex-1 space-y-1">
-              <div className="h-3 w-full rounded bg-muted animate-pulse" />
-              <div className="h-2.5 w-16 rounded bg-muted animate-pulse" />
-            </div>
-          </div>
-        ))}
-      </div>
+      <EmptyState
+        icon={Clipboard}
+        title="No active reviews"
+        description="Upload a plan set to begin your first AI-assisted review"
+        actionLabel="Start New Review"
+        onAction={() => navigate("/review")}
+      />
     );
   }
 
-  if (!activity || activity.length === 0) {
-    return <p className="text-xs text-muted-foreground text-center py-6">No recent activity</p>;
-  }
+  return (
+    <Card className="shadow-subtle overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+              <th className="text-left px-4 py-3">Project</th>
+              <th className="text-left px-4 py-3 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort("jurisdiction")}>
+                Jurisdiction<SortIcon k="jurisdiction" />
+              </th>
+              <th className="text-left px-4 py-3 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort("stage")}>
+                Stage<SortIcon k="stage" />
+              </th>
+              <th className="text-left px-4 py-3 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort("confidence")}>
+                AI Conf.<SortIcon k="confidence" />
+              </th>
+              <th className="text-left px-4 py-3 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort("days")}>
+                Days<SortIcon k="days" />
+              </th>
+              <th className="text-right px-4 py-3">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {rows.slice(0, 15).map((p) => (
+              <tr
+                key={p.id}
+                className="hover:bg-muted/30 cursor-pointer transition-colors"
+                onClick={() => navigate(`/review/${p.id}`)}
+              >
+                <td className="px-4 py-3">
+                  <p className="font-medium truncate max-w-[200px]">{p.name}</p>
+                  <p className="text-[11px] text-muted-foreground truncate">{p.address}</p>
+                </td>
+                <td className="px-4 py-3 text-xs text-muted-foreground">{p.jurisdiction || p.county || "—"}</td>
+                <td className="px-4 py-3"><StatusChip status={p.status} /></td>
+                <td className="px-4 py-3"><ConfidenceBar score={0.75} /></td>
+                <td className="px-4 py-3"><DaysActiveBadge days={p.daysActive} /></td>
+                <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center justify-end gap-1">
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate(`/review/${p.id}`)}>
+                      <Eye className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate(`/projects/${p.id}`)}>
+                      <MessageSquare className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate(`/documents`)}>
+                      <FileCheck className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+/* ── Upcoming Deadlines Panel ── */
+function DeadlinesPanel({ projects, navigate }: { projects: any[]; navigate: (p: string) => void }) {
+  const items = useMemo(() => {
+    const now = new Date();
+    const upcoming = (projects || [])
+      .filter((p) => p.deadline_at && !["certificate_issued", "cancelled", "on_hold"].includes(p.status))
+      .map((p) => ({ ...p, deadlineDate: new Date(p.deadline_at!) }))
+      .filter((p) => p.deadlineDate >= addDays(now, -1) && p.deadlineDate <= addDays(now, 7))
+      .sort((a, b) => a.deadlineDate.getTime() - b.deadlineDate.getTime())
+      .slice(0, 8);
+    return upcoming;
+  }, [projects]);
+
+  const getDayLabel = (d: Date) => {
+    if (isToday(d)) return "TODAY";
+    if (isTomorrow(d)) return "TOMORROW";
+    return format(d, "EEE").toUpperCase();
+  };
+
+  const getDotColor = (d: Date) => {
+    if (isPast(d) && !isToday(d)) return "bg-destructive";
+    if (isToday(d)) return "bg-[hsl(var(--warning))]";
+    return "bg-accent";
+  };
 
   return (
-    <div className="space-y-3">
-      {activity.map((item) => (
-        <div
-          key={item.id}
-          className={`flex items-start gap-2 ${item.project_id ? "cursor-pointer hover:bg-muted/30 -mx-1 px-1 rounded transition-colors" : ""}`}
-          onClick={() => item.project_id && navigate(`/projects/${item.project_id}`)}
-        >
-          <div className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${getEventColor(item.event_type)}`} />
-          <div className="flex-1">
-            <p className="text-xs leading-relaxed">{item.description}</p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">
-              {formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}
-            </p>
+    <Card className="shadow-subtle">
+      <div className="px-5 py-4 border-b flex items-center gap-2">
+        <Calendar className="h-4 w-4 text-muted-foreground" />
+        <span className="text-[15px] font-semibold text-foreground">Upcoming Deadlines</span>
+      </div>
+      <CardContent className="p-5">
+        {items.length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center py-4">No upcoming deadlines</p>
+        ) : (
+          <div className="space-y-3">
+            {items.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-start gap-3 cursor-pointer hover:bg-muted/30 -mx-2 px-2 py-1 rounded transition-colors"
+                onClick={() => navigate(`/projects/${item.id}`)}
+              >
+                <span className="text-[11px] font-mono text-muted-foreground uppercase w-[70px] pt-0.5 shrink-0">
+                  {getDayLabel(item.deadlineDate)}
+                </span>
+                <div className={cn("mt-1.5 h-2 w-2 rounded-full shrink-0", getDotColor(item.deadlineDate))} />
+                <span className="text-[13px] text-foreground">{item.name}</span>
+              </div>
+            ))}
           </div>
-        </div>
-      ))}
-    </div>
+        )}
+        <Button variant="link" className="text-accent text-[13px] p-0 mt-3 h-auto" onClick={() => navigate("/deadlines")}>
+          View calendar →
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ── AI Activity Feed ── */
+function AIActivityFeed() {
+  const { data: aiOutputs, refetch } = useQuery({
+    queryKey: ["ai-activity-feed"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("ai_outputs")
+        .select("id, prediction, severity, confidence_score, project_id, created_at")
+        .order("created_at", { ascending: false })
+        .limit(8);
+      if (error) throw error;
+      // get project names
+      const ids = [...new Set((data || []).map((d) => d.project_id).filter(Boolean))];
+      let projectMap = new Map<string, string>();
+      if (ids.length > 0) {
+        const { data: ps } = await supabase.from("projects").select("id, name").in("id", ids);
+        projectMap = new Map((ps || []).map((p) => [p.id, p.name]));
+      }
+      return (data || []).map((d) => ({ ...d, projectName: projectMap.get(d.project_id!) || "Unknown" }));
+    },
+  });
+
+  // Auto-refresh every 60s
+  useEffect(() => {
+    const interval = setInterval(() => refetch(), 60000);
+    return () => clearInterval(interval);
+  }, [refetch]);
+
+  const severityDot: Record<string, string> = {
+    critical: "bg-destructive",
+    major: "bg-[hsl(var(--warning))]",
+    minor: "bg-[hsl(var(--status-minor))]",
+    admin: "bg-[hsl(var(--status-admin))]",
+  };
+
+  return (
+    <Card className="shadow-subtle">
+      <div className="px-5 py-4 border-b flex items-center gap-2">
+        <Zap className="h-4 w-4 text-[hsl(var(--fpp-gold))]" />
+        <span className="text-[15px] font-semibold text-foreground">AI Activity</span>
+      </div>
+      <CardContent className="p-5">
+        {!aiOutputs || aiOutputs.length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center py-4">No AI activity yet</p>
+        ) : (
+          <div className="space-y-3">
+            {aiOutputs.map((item) => (
+              <div key={item.id} className="flex items-start gap-2">
+                <div className={cn("mt-1.5 h-2 w-2 rounded-full shrink-0", severityDot[item.severity || ""] || "bg-muted-foreground")} />
+                <div className="flex-1">
+                  <p className="text-xs text-foreground/80">
+                    {item.prediction || "AI check"} • <span className="text-muted-foreground">{item.projectName}</span>
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    {formatDistanceToNow(new Date(item.created_at!), { addSuffix: true })}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
 /* ── Main Dashboard ── */
-
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { data: stats, isLoading: statsLoading } = useDashboardStats();
   const { data: projects, isLoading: projectsLoading } = useProjects();
-  const { data: activity, isLoading: activityLoading } = useActivityLog(8);
-  const { data: revenueStats } = useRevenueStats();
-  const { data: overdueProjects } = useQuery({
-    queryKey: ["overdue-projects"],
+  const { data: flagCounts } = useReviewFlagCounts();
+  const { data: inspections } = useInspections();
+
+  // KPI calculations
+  const activeStatuses = ["intake", "plan_review", "comments_sent", "resubmitted"];
+  const activeReviews = useMemo(() => (projects || []).filter((p) => activeStatuses.includes(p.status)), [projects]);
+  const awaitingResub = useMemo(() => (projects || []).filter((p) => p.status === "comments_sent").length, [projects]);
+  const overdueCount = useMemo(() => {
+    const now = new Date();
+    return (projects || []).filter((p) => p.deadline_at && new Date(p.deadline_at) < now && activeStatuses.includes(p.status)).length;
+  }, [projects]);
+
+  // Approvals this week
+  const { data: approvalsData } = useQuery({
+    queryKey: ["approvals-this-week"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("projects")
-        .select("id, name, deadline_at")
-        .lt("deadline_at", new Date().toISOString())
-        .not("status", "in", '("certificate_issued","cancelled","on_hold")');
-      if (error) throw error;
-      return data || [];
+      const now = new Date();
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - now.getDay());
+      startOfWeek.setHours(0, 0, 0, 0);
+      const lastWeekStart = new Date(startOfWeek);
+      lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+
+      const [thisWeek, lastWeek] = await Promise.all([
+        supabase.from("projects").select("id").eq("status", "approved").gte("updated_at", startOfWeek.toISOString()),
+        supabase.from("projects").select("id").eq("status", "approved").gte("updated_at", lastWeekStart.toISOString()).lt("updated_at", startOfWeek.toISOString()),
+      ]);
+      return { thisWeek: thisWeek.data?.length || 0, lastWeek: lastWeek.data?.length || 0 };
     },
   });
+
+  // Pending inspections
+  const pendingInspections = useMemo(() =>
+    (inspections || []).filter((i) => i.result === "pending" && i.scheduled_at),
+    [inspections]
+  );
+  const nextInspection = pendingInspections[0];
+
+  const openFlags = (flagCounts?.total ?? 0) - (flagCounts?.resolved ?? 0);
 
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const displayName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "there";
+  const approvalDiff = (approvalsData?.thisWeek ?? 0) - (approvalsData?.lastWeek ?? 0);
 
   return (
     <div className="p-8 md:p-10 max-w-7xl">
-      {/* Overdue banner */}
-      {overdueProjects && overdueProjects.length > 0 && (
-        <div className="mb-6 rounded-lg border-l-4 border-l-destructive bg-destructive/5 px-5 py-4 flex items-center gap-4">
-          <AlertTriangle className="h-4 w-4 text-destructive shrink-0 animate-pulse" />
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-destructive">
-              {overdueProjects.length} project{overdueProjects.length > 1 ? "s" : ""} overdue
-            </p>
-            <p className="text-xs text-destructive/70 mt-0.5">
-              {overdueProjects.slice(0, 3).map(p => p.name).join(", ")}
-              {overdueProjects.length > 3 ? ` +${overdueProjects.length - 3} more` : ""}
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* Greeting */}
       <div className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+        <h1 className="text-2xl font-display font-semibold tracking-tight text-foreground">
           {greeting}, {displayName}.
         </h1>
         <p className="text-sm text-muted-foreground mt-1">{format(now, "EEEE, MMMM d, yyyy")}</p>
       </div>
 
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-        <KpiCard label="Active" value={stats?.activeProjects ?? 0} icon={Briefcase} loading={statsLoading} onClick={() => navigate("/projects")} />
-        <KpiCard label="Due This Week" value={stats?.criticalDeadlines ?? 0} icon={AlertTriangle} destructive={(stats?.criticalDeadlines ?? 0) > 0} loading={statsLoading} />
-        <KpiCard label="Statutory Due" value={stats?.statutoryDue ?? 0} icon={Gavel} destructive={(stats?.statutoryDue ?? 0) > 0} loading={statsLoading} />
-        <KpiCard label="Avg Review" value={stats?.avgReviewTime ?? "0d"} icon={Timer} loading={statsLoading} />
-      </div>
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
-        <KpiCard
-          label="Revenue MTD"
-          value={`$${(revenueStats?.revenueMTD ?? 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
-          icon={DollarSign}
-          accent
-          loading={!revenueStats}
-          onClick={() => navigate("/invoices")}
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+        <DashKpi
+          icon={FileText}
+          iconColor="#0E7C7B"
+          label="active reviews"
+          value={activeReviews.length}
+          delay={0}
+          subRow={<>{awaitingResub} awaiting resubmittal • {overdueCount} overdue</>}
         />
-        <KpiCard
-          label="Outstanding"
-          value={`$${(revenueStats?.outstanding ?? 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
-          icon={Receipt}
-          loading={!revenueStats}
-          onClick={() => navigate("/invoices")}
+        <DashKpi
+          icon={CheckCircle}
+          iconColor="#2E7D52"
+          label="approved this week"
+          value={approvalsData?.thisWeek ?? 0}
+          delay={100}
+          subRow={
+            approvalDiff !== 0 ? (
+              <span className={approvalDiff > 0 ? "text-success" : "text-destructive"}>
+                {approvalDiff > 0 ? "↑" : "↓"} {Math.abs(approvalDiff)} vs last week
+              </span>
+            ) : <>same as last week</>
+          }
         />
-        <KpiCard
-          label="Overdue"
-          value={`$${(revenueStats?.overdue ?? 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
-          icon={TrendingUp}
-          destructive={(revenueStats?.overdueCount ?? 0) > 0}
-          loading={!revenueStats}
-          onClick={() => navigate("/invoices")}
+        <DashKpi
+          icon={ClipboardCheck}
+          iconColor="#C8972A"
+          label="inspections scheduled"
+          value={pendingInspections.length}
+          delay={200}
+          subRow={
+            nextInspection ? (
+              <>Next: {format(new Date(nextInspection.scheduled_at!), "MMM d")}</>
+            ) : undefined
+          }
+        />
+        <DashKpi
+          icon={AlertTriangle}
+          iconColor="#D63230"
+          label="open flags across reviews"
+          value={openFlags}
+          delay={300}
+          subRow={
+            <>{flagCounts?.critical ?? 0} critical • {flagCounts?.major ?? 0} major • {flagCounts?.minor ?? 0} minor</>
+          }
         />
       </div>
 
@@ -289,65 +382,26 @@ export default function Dashboard() {
         </Button>
       </div>
 
-      {/* QC Pending Reviews */}
-      <div className="mb-8">
-        <QcPendingWidget />
-      </div>
-
-      {/* Two-column: project table + activity sidebar */}
-      <div className="grid gap-8 lg:grid-cols-[1fr_300px]">
-        <div className="space-y-8">
-          <div>
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Active Projects</h2>
-              <Button variant="ghost" size="sm" className="text-xs text-accent" onClick={() => navigate("/projects")}>
-                View all →
-              </Button>
-            </div>
-            {projectsLoading ? (
-              <Card className="shadow-subtle">
-                <div className="divide-y">
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <div key={i} className="flex items-center gap-4 px-5 py-4">
-                      <div className="h-8 w-8 rounded-full bg-muted animate-pulse" />
-                      <div className="flex-1 space-y-2">
-                        <div className="h-4 w-40 rounded bg-muted animate-pulse" />
-                        <div className="h-3 w-56 rounded bg-muted animate-pulse" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            ) : (projects || []).length === 0 ? (
-              <EmptyState
-                icon={FolderKanban}
-                title="No projects yet"
-                description="Create your first project to get started"
-                actionLabel="Create Project"
-                onAction={() => navigate("/projects?action=new")}
-              />
-            ) : (
-              <ProjectTable projects={projects || []} navigate={navigate} />
-            )}
-          </div>
-
-          {/* Deadlines section (merged) */}
-          {!projectsLoading && projects && projects.length > 0 && (
-            <div>
-              <h2 className="mb-4 text-xs font-semibold text-muted-foreground uppercase tracking-widest">Deadlines</h2>
-              <DeadlinesSection projects={projects} navigate={navigate} />
-            </div>
+      {/* Main 2-column layout */}
+      <div className="grid gap-6 lg:grid-cols-[65%_1fr]">
+        {/* Left: Active Reviews Queue */}
+        <div>
+          <h2 className="font-display text-xl font-semibold text-foreground mb-4">Active Reviews</h2>
+          {projectsLoading ? (
+            <Card className="shadow-subtle">
+              <div className="p-4 space-y-2">
+                {Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} cols={6} />)}
+              </div>
+            </Card>
+          ) : (
+            <ActiveReviewsQueue projects={projects || []} navigate={navigate} />
           )}
         </div>
 
-        {/* Activity sidebar */}
-        <div>
-          <h2 className="mb-4 text-xs font-semibold text-muted-foreground uppercase tracking-widest">Activity</h2>
-          <Card className="shadow-subtle">
-            <CardContent className="p-5">
-              <CompactActivityFeed activity={activity || []} loading={activityLoading} navigate={navigate} />
-            </CardContent>
-          </Card>
+        {/* Right: Deadlines + AI Activity */}
+        <div className="space-y-6">
+          <DeadlinesPanel projects={projects || []} navigate={navigate} />
+          <AIActivityFeed />
         </div>
       </div>
     </div>
