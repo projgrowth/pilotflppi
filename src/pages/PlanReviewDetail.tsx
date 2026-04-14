@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -23,6 +24,7 @@ import { ReviewTopBar } from "@/components/plan-review/ReviewTopBar";
 import { CountyPanel } from "@/components/plan-review/CountyPanel";
 import { LetterPanel } from "@/components/plan-review/LetterPanel";
 import { cn } from "@/lib/utils";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { FindingCard, type Finding } from "@/components/FindingCard";
 import { SeverityDonut } from "@/components/SeverityDonut";
 import { ScanTimeline } from "@/components/ScanTimeline";
