@@ -1,0 +1,146 @@
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Sparkles, Loader2, Send, Check, Copy } from "lucide-react";
+import { CountyDocumentPackage } from "@/components/CountyDocumentPackage";
+import { cn } from "@/lib/utils";
+import type { Finding } from "@/components/FindingCard";
+import type { FindingStatus } from "@/components/FindingStatusFilter";
+
+interface LetterPanelProps {
+  reviewId: string;
+  projectId: string;
+  projectName: string;
+  address: string;
+  county: string;
+  jurisdiction: string;
+  tradeType: string;
+  round: number;
+  aiCheckStatus: string;
+  qcStatus: string;
+  hasFindings: boolean;
+  findings: Finding[];
+  findingStatuses: Record<number, FindingStatus>;
+  firmSettings: any;
+  commentLetter: string;
+  generatingLetter: boolean;
+  copied: boolean;
+  userId?: string;
+  onGenerateLetter: () => void;
+  onCopyLetter: () => void;
+  onLetterChange: (value: string) => void;
+  onQcApprove: () => void;
+  onQcReject: () => void;
+  onDocumentGenerated: () => void;
+}
+
+export function LetterPanel({
+  qcStatus, hasFindings, findings, findingStatuses, firmSettings,
+  commentLetter, generatingLetter, copied, county, jurisdiction,
+  tradeType, round, projectId, projectName, address, aiCheckStatus,
+  onGenerateLetter, onCopyLetter, onLetterChange, onQcApprove, onQcReject, onDocumentGenerated,
+}: LetterPanelProps) {
+  return (
+    <div className="p-3 space-y-3">
+      {/* QC Status Bar */}
+      {hasFindings && aiCheckStatus === "complete" && (
+        <div className={cn(
+          "rounded-lg border px-3 py-2 flex items-center justify-between",
+          qcStatus === "qc_approved" ? "border-success/30 bg-success/5" :
+          qcStatus === "qc_rejected" ? "border-destructive/30 bg-destructive/5" :
+          "border-[hsl(var(--warning))]/30 bg-[hsl(var(--warning))]/5"
+        )}>
+          <div className="flex items-center gap-2">
+            <div className={cn("h-2 w-2 rounded-full",
+              qcStatus === "qc_approved" ? "bg-success" :
+              qcStatus === "qc_rejected" ? "bg-destructive" :
+              "bg-[hsl(var(--warning))]"
+            )} />
+            <span className="text-[11px] font-semibold">
+              {qcStatus === "qc_approved" ? "QC Approved" :
+               qcStatus === "qc_rejected" ? "QC Rejected" : "Pending QC Review"}
+            </span>
+          </div>
+          {qcStatus === "pending_qc" && (
+            <div className="flex gap-1">
+              <Button size="sm" variant="outline" className="h-6 text-[10px] text-destructive border-destructive/30" onClick={onQcReject}>
+                Reject
+              </Button>
+              <Button size="sm" className="h-6 text-[10px] bg-success text-success-foreground hover:bg-success/90" onClick={onQcApprove}>
+                Approve
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Comment Letter</span>
+        <div className="flex items-center gap-1.5">
+          {hasFindings && qcStatus === "qc_approved" && (
+            <CountyDocumentPackage
+              projectId={projectId}
+              projectName={projectName}
+              address={address}
+              county={county}
+              jurisdiction={jurisdiction}
+              tradeType={tradeType}
+              round={round}
+              findings={findings}
+              findingStatuses={Object.fromEntries(Object.entries(findingStatuses).map(([k, v]) => [Number(k), v]))}
+              firmInfo={firmSettings}
+              onDocumentGenerated={onDocumentGenerated}
+            />
+          )}
+          {hasFindings && qcStatus !== "qc_approved" && (
+            <span className="text-[9px] text-muted-foreground italic">QC approval required for export</span>
+          )}
+          {commentLetter && !generatingLetter && (
+            <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={onCopyLetter}>
+              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            </Button>
+          )}
+        </div>
+      </div>
+      {!hasFindings && (
+        <div className="text-center py-12">
+          <p className="text-xs text-muted-foreground">Run AI check first to generate findings</p>
+        </div>
+      )}
+      {hasFindings && !commentLetter && !generatingLetter && (
+        <Button variant="outline" className="w-full h-10 text-xs" onClick={onGenerateLetter}>
+          <Sparkles className="h-3.5 w-3.5 mr-1.5" /> Generate Comment Letter
+        </Button>
+      )}
+      {(commentLetter || generatingLetter) && (
+        <>
+          <div className="rounded-lg border bg-background overflow-hidden">
+            <div className="border-b bg-muted/30 px-4 py-2 flex items-center justify-between">
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">FLPPI — Comment Letter</span>
+              {generatingLetter && <Loader2 className="h-3 w-3 text-accent animate-spin" />}
+            </div>
+            <Textarea
+              value={commentLetter}
+              onChange={(e) => onLetterChange(e.target.value)}
+              rows={18}
+              className="font-mono text-[11px] border-0 rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 resize-y"
+              placeholder={generatingLetter ? "Generating..." : ""}
+            />
+          </div>
+          {commentLetter && !generatingLetter && (
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" className="text-xs flex-1" onClick={onGenerateLetter}>
+                <Sparkles className="h-3 w-3 mr-1" /> Regenerate
+              </Button>
+              <Button size="sm" className="text-xs flex-1 bg-accent text-accent-foreground hover:bg-accent/90"
+                disabled={qcStatus !== "qc_approved"}
+                title={qcStatus !== "qc_approved" ? "QC approval required" : ""}
+              >
+                <Send className="h-3 w-3 mr-1" /> Send to Contractor
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
