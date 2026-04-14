@@ -50,7 +50,7 @@ export default function Review() {
   return (
     <div className="page-enter space-y-6">
       <div>
-        <h1 className="font-display text-3xl text-foreground">Plan Review</h1>
+        <h1 className="text-3xl font-semibold text-foreground">Plan Review</h1>
         <p className="text-sm text-fpp-gray-600 mt-1">Select a project to begin or continue a review</p>
       </div>
 

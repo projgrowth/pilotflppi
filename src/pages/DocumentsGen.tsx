@@ -133,7 +133,7 @@ export default function DocumentsPage() {
   return (
     <div className="page-enter space-y-6">
       <div>
-        <h1 className="font-display text-3xl text-foreground">Document Generator</h1>
+        <h1 className="text-3xl font-semibold text-foreground">Document Generator</h1>
         <p className="text-sm text-fpp-gray-600 mt-1">Generate required Florida Private Provider documents from your active review data.</p>
       </div>
 
@@ -201,7 +201,7 @@ export default function DocumentsPage() {
             ) : (
               <div className="aspect-[8.5/11] bg-white border rounded p-8 max-h-[400px] overflow-auto">
                 <div className="text-center mb-6">
-                  <h2 className="font-display text-xl">State of Florida</h2>
+                  <h2 className="text-xl font-semibold">State of Florida</h2>
                   <p className="text-sm text-fpp-gray-600">{generating}</p>
                 </div>
                 <p className="text-sm text-fpp-gray-600 leading-relaxed">

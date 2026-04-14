@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import SeverityBadge from "@/components/shared/SeverityBadge";
 import ConfidenceBadge from "@/components/shared/ConfidenceBadge";
-import { ArrowLeft, Check, X, Pencil, ExternalLink, ZoomIn, ZoomOut, Maximize } from "lucide-react";
+import { ArrowLeft, Check, X, Pencil, ZoomIn, ZoomOut, Maximize } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -140,7 +140,7 @@ export default function ReviewDetail() {
         {/* Left - Plan viewer */}
         <div className="hidden md:flex w-[60%] bg-fpp-navy-mid relative flex-col">
            <div className="flex-1 relative flex items-center justify-center">
-             <p className="text-fpp-gray-400 text-lg font-display opacity-30">Plan Sheet Viewer</p>
+             <p className="text-fpp-gray-400 text-lg opacity-30">Plan Sheet Viewer</p>
              {/* Pins from real flags */}
              {flagsToPins(flags || []).map((pin) => (
                <div

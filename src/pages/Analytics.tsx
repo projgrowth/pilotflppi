@@ -7,35 +7,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Legend, CartesianGrid } from "recharts";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 
 const COLORS = ["#0E7C7B", "#C8972A", "#1A3250", "#2E7D52", "#5B8DB8", "#D4A017"];
-
-// Mock chart data
-const volumeData = [
-  { month: "Jan", completed: 12, started: 15 },
-  { month: "Feb", completed: 14, started: 18 },
-  { month: "Mar", completed: 10, started: 12 },
-  { month: "Apr", completed: 16, started: 20 },
-  { month: "May", completed: 18, started: 22 },
-  { month: "Jun", completed: 15, started: 17 },
-];
-
-const commonFlags = [
-  { name: "Hurricane Straps", count: 24, severity: "critical" },
-  { name: "Wind-Borne Debris", count: 19, severity: "critical" },
-  { name: "FL Product Approval", count: 17, severity: "major" },
-  { name: "Egress Windows", count: 14, severity: "critical" },
-  { name: "Energy Form 405", count: 12, severity: "major" },
-  { name: "HVAC Manual J", count: 10, severity: "major" },
-  { name: "Sealed Drawings", count: 9, severity: "major" },
-  { name: "Smoke Detectors", count: 8, severity: "critical" },
-];
-
-const accuracyData = [
-  { week: "W1", rate: 78 }, { week: "W2", rate: 80 }, { week: "W3", rate: 82 },
-  { week: "W4", rate: 81 }, { week: "W5", rate: 85 }, { week: "W6", rate: 87 },
-  { week: "W7", rate: 86 }, { week: "W8", rate: 89 },
-];
 
 const severityBarColor: Record<string, string> = {
   critical: "#D63230", major: "#E8831A", minor: "#D4A017",
@@ -47,24 +22,139 @@ export default function Analytics() {
   const { data: aiStats } = useAILearningStats();
   const [range, setRange] = useState("30");
 
-  const jurisdictionData = useMemo(() => {
-    const map: Record<string, number> = {};
-    (projects || []).forEach((p) => { map[p.county] = (map[p.county] || 0) + 1; });
-    return Object.entries(map).map(([name, value]) => ({ name, value }));
-  }, [projects]);
+  // Compute date filter
+  const rangeDate = useMemo(() => {
+    if (range === "all") return null;
+    const d = new Date();
+    d.setDate(d.getDate() - parseInt(range));
+    return d.toISOString();
+  }, [range]);
 
-  const projectCount = projects?.length || 0;
+  // Real volume data — group projects by month
+  const volumeData = useMemo(() => {
+    const filtered = (projects || []).filter(
+      (p) => !rangeDate || p.created_at >= rangeDate
+    );
+    const monthMap: Record<string, { started: number; completed: number }> = {};
+    filtered.forEach((p) => {
+      const month = new Date(p.created_at).toLocaleDateString("en-US", { month: "short" });
+      if (!monthMap[month]) monthMap[month] = { started: 0, completed: 0 };
+      monthMap[month].started++;
+      if (["approved", "permit_issued", "certificate_issued", "inspection_complete"].includes(p.status)) {
+        monthMap[month].completed++;
+      }
+    });
+    return Object.entries(monthMap).map(([month, v]) => ({ month, ...v }));
+  }, [projects, rangeDate]);
+
+  // Real flag frequency from review_flags
+  const { data: flagFrequency } = useQuery({
+    queryKey: ["flag-frequency"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("review_flags")
+        .select("description, severity")
+        .eq("status", "active");
+      if (!data || data.length === 0) return [];
+      // Count by description (first 40 chars as key)
+      const counts: Record<string, { name: string; count: number; severity: string }> = {};
+      data.forEach((f) => {
+        const key = (f.description || "Unknown").slice(0, 40);
+        if (!counts[key]) counts[key] = { name: key, count: 0, severity: f.severity || "minor" };
+        counts[key].count++;
+      });
+      return Object.values(counts).sort((a, b) => b.count - a.count).slice(0, 8);
+    },
+  });
+
+  // Real AI accuracy from corrections vs ai_outputs
+  const { data: accuracyData } = useQuery({
+    queryKey: ["ai-accuracy-trend"],
+    queryFn: async () => {
+      const { data: outputs } = await supabase
+        .from("ai_outputs")
+        .select("id, created_at")
+        .order("created_at");
+      const { data: corrections } = await supabase
+        .from("corrections")
+        .select("id, created_at");
+      if (!outputs || outputs.length === 0) return [];
+      // Group by week
+      const weeks: Record<string, { total: number; corrected: number }> = {};
+      outputs.forEach((o) => {
+        const week = `W${Math.ceil(new Date(o.created_at!).getDate() / 7)}`;
+        if (!weeks[week]) weeks[week] = { total: 0, corrected: 0 };
+        weeks[week].total++;
+      });
+      (corrections || []).forEach((c) => {
+        const week = `W${Math.ceil(new Date(c.created_at!).getDate() / 7)}`;
+        if (weeks[week]) weeks[week].corrected++;
+      });
+      return Object.entries(weeks).map(([week, v]) => ({
+        week,
+        rate: v.total > 0 ? Math.round(((v.total - v.corrected) / v.total) * 100) : 100,
+      }));
+    },
+  });
+
+  // Real HCR table from corrections
+  const { data: hcrData } = useQuery({
+    queryKey: ["hcr-table"],
+    queryFn: async () => {
+      const { data: corrections } = await supabase
+        .from("corrections")
+        .select("correction_type, fbc_section");
+      const { data: outputs } = await supabase
+        .from("ai_outputs")
+        .select("id, prediction");
+      if (!outputs || outputs.length === 0) return [];
+      const totalOutputs = outputs.length;
+      const totalCorrections = corrections?.length || 0;
+      const overrides = corrections?.filter((c) => c.correction_type === "override").length || 0;
+      const edits = corrections?.filter((c) => c.correction_type === "edit").length || 0;
+      const flags = corrections?.filter((c) => c.correction_type === "flag").length || 0;
+      return [
+        { cat: "Overrides (AI wrong)", total: totalOutputs, confirmed: totalOutputs - overrides, overrides },
+        { cat: "Edits (partially correct)", total: totalOutputs, confirmed: totalOutputs - edits, overrides: edits },
+        { cat: "Missed Issues (flagged)", total: totalOutputs, confirmed: totalOutputs - flags, overrides: flags },
+        { cat: "All Corrections", total: totalOutputs, confirmed: totalOutputs - totalCorrections, overrides: totalCorrections },
+      ];
+    },
+  });
+
+  const jurisdictionData = useMemo(() => {
+    const filtered = (projects || []).filter(
+      (p) => !rangeDate || p.created_at >= rangeDate
+    );
+    const map: Record<string, number> = {};
+    filtered.forEach((p) => { map[p.county] = (map[p.county] || 0) + 1; });
+    return Object.entries(map).map(([name, value]) => ({ name, value }));
+  }, [projects, rangeDate]);
+
+  const projectCount = useMemo(() => {
+    return (projects || []).filter(
+      (p) => !rangeDate || p.created_at >= rangeDate
+    ).length;
+  }, [projects, rangeDate]);
+
   const avgDays = useMemo(() => {
-    const approved = (projects || []).filter(p => p.status === "approved" || p.status === "certificate_issued");
+    const approved = (projects || [])
+      .filter((p) => !rangeDate || p.created_at >= rangeDate)
+      .filter((p) => p.status === "approved" || p.status === "certificate_issued");
     if (approved.length === 0) return 0;
-    const total = approved.reduce((s, p) => s + Math.floor((Date.now() - new Date(p.created_at).getTime()) / 86400000), 0);
+    const total = approved.reduce(
+      (s, p) => s + Math.floor((Date.now() - new Date(p.created_at).getTime()) / 86400000),
+      0
+    );
     return Math.round(total / approved.length);
-  }, [projects]);
+  }, [projects, rangeDate]);
+
+  const commonFlags = flagFrequency || [];
 
   return (
     <div className="page-enter space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-3xl text-foreground">Analytics</h1>
+        <h1 className="text-3xl font-semibold text-foreground">Analytics</h1>
         <Select value={range} onValueChange={setRange}>
           <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -79,7 +169,7 @@ export default function Analytics() {
       {/* KPI row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: "Reviews This Month", value: projectCount },
+          { label: "Reviews This Period", value: projectCount },
           { label: "Avg. Turnaround", value: `${avgDays}d` },
           { label: "Flags Per Review", value: flagCounts ? Math.round(flagCounts.total / Math.max(projectCount, 1)) : 0 },
           { label: "AI Accuracy Rate", value: aiStats ? `${Math.round((1 - aiStats.hcr) * 100)}%` : "—" },
@@ -87,7 +177,7 @@ export default function Analytics() {
           <Card key={kpi.label} className="shadow-subtle">
             <CardContent className="p-5">
               <p className="text-[10px] uppercase tracking-wider text-fpp-gray-400 font-mono">{kpi.label}</p>
-              <p className="font-display text-3xl text-foreground mt-1">{kpi.value}</p>
+              <p className="text-3xl font-semibold text-foreground mt-1">{kpi.value}</p>
             </CardContent>
           </Card>
         ))}
@@ -97,16 +187,20 @@ export default function Analytics() {
       <Card className="shadow-subtle">
         <CardContent className="p-5">
           <h3 className="text-sm font-semibold mb-4">Review Volume</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={volumeData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--fpp-gray-100))" />
-              <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip />
-              <Line type="monotone" dataKey="completed" stroke="#0E7C7B" strokeWidth={2} dot />
-              <Line type="monotone" dataKey="started" stroke="#C8972A" strokeWidth={2} dot />
-            </LineChart>
-          </ResponsiveContainer>
+          {volumeData.length === 0 ? (
+            <p className="text-sm text-fpp-gray-400 text-center py-12">No project data yet for this period</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={250}>
+              <LineChart data={volumeData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--fpp-gray-100))" />
+                <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Line type="monotone" dataKey="completed" stroke="#0E7C7B" strokeWidth={2} dot />
+                <Line type="monotone" dataKey="started" stroke="#C8972A" strokeWidth={2} dot />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </CardContent>
       </Card>
 
@@ -114,18 +208,22 @@ export default function Analytics() {
         <Card className="shadow-subtle">
           <CardContent className="p-5">
             <h3 className="text-sm font-semibold mb-4">Most Common Flags</h3>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={commonFlags} layout="vertical">
-                <XAxis type="number" tick={{ fontSize: 11 }} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} />
-                <Tooltip />
-                <Bar dataKey="count">
-                  {commonFlags.map((entry, i) => (
-                    <Cell key={i} fill={severityBarColor[entry.severity] || "#5B8DB8"} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            {commonFlags.length === 0 ? (
+              <p className="text-sm text-fpp-gray-400 text-center py-12">No flag data yet</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={commonFlags} layout="vertical">
+                  <XAxis type="number" tick={{ fontSize: 11 }} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} />
+                  <Tooltip />
+                  <Bar dataKey="count">
+                    {commonFlags.map((entry, i) => (
+                      <Cell key={i} fill={severityBarColor[entry.severity] || "#5B8DB8"} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
 
@@ -133,30 +231,38 @@ export default function Analytics() {
           <CardContent className="p-5">
             <h3 className="text-sm font-semibold mb-1">AI Accuracy Trend</h3>
             <p className="text-[10px] text-fpp-gray-400 mb-4">% of AI flags confirmed by human reviewers — rising = AI improving</p>
-            <ResponsiveContainer width="100%" height={250}>
-              <LineChart data={accuracyData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--fpp-gray-100))" />
-                <XAxis dataKey="week" tick={{ fontSize: 11 }} />
-                <YAxis domain={[60, 100]} tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Line type="monotone" dataKey="rate" stroke="#0E7C7B" strokeWidth={2} dot />
-              </LineChart>
-            </ResponsiveContainer>
+            {!accuracyData || accuracyData.length === 0 ? (
+              <p className="text-sm text-fpp-gray-400 text-center py-12">No AI output data yet</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={accuracyData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--fpp-gray-100))" />
+                  <XAxis dataKey="week" tick={{ fontSize: 11 }} />
+                  <YAxis domain={[60, 100]} tick={{ fontSize: 11 }} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="rate" stroke="#0E7C7B" strokeWidth={2} dot />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
 
         <Card className="shadow-subtle">
           <CardContent className="p-5">
             <h3 className="text-sm font-semibold mb-4">Reviews by Jurisdiction</h3>
-            <ResponsiveContainer width="100%" height={250}>
-              <PieChart>
-                <Pie data={jurisdictionData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80}>
-                  {jurisdictionData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
+            {jurisdictionData.length === 0 ? (
+              <p className="text-sm text-fpp-gray-400 text-center py-12">No project data yet</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={250}>
+                <PieChart>
+                  <Pie data={jurisdictionData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80}>
+                    {jurisdictionData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
 
@@ -167,7 +273,10 @@ export default function Analytics() {
             <ResponsiveContainer width="100%" height={250}>
               <BarChart data={(() => {
                 const stageCounts: Record<string, number> = { Intake: 0, "Plan Review": 0, "Comments Sent": 0, Resubmitted: 0, Approved: 0, "Permit+": 0 };
-                (projects || []).forEach((p) => {
+                const filtered = (projects || []).filter(
+                  (p) => !rangeDate || p.created_at >= rangeDate
+                );
+                filtered.forEach((p) => {
                   if (p.status === "intake") stageCounts["Intake"]++;
                   else if (p.status === "plan_review") stageCounts["Plan Review"]++;
                   else if (p.status === "comments_sent") stageCounts["Comments Sent"]++;
@@ -187,42 +296,42 @@ export default function Analytics() {
         </Card>
       </div>
 
-      {/* HCR Table */}
+      {/* HCR Table — now from real data */}
       <Card className="shadow-subtle">
         <CardContent className="p-5">
           <h3 className="text-sm font-semibold">AI Learning Metrics</h3>
-          <p className="text-[10px] text-fpp-gray-400 mb-4">Human correction rate by flag category. Lower HCR = AI is improving in that category.</p>
+          <p className="text-[10px] text-fpp-gray-400 mb-4">Human correction rate by category. Lower HCR = AI is improving.</p>
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-xs">Flag Category</TableHead>
-                  <TableHead className="text-xs">Total Flags</TableHead>
+                  <TableHead className="text-xs">Category</TableHead>
+                  <TableHead className="text-xs">Total Outputs</TableHead>
                   <TableHead className="text-xs">AI Confirmed</TableHead>
-                  <TableHead className="text-xs">Human Overrides</TableHead>
+                  <TableHead className="text-xs">Human Corrections</TableHead>
                   <TableHead className="text-xs">HCR %</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {[
-                  { cat: "Hurricane Straps", total: 24, confirmed: 22, overrides: 2 },
-                  { cat: "Wind-Borne Debris", total: 19, confirmed: 17, overrides: 2 },
-                  { cat: "Egress Windows", total: 14, confirmed: 11, overrides: 3 },
-                  { cat: "Energy Compliance", total: 12, confirmed: 11, overrides: 1 },
-                  { cat: "HVAC Sizing", total: 10, confirmed: 7, overrides: 3 },
-                ].map((row) => {
-                  const hcr = Math.round((row.overrides / row.total) * 100);
-                  const hcrColor = hcr < 10 ? "text-status-pass" : hcr < 20 ? "text-status-minor" : "text-status-critical";
-                  return (
-                    <TableRow key={row.cat}>
-                      <TableCell className="text-xs font-medium">{row.cat}</TableCell>
-                      <TableCell className="text-xs font-mono">{row.total}</TableCell>
-                      <TableCell className="text-xs font-mono">{row.confirmed}</TableCell>
-                      <TableCell className="text-xs font-mono">{row.overrides}</TableCell>
-                      <TableCell className={`text-xs font-mono font-semibold ${hcrColor}`}>{hcr}%</TableCell>
-                    </TableRow>
-                  );
-                })}
+                {(!hcrData || hcrData.length === 0) ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-xs text-fpp-gray-400 text-center py-6">No AI output or correction data yet</TableCell>
+                  </TableRow>
+                ) : (
+                  hcrData.map((row) => {
+                    const hcr = row.total > 0 ? Math.round((row.overrides / row.total) * 100) : 0;
+                    const hcrColor = hcr < 10 ? "text-status-pass" : hcr < 20 ? "text-status-minor" : "text-status-critical";
+                    return (
+                      <TableRow key={row.cat}>
+                        <TableCell className="text-xs font-medium">{row.cat}</TableCell>
+                        <TableCell className="text-xs font-mono">{row.total}</TableCell>
+                        <TableCell className="text-xs font-mono">{row.confirmed}</TableCell>
+                        <TableCell className="text-xs font-mono">{row.overrides}</TableCell>
+                        <TableCell className={`text-xs font-mono font-semibold ${hcrColor}`}>{hcr}%</TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
               </TableBody>
             </Table>
           </div>
