@@ -108,11 +108,6 @@ function getDaysRemaining(createdAt: string): number {
   return Math.max(0, Math.ceil((deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
 }
 
-const severityColors: Record<string, string> = {
-  critical: "bg-destructive text-destructive-foreground",
-  major: "bg-[hsl(var(--warning))] text-[hsl(var(--warning-foreground))]",
-  minor: "bg-muted text-muted-foreground",
-};
 
 export default function PlanReviewDetail() {
   const { id } = useParams<{ id: string }>();
