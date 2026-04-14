@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useProjects } from "@/hooks/useProjects";
-import { useReviewFlags } from "@/hooks/useReviewData";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,6 +32,24 @@ export default function Review() {
   const [search, setSearch] = useState("");
   const [countyFilter, setCountyFilter] = useState("all");
 
+  // Fetch latest plan_review id per project for direct linking
+  const { data: latestReviews } = useQuery({
+    queryKey: ["latest-plan-reviews"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("plan_reviews")
+        .select("id, project_id, round")
+        .order("round", { ascending: false });
+      if (error) throw error;
+      // Keep only the latest round per project
+      const map: Record<string, string> = {};
+      for (const r of data || []) {
+        if (!map[r.project_id]) map[r.project_id] = r.id;
+      }
+      return map;
+    },
+  });
+
   const counties = useMemo(() => {
     const set = new Set((projects || []).map((p) => p.county).filter(Boolean));
     return Array.from(set).sort();
@@ -46,6 +65,15 @@ export default function Review() {
   }, [projects, search, countyFilter]);
 
   const daysActive = (p: any) => Math.floor((Date.now() - new Date(p.created_at).getTime()) / 86400000);
+
+  const handleProjectClick = (projectId: string) => {
+    const reviewId = latestReviews?.[projectId];
+    if (reviewId) {
+      navigate(`/plan-review/${reviewId}`);
+    } else {
+      navigate(`/review/${projectId}`);
+    }
+  };
 
   return (
     <div className="page-enter space-y-6">
@@ -84,7 +112,7 @@ export default function Review() {
             <Card
               key={p.id}
               className="cursor-pointer hover:shadow-md transition-shadow"
-              onClick={() => navigate(`/review/${p.id}`)}
+              onClick={() => handleProjectClick(p.id)}
             >
               <CardContent className="p-5 space-y-3">
                 <div className="flex items-start justify-between">

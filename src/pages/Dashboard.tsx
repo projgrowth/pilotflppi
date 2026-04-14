@@ -45,7 +45,7 @@ function DashKpi({
 /* ── Active Reviews Table ── */
 type SortKey = "days" | "confidence" | "jurisdiction" | "stage";
 
-function ActiveReviewsQueue({ projects, navigate }: { projects: any[]; navigate: (p: string) => void }) {
+function ActiveReviewsQueue({ projects, navigate, latestReviews }: { projects: any[]; navigate: (p: string) => void; latestReviews?: Record<string, string> }) {
   const [sortKey, setSortKey] = useState<SortKey>("days");
   const [sortAsc, setSortAsc] = useState(false);
 
@@ -110,7 +110,7 @@ function ActiveReviewsQueue({ projects, navigate }: { projects: any[]; navigate:
               <tr
                 key={p.id}
                 className="hover:bg-muted/30 cursor-pointer transition-colors"
-                onClick={() => navigate(`/review/${p.id}`)}
+                onClick={() => { const rid = latestReviews?.[p.id]; navigate(rid ? `/plan-review/${rid}` : `/review/${p.id}`); }}
               >
                 <td className="px-4 py-3">
                   <p className="font-medium truncate max-w-[200px]">{p.name}</p>
@@ -122,7 +122,7 @@ function ActiveReviewsQueue({ projects, navigate }: { projects: any[]; navigate:
                 <td className="px-4 py-3"><DaysActiveBadge days={p.daysActive} /></td>
                 <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center justify-end gap-1">
-                    <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="View review" onClick={() => navigate(`/review/${p.id}`)}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="View review" onClick={() => { const rid = latestReviews?.[p.id]; navigate(rid ? `/plan-review/${rid}` : `/review/${p.id}`); }}>
                       <Eye className="h-3.5 w-3.5" />
                     </Button>
                     <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="View project" onClick={() => navigate(`/projects/${p.id}`)}>
@@ -351,6 +351,23 @@ export default function Dashboard() {
   const { data: inspections } = useInspections();
   const { data: revenueStats } = useRevenueStats();
 
+  // Fetch latest plan_review id per project for direct linking
+  const { data: latestReviews } = useQuery({
+    queryKey: ["latest-plan-reviews"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("plan_reviews")
+        .select("id, project_id, round")
+        .order("round", { ascending: false });
+      if (error) throw error;
+      const map: Record<string, string> = {};
+      for (const r of data || []) {
+        if (!map[r.project_id]) map[r.project_id] = r.id;
+      }
+      return map;
+    },
+  });
+
   // KPI calculations
   const activeStatuses = ["intake", "plan_review", "comments_sent", "resubmitted"];
   const activeReviews = useMemo(() => (projects || []).filter((p) => activeStatuses.includes(p.status)), [projects]);
@@ -497,7 +514,7 @@ export default function Dashboard() {
               </div>
             </Card>
           ) : (
-            <ActiveReviewsQueue projects={projects || []} navigate={navigate} />
+            <ActiveReviewsQueue projects={projects || []} navigate={navigate} latestReviews={latestReviews} />
           )}
         </div>
 
