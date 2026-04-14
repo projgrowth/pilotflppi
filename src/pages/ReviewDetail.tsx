@@ -89,7 +89,7 @@ export default function ReviewDetail() {
 
   const handleCorrection = async () => {
     if (!selectedFlag) return;
-    const { error } = await supabase.from("corrections").insert({
+    const { data, error } = await supabase.from("corrections").insert({
       output_id: null as any,
       user_id: user?.id!,
       original_value: correctionForm.original_value || selectedFlag.description,
@@ -97,8 +97,14 @@ export default function ReviewDetail() {
       correction_type: correctionForm.correction_type,
       fbc_section: correctionForm.fbc_section || selectedFlag.fbc_section,
       context_notes: correctionForm.context_notes,
-    });
+    }).select("id").single();
     if (error) { toast.error("Failed to save correction"); return; }
+    
+    // Trigger embedding generation via edge function
+    supabase.functions.invoke("process-correction", {
+      body: { correction_id: data.id },
+    }).catch(() => { /* non-blocking */ });
+    
     toast.success("Correction saved — this feeds the AI learning system");
     setCorrectionOpen(false);
     setCorrectionForm({ corrected_value: "", original_value: "", fbc_section: "", context_notes: "", correction_type: "override" });
