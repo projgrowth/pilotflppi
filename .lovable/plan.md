@@ -1,26 +1,75 @@
 
 
-# Plan: Switch to Sans-Serif Headers + Green/White Color Refresh
+# Plan: Address All 5 Audit Improvements
 
-## What Changes
+## Summary
+Fix the 5 remaining improvement areas: AI edge function security (already done — verify client-side), loading/error/empty states, mobile-responsive plan review, search/filters on Projects, and type safety cleanup.
 
-### 1. Remove DM Serif Display, use IBM Plex Sans for all text
-- Remove the DM Serif Display Google Font import
-- Change `h1, h2, h3` from `font-family: var(--font-display)` to `font-family: var(--font-sans)` with `font-weight: 600`
-- Update `tailwind.config.ts` to remove the `display` font family (or point it to IBM Plex Sans)
-- Keep IBM Plex Sans and IBM Plex Mono as-is
+---
 
-### 2. Shift palette toward green & white
-Current primary is teal (`180 80% 27%` — dark cyan-green). Adjust to a cleaner green/white feel:
-- **Background**: Brighten to pure white (`0 0% 100%`) instead of the current off-white (`216 25% 97%`)
-- **Primary**: Shift from dark teal to a fresher green (e.g. `160 60% 38%` — a clean mid-green)
-- **Sidebar**: Keep dark navy but update `--sidebar-primary` to match the new green
-- **Ring/focus**: Match new green
-- **Accent (gold)**: Keep or soften slightly — it pairs well with green
+## 1. Verify AI Edge Function Security (Already Secured)
+The edge function already has JWT validation via `getClaims()` (lines 367-387). The client `streamAI()` already sends the session access token. **No code changes needed** — this item is resolved.
 
-### 3. Files touched
-- `src/index.css` — font import, heading styles, color token values
-- `tailwind.config.ts` — `fontFamily.display` update
+## 2. Add Loading, Error, and Empty States
 
-No structural or component changes needed — everything uses CSS variables so the tokens propagate automatically.
+**Files**: `Analytics.tsx`, `Inspections.tsx`, `Contractors.tsx`, `Documents.tsx`, `DocumentsGen.tsx`
+
+- Wrap data-dependent sections with loading skeleton fallbacks using the existing `Skeleton` and `SkeletonRow` components
+- Add error state handling: if queries fail, show a centered error message with retry button
+- Analytics: guard charts with `isLoading` from `useProjects()` — show skeleton cards while loading
+- Inspections: already has `EmptyState` but no loading skeleton — add one
+- Contractors: already has loading/empty — verify error handling
+
+## 3. Make PlanReviewDetail Mobile-Responsive
+
+**File**: `PlanReviewDetail.tsx`
+
+- The page uses `ResizablePanelGroup direction="horizontal"` which doesn't work on mobile
+- On screens < 768px: replace the resizable two-panel layout with a vertical stack + tab switcher (Plan Sheet | Findings)
+- Use the existing `use-mobile` hook to detect mobile
+- Hide the resizable handle on mobile; show a tab bar at the top instead
+- Ensure the findings accordion is scrollable on small screens
+
+## 4. Add Search, County Filter, and Sort to Projects
+
+**File**: `Projects.tsx`
+
+The page already has search and status filter pills. Add:
+- **County dropdown filter** next to the existing filter pills — `Select` with "All Counties" default + the FLORIDA_COUNTIES list
+- **Sort toggle** (newest first / deadline soonest) — small dropdown or toggle button
+- Update the `filtered` logic to include county filter
+- These are lightweight additions to the existing filter bar
+
+## 5. Fix `as any` Type Casts
+
+**Files**: `useInvoices.ts`, `useReviewData.ts`, `ReviewDetail.tsx`, `ProjectDetail.tsx`, `Settings.tsx`, `FbcCountyChatbot.tsx`, `FeeScheduleSettings.tsx`
+
+Key patterns to fix:
+- **`supabase.from("invoices" as any)`**: The `invoices` table exists in the DB but may not be in the generated types. Run a types regeneration or add manual type overrides in a `database.types.ts` extension file
+- **Severity/confidence badge casts**: Define proper union types for severity (`"critical" | "major" | "minor"`) and confidence (`"verified" | "likely" | "advisory"`) and use type guards
+- **`status: newStatus as any`** in ProjectDetail: use the `project_status` enum type from Supabase types
+- **`jurisdictions as any`** in Settings: cast to `Json` type from Supabase types
+- **`output_id: null as any`** in ReviewDetail: make the field nullable in the insert type or use a proper default
+
+---
+
+## Execution Order
+1. Loading/error/empty states (broadest UX impact)
+2. Projects search & filter enhancements
+3. PlanReviewDetail mobile layout
+4. Type safety fixes
+5. Mark AI security as resolved
+
+## Files Modified
+- `src/pages/Analytics.tsx`
+- `src/pages/Inspections.tsx`
+- `src/pages/Projects.tsx`
+- `src/pages/PlanReviewDetail.tsx`
+- `src/hooks/useInvoices.ts`
+- `src/hooks/useReviewData.ts`
+- `src/pages/ReviewDetail.tsx`
+- `src/pages/ProjectDetail.tsx`
+- `src/pages/Settings.tsx`
+- `src/components/FbcCountyChatbot.tsx`
+- `src/components/FeeScheduleSettings.tsx`
 
