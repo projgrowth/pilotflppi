@@ -95,7 +95,7 @@ export default function Review() {
                   <DaysActiveBadge days={daysActive(p)} />
                 </div>
                 <ReviewStagePipeline currentStage={stageMap[p.status] || "intake"} compact />
-                <ConfidenceBar score={p.confidence_score ?? 0} animated />
+                <ConfidenceBar score={0} animated />
               </CardContent>
             </Card>
           ))}

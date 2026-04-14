@@ -118,7 +118,7 @@ function ActiveReviewsQueue({ projects, navigate }: { projects: any[]; navigate:
                 </td>
                 <td className="px-4 py-3 text-xs text-muted-foreground">{p.jurisdiction || p.county || "—"}</td>
                 <td className="px-4 py-3"><StatusChip status={p.status} /></td>
-                <td className="px-4 py-3"><ConfidenceBar score={p.confidence_score ?? 0} /></td>
+                <td className="px-4 py-3"><ConfidenceBar score={0} /></td>
                 <td className="px-4 py-3"><DaysActiveBadge days={p.daysActive} /></td>
                 <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center justify-end gap-1">
