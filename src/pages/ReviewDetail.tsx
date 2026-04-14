@@ -91,7 +91,7 @@ export default function ReviewDetail() {
   const handleCorrection = async () => {
     if (!selectedFlag) return;
     const { data, error } = await supabase.from("corrections").insert({
-      output_id: null as any,
+      output_id: null,
       user_id: user?.id!,
       original_value: correctionForm.original_value || selectedFlag.description,
       corrected_value: correctionForm.corrected_value,

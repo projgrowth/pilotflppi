@@ -35,7 +35,7 @@ export function FeeScheduleSettings() {
 
   const handleSave = () => {
     if (!editing) return;
-    saveMutation.mutate(editing as any, { onSuccess: () => setEditing(null) });
+    saveMutation.mutate(editing as FeeSchedule, { onSuccess: () => setEditing(null) });
   };
 
   if (isLoading) {

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -23,6 +24,7 @@ import { ReviewTopBar } from "@/components/plan-review/ReviewTopBar";
 import { CountyPanel } from "@/components/plan-review/CountyPanel";
 import { LetterPanel } from "@/components/plan-review/LetterPanel";
 import { cn } from "@/lib/utils";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { FindingCard, type Finding } from "@/components/FindingCard";
 import { SeverityDonut } from "@/components/SeverityDonut";
 import { ScanTimeline } from "@/components/ScanTimeline";
@@ -110,6 +112,8 @@ function getDaysRemaining(createdAt: string): number {
 
 
 export default function PlanReviewDetail() {
+  const isMobile = useIsMobile();
+  const [mobileTab, setMobileTab] = useState<"plans" | "findings">("plans");
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -607,7 +611,122 @@ export default function PlanReviewDetail() {
         </div>
       )}
 
-      {/* ── Main Split Layout (Resizable) ── */}
+      {/* ── Main Split Layout ── */}
+      {isMobile ? (
+        /* ── Mobile: Tab Switcher ── */
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="shrink-0 border-b bg-card px-3 py-1.5 flex gap-1">
+            <button
+              onClick={() => setMobileTab("plans")}
+              className={cn("px-4 py-1.5 rounded-md text-xs font-medium transition-all", mobileTab === "plans" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted/50")}
+            >
+              Plan Sheet
+            </button>
+            <button
+              onClick={() => setMobileTab("findings")}
+              className={cn("px-4 py-1.5 rounded-md text-xs font-medium transition-all", mobileTab === "findings" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted/50")}
+            >
+              Findings {hasFindings && <span className="ml-1 text-[9px] opacity-70">{findings.length}</span>}
+            </button>
+          </div>
+          {mobileTab === "plans" ? (
+            <div className="flex-1 flex flex-col min-w-0">
+              {hasDocuments ? (
+                <>
+                  {renderingPages && pageImages.length === 0 && (
+                    <div className="flex-1 flex items-center justify-center">
+                      <div className="text-center space-y-3">
+                        <Loader2 className="h-8 w-8 text-accent mx-auto animate-spin" />
+                        <p className="text-sm text-muted-foreground">Loading document...</p>
+                        <Progress value={renderProgress} className="h-1 w-48 mx-auto" />
+                      </div>
+                    </div>
+                  )}
+                  {pageImages.length > 0 && (
+                    <PlanMarkupViewer pageImages={pageImages} findings={findings} activeFindingIndex={activeFindingIndex} onAnnotationClick={handleAnnotationClick} className="flex-1" />
+                  )}
+                </>
+              ) : (
+                <div className="flex-1 flex items-center justify-center p-6">
+                  <div className="border-2 border-dashed border-border/50 rounded-xl p-8 text-center cursor-pointer hover:border-accent/40 transition-all" onClick={() => fileInputRef.current?.click()}>
+                    {uploading ? <Loader2 className="h-8 w-8 text-accent mx-auto mb-2 animate-spin" /> : <Upload className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />}
+                    <p className="text-sm font-medium">{uploading ? "Uploading..." : "Drop plans here"}</p>
+                    <p className="text-xs text-muted-foreground mt-1">PDF up to 20MB</p>
+                    <input ref={fileInputRef} type="file" accept=".pdf" multiple className="hidden" onChange={(e) => handleFileUpload(e.target.files)} />
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto bg-card">
+              <div className="shrink-0 px-3 py-2 border-b flex items-center gap-1 overflow-x-auto">
+                {(["findings", "checklist", "completeness", "letter", "county"] as RightPanelMode[]).map((mode) => (
+                  <button key={mode} onClick={() => setRightPanel(mode)} className={cn("px-3 py-1 rounded-md text-xs font-medium transition-all capitalize whitespace-nowrap", rightPanel === mode ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted/50")}>
+                    {mode}
+                    {mode === "findings" && hasFindings && <span className="ml-1 text-[9px] opacity-70">{findings.length}</span>}
+                  </button>
+                ))}
+              </div>
+              <div className="overflow-y-auto">
+                {rightPanel === "findings" && (
+                  <div className="p-3 space-y-2">
+                    {!hasFindings && !aiRunning && (
+                      <div className="flex flex-col items-center justify-center py-12 px-4">
+                        {hasDocuments ? (
+                          <div className="text-center space-y-3 max-w-[220px]">
+                            <div className="mx-auto w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center"><Sparkles className="h-5 w-5 text-accent" /></div>
+                            <p className="text-sm font-medium">Ready to analyze</p>
+                            <Button size="sm" onClick={() => runAICheck(review)} className="w-full bg-accent text-accent-foreground hover:bg-accent/90"><Sparkles className="h-3.5 w-3.5 mr-1.5" /> Analyze Plans</Button>
+                          </div>
+                        ) : (
+                          <div className="text-center space-y-2"><Upload className="h-8 w-8 text-muted-foreground/20 mx-auto" /><p className="text-sm text-muted-foreground">Upload documents to begin</p></div>
+                        )}
+                      </div>
+                    )}
+                    {hasFindings && (
+                      <>
+                        <FindingStatusFilter activeFilter={statusFilter} counts={{ all: findings.length, open: openCount, resolved: resolvedCount, deferred: deferredCount }} onFilterChange={setStatusFilter} />
+                        <Accordion type="multiple" defaultValue={DISCIPLINE_ORDER.filter((d) => filteredGrouped[d])} className="space-y-1">
+                          {DISCIPLINE_ORDER.filter((d) => filteredGrouped[d]).map((discipline) => {
+                            const group = filteredGrouped[discipline];
+                            const Icon = getDisciplineIcon(discipline);
+                            const worst = getWorstSeverity(group);
+                            return (
+                              <AccordionItem key={discipline} value={discipline} className="border rounded-lg overflow-hidden">
+                                <AccordionTrigger className="px-3 py-2 hover:no-underline hover:bg-muted/30 text-xs">
+                                  <div className="flex items-center gap-2">
+                                    <Icon className={cn("h-3.5 w-3.5", getDisciplineColor(discipline))} />
+                                    <span className="font-medium">{getDisciplineLabel(discipline)}</span>
+                                    <Badge variant="secondary" className="text-[9px] h-4 px-1">{group.length}</Badge>
+                                  </div>
+                                </AccordionTrigger>
+                                <AccordionContent className="px-3 pb-3 space-y-1.5">
+                                  {group.map((finding, i) => {
+                                    const gi = globalIndexMap.get(finding)!;
+                                    return (
+                                      <FindingCard key={i} ref={(el) => { if (el) findingRefs.current.set(gi, el); }} finding={finding} index={i} globalIndex={gi} isActive={activeFindingIndex === gi} onLocateClick={() => { handleLocateFinding(gi); setMobileTab("plans"); }} animationDelay={i * 40} status={findingStatuses[gi] || "open"} onStatusChange={(status) => updateFindingStatus(gi, status)} history={(findingHistory || []).filter(h => h.finding_index === gi)} />
+                                    );
+                                  })}
+                                </AccordionContent>
+                              </AccordionItem>
+                            );
+                          })}
+                        </Accordion>
+                      </>
+                    )}
+                  </div>
+                )}
+                {rightPanel === "checklist" && <div className="p-3"><DisciplineChecklist tradeType={review.project?.trade_type || "building"} findings={findings} /></div>}
+                {rightPanel === "completeness" && <div className="p-3"><SitePlanChecklist findings={findings} county={county} /></div>}
+                {rightPanel === "letter" && (
+                  <LetterPanel reviewId={review.id} projectId={review.project_id} projectName={review.project?.name || ""} address={review.project?.address || ""} county={county} jurisdiction={review.project?.jurisdiction || ""} tradeType={review.project?.trade_type || ""} round={review.round} aiCheckStatus={review.ai_check_status} qcStatus={review.qc_status || "pending_qc"} hasFindings={hasFindings} findings={findings} findingStatuses={findingStatuses} firmSettings={firmSettings} commentLetter={commentLetter} generatingLetter={generatingLetter} copied={copied} userId={user?.id} onGenerateLetter={() => generateCommentLetter(review)} onCopyLetter={copyLetter} onLetterChange={setCommentLetter} onQcApprove={async () => { await supabase.from("plan_reviews").update({ qc_status: "qc_approved", qc_reviewer_id: user?.id }).eq("id", review.id); queryClient.invalidateQueries({ queryKey: ["plan-review", id] }); toast.success("QC approved"); }} onQcReject={async () => { await supabase.from("plan_reviews").update({ qc_status: "qc_rejected", qc_reviewer_id: user?.id }).eq("id", review.id); queryClient.invalidateQueries({ queryKey: ["plan-review", id] }); toast.error("QC rejected"); }} onDocumentGenerated={() => queryClient.invalidateQueries({ queryKey: ["project-documents", review.project_id] })} />
+                )}
+                {rightPanel === "county" && <CountyPanel county={county} />}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
       <ResizablePanelGroup direction="horizontal" className="flex-1 overflow-hidden">
         {/* ── LEFT: Document Viewer ── */}
         <ResizablePanel defaultSize={rightPanelCollapsed ? 100 : 65} minSize={35}>
@@ -873,6 +992,7 @@ export default function PlanReviewDetail() {
           </ResizablePanel>
         )}
       </ResizablePanelGroup>
+      )}
     </div>
   );
 }

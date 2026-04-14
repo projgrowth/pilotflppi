@@ -17,7 +17,7 @@ interface Message {
 }
 
 const COUNTY_OPTIONS = Object.entries(COUNTY_REGISTRY)
-  .map(([key, val]) => ({ key, label: (val as any).label || key }))
+  .map(([key, val]) => ({ key, label: (val as Record<string, unknown>).label as string || key }))
   .sort((a, b) => a.label.localeCompare(b.label));
 
 const QUICK_QUESTIONS = [

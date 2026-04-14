@@ -3,6 +3,7 @@ import { useProjects } from "@/hooks/useProjects";
 import { useReviewFlagCounts } from "@/hooks/useReviewData";
 import { useAILearningStats } from "@/hooks/useAILearningStats";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Legend, CartesianGrid } from "recharts";
@@ -17,7 +18,7 @@ const severityBarColor: Record<string, string> = {
 };
 
 export default function Analytics() {
-  const { data: projects } = useProjects();
+  const { data: projects, isLoading: projectsLoading, error: projectsError } = useProjects();
   const { data: flagCounts } = useReviewFlagCounts();
   const { data: aiStats } = useAILearningStats();
   const [range, setRange] = useState("30");
@@ -151,6 +152,15 @@ export default function Analytics() {
 
   const commonFlags = flagFrequency || [];
 
+  if (projectsError) {
+    return (
+      <div className="page-enter flex flex-col items-center justify-center py-24">
+        <p className="text-sm text-destructive mb-3">Failed to load analytics data</p>
+        <Button variant="outline" size="sm" onClick={() => window.location.reload()}>Retry</Button>
+      </div>
+    );
+  }
+
   return (
     <div className="page-enter space-y-6">
       <div className="flex items-center justify-between">
@@ -167,6 +177,18 @@ export default function Analytics() {
       </div>
 
       {/* KPI row */}
+      {projectsLoading ? (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i} className="shadow-subtle">
+              <CardContent className="p-5 space-y-2">
+                <div className="h-3 w-24 rounded bg-muted animate-pulse" />
+                <div className="h-8 w-16 rounded bg-muted animate-pulse" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : (
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: "Reviews This Period", value: projectCount },
@@ -182,8 +204,8 @@ export default function Analytics() {
           </Card>
         ))}
       </div>
+      )}
 
-      {/* Charts */}
       <Card className="shadow-subtle">
         <CardContent className="p-5">
           <h3 className="text-sm font-semibold mb-4">Review Volume</h3>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import type { Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -80,7 +81,7 @@ export default function SettingsPage() {
       setFirmLogoUrl(firmSettings.logo_url || "");
       setFirmClosingLanguage(firmSettings.closing_language || "");
       // Load jurisdictions from DB if they exist
-      const dbJurisdictions = (firmSettings as any).jurisdictions;
+      const dbJurisdictions = (firmSettings as unknown as Record<string, unknown>).jurisdictions;
       if (Array.isArray(dbJurisdictions) && dbJurisdictions.length > 0) {
         setJurisdictions(dbJurisdictions);
       }
@@ -141,13 +142,13 @@ export default function SettingsPage() {
       if (firmSettings) {
         const { error } = await supabase
           .from("firm_settings")
-          .update({ jurisdictions: jurisdictions as any })
+          .update({ jurisdictions: jurisdictions as unknown as Json })
           .eq("user_id", user.id);
         if (error) throw error;
       } else {
         const { error } = await supabase
           .from("firm_settings")
-          .insert({ user_id: user.id, firm_name: "", jurisdictions: jurisdictions as any });
+          .insert({ user_id: user.id, firm_name: "", jurisdictions: jurisdictions as unknown as Json });
         if (error) throw error;
       }
       queryClient.invalidateQueries({ queryKey: ["firm-settings"] });
