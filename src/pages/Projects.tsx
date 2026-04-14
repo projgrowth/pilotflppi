@@ -43,6 +43,8 @@ const TRADE_TYPES = [
 export default function Projects() {
   const [activeFilter, setActiveFilter] = useState<typeof filters[number]>("All");
   const [search, setSearch] = useState("");
+  const [countyFilter, setCountyFilter] = useState("all");
+  const [sortBy, setSortBy] = useState<"newest" | "deadline">("newest");
   const { data: projects, isLoading } = useProjects();
   const { data: contractors } = useContractors();
   const navigate = useNavigate();
@@ -111,12 +113,20 @@ export default function Projects() {
       const q = search.toLowerCase();
       if (!p.name.toLowerCase().includes(q) && !p.address.toLowerCase().includes(q)) return false;
     }
+    if (countyFilter !== "all" && p.county !== countyFilter) return false;
     if (activeFilter === "All") return true;
     if (activeFilter === "Plan Review") return p.status === "plan_review" || p.status === "comments_sent" || p.status === "resubmitted";
     if (activeFilter === "Inspection") return p.status === "inspection_scheduled" || p.status === "inspection_complete";
     if (activeFilter === "Pending") return p.status === "intake" || p.status === "on_hold";
     if (activeFilter === "Complete") return p.status === "approved" || p.status === "certificate_issued" || p.status === "permit_issued";
     return true;
+  }).sort((a, b) => {
+    if (sortBy === "deadline") {
+      const da = a.deadline_at ? new Date(a.deadline_at).getTime() : Infinity;
+      const db = b.deadline_at ? new Date(b.deadline_at).getTime() : Infinity;
+      return da - db;
+    }
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 
   return (
@@ -142,6 +152,22 @@ export default function Projects() {
             </button>
           ))}
         </div>
+        <Select value={countyFilter} onValueChange={setCountyFilter}>
+          <SelectTrigger className="w-40 h-9 text-xs"><SelectValue placeholder="All Counties" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Counties</SelectItem>
+            {FLORIDA_COUNTIES.map((c) => (
+              <SelectItem key={c} value={c}>{c.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={sortBy} onValueChange={(v) => setSortBy(v as "newest" | "deadline")}>
+          <SelectTrigger className="w-36 h-9 text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="newest">Newest First</SelectItem>
+            <SelectItem value="deadline">Deadline Soonest</SelectItem>
+          </SelectContent>
+        </Select>
         <div className="relative ml-auto">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input placeholder="Search projects..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 w-64" />
