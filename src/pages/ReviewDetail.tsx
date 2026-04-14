@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useProjects } from "@/hooks/useProjects";
 import { useReviewFlags } from "@/hooks/useReviewData";
@@ -45,6 +45,25 @@ export default function ReviewDetail() {
   const { data: flags, isLoading } = useReviewFlags(projectId);
 
   const project = projects?.find((p) => p.id === projectId);
+
+  // Auto-redirect to the functional plan review page if a plan_review exists
+  const [redirectChecked, setRedirectChecked] = useState(false);
+  useEffect(() => {
+    if (!projectId) return;
+    supabase
+      .from("plan_reviews")
+      .select("id")
+      .eq("project_id", projectId)
+      .order("round", { ascending: false })
+      .limit(1)
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          navigate(`/plan-review/${data[0].id}`, { replace: true });
+        } else {
+          setRedirectChecked(true);
+        }
+      });
+  }, [projectId, navigate]);
 
   const [severityFilter, setSeverityFilter] = useState("all");
   const [confFilter, setConfFilter] = useState("all");
