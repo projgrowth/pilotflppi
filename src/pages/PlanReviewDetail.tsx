@@ -112,6 +112,8 @@ function getDaysRemaining(createdAt: string): number {
 
 
 export default function PlanReviewDetail() {
+  const isMobile = useIsMobile();
+  const [mobileTab, setMobileTab] = useState<"plans" | "findings">("plans");
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
