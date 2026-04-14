@@ -278,7 +278,7 @@ function RevenuKpi({
     <Card className="shadow-subtle">
       <CardContent className="p-6 relative">
         <Icon className="absolute top-5 right-5 h-6 w-6" style={{ color: iconColor }} />
-        <p className="font-display text-4xl font-bold tracking-tight text-foreground">
+        <p className="text-4xl font-bold tracking-tight text-foreground">
           ${displayed.toLocaleString()}
         </p>
         <p className="text-[13px] font-medium text-muted-foreground uppercase tracking-widest mt-1">{label}</p>
@@ -398,7 +398,7 @@ export default function Dashboard() {
     <div className="p-4 sm:p-8 md:p-10 max-w-7xl">
       {/* Greeting */}
       <div className="mb-8">
-        <h1 className="text-2xl font-display font-semibold tracking-tight text-foreground">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           {greeting}, {displayName}.
         </h1>
         <p className="text-sm text-muted-foreground mt-1">{format(now, "EEEE, MMMM d, yyyy")}</p>
@@ -489,7 +489,7 @@ export default function Dashboard() {
       <div className="grid gap-6 lg:grid-cols-[65%_1fr]">
         {/* Left: Active Reviews Queue */}
         <div>
-          <h2 className="font-display text-xl font-semibold text-foreground mb-4">Active Reviews</h2>
+          <h2 className="text-xl font-semibold text-foreground mb-4">Active Reviews</h2>
           {projectsLoading ? (
             <Card className="shadow-subtle">
               <div className="p-4 space-y-2">
