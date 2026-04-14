@@ -452,6 +452,32 @@ export default function Dashboard() {
         />
       </div>
 
+      {/* Revenue KPI Cards */}
+      <div className="grid grid-cols-3 gap-5 mb-8">
+        <RevenuKpi
+          icon={TrendingUp}
+          iconColor="#2E7D52"
+          label="Revenue MTD"
+          value={revenueStats?.revenueMTD ?? 0}
+          delay={0}
+        />
+        <RevenuKpi
+          icon={DollarSign}
+          iconColor="#C8972A"
+          label="Outstanding"
+          value={revenueStats?.outstanding ?? 0}
+          delay={100}
+        />
+        <RevenuKpi
+          icon={Clock}
+          iconColor="#D63230"
+          label="Overdue"
+          value={revenueStats?.overdue ?? 0}
+          delay={200}
+          subRow={revenueStats?.overdueCount ? <>{revenueStats.overdueCount} invoice{revenueStats.overdueCount !== 1 ? "s" : ""}</> : undefined}
+        />
+      </div>
+
       {/* Quick Actions */}
       <div className="mb-8 flex flex-wrap items-center gap-3">
         <Button onClick={() => navigate("/projects?action=new")} className="bg-primary text-primary-foreground hover:bg-primary/90">
@@ -478,6 +504,7 @@ export default function Dashboard() {
         {/* Right: Deadlines + AI Activity */}
         <div className="space-y-6">
           <DeadlinesPanel projects={projects || []} navigate={navigate} />
+          <AccountsReceivableWidget navigate={navigate} />
           <AIActivityFeed />
         </div>
       </div>
