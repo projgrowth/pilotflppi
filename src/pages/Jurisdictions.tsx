@@ -88,7 +88,7 @@ export default function Jurisdictions() {
                   <h3 className="text-base font-semibold text-foreground">{j.name}</h3>
                   <p className="text-xs font-mono text-fpp-gray-400">{j.county} County, FL</p>
                 </div>
-                <span className={statusStyle[j.registration_status]}>{statusLabel[j.registration_status]}</span>
+                <span className={statusStyle[j.registration_status]}>{statusLabel[j.registration_status] ?? j.registration_status}</span>
               </div>
 
               <div className="flex flex-wrap gap-1.5 mt-3">
