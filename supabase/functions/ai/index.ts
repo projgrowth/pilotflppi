@@ -100,7 +100,7 @@ For each finding, provide ALL of the following fields:
 - description: Clear, specific description of the deficiency you SEE in the plans
 - recommendation: Actionable fix with code reference
 - confidence: "verified" | "likely" | "advisory"
-- markup: Object with { page_index: <0-based index of the image where the issue is>, x: <percentage from left 0-100>, y: <percentage from top 0-100>, width: <percentage width 5-30>, height: <percentage height 3-20> } indicating WHERE on the plan the issue is located. Be as precise as possible.
+- markup: **REQUIRED** — Object with { page_index: <0-based index of the image where the issue is>, x: <percentage from left 0-100>, y: <percentage from top 0-100>, width: <percentage width 5-30>, height: <percentage height 3-20> } indicating WHERE on the plan the issue is located. You MUST provide markup for every finding. Examine the plan image carefully to determine the exact region where the deficiency is visible. For missing-information findings, place the markup where the information SHOULD appear (e.g., title block area for missing code summary, site plan area for missing setbacks).
 
 **MISSING INFORMATION CHECK (Critical for Private Providers):**
 As you review each sheet, also check whether the following REQUIRED elements are present. If any are MISSING, flag them as findings:
