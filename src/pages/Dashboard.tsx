@@ -267,6 +267,81 @@ function AIActivityFeed() {
   );
 }
 
+/* ── Revenue KPI Card (currency) ── */
+function RevenuKpi({
+  icon: Icon, iconColor, label, value, subRow, delay = 0,
+}: {
+  icon: React.ElementType; iconColor: string; label: string; value: number; subRow?: React.ReactNode; delay?: number;
+}) {
+  const displayed = useCountUp(value, 800, delay);
+  return (
+    <Card className="shadow-subtle">
+      <CardContent className="p-6 relative">
+        <Icon className="absolute top-5 right-5 h-6 w-6" style={{ color: iconColor }} />
+        <p className="font-display text-4xl font-bold tracking-tight text-foreground">
+          ${displayed.toLocaleString()}
+        </p>
+        <p className="text-[13px] font-medium text-muted-foreground uppercase tracking-widest mt-1">{label}</p>
+        {subRow && <p className="text-xs font-mono text-muted-foreground/80 mt-2">{subRow}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ── Accounts Receivable Widget ── */
+function AccountsReceivableWidget({ navigate }: { navigate: (p: string) => void }) {
+  const { data: invoices } = useInvoices();
+  const unpaid = useMemo(() =>
+    (invoices || [])
+      .filter((i) => ["sent", "partial", "overdue"].includes(i.status))
+      .sort((a, b) => (Number(b.total) - Number(b.amount_paid)) - (Number(a.total) - Number(a.amount_paid)))
+      .slice(0, 5),
+    [invoices]
+  );
+
+  return (
+    <Card className="shadow-subtle">
+      <div className="px-5 py-4 border-b flex items-center gap-2">
+        <DollarSign className="h-4 w-4 text-[hsl(var(--fpp-gold))]" />
+        <span className="text-[15px] font-semibold text-foreground">Accounts Receivable</span>
+      </div>
+      <CardContent className="p-5">
+        {unpaid.length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center py-4">No outstanding invoices</p>
+        ) : (
+          <div className="space-y-3">
+            {unpaid.map((inv) => {
+              const balance = Number(inv.total) - Number(inv.amount_paid);
+              const isOverdue = inv.due_at && new Date(inv.due_at) < new Date();
+              return (
+                <div
+                  key={inv.id}
+                  className="flex items-center justify-between cursor-pointer hover:bg-muted/30 -mx-2 px-2 py-1.5 rounded transition-colors"
+                  onClick={() => navigate(`/projects/${inv.project_id}`)}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-medium truncate">{inv.project?.name || inv.invoice_number}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {inv.invoice_number}
+                      {inv.due_at && <> · Due {format(new Date(inv.due_at), "MMM d")}</>}
+                    </p>
+                  </div>
+                  <span className={cn("text-sm font-semibold tabular-nums ml-3", isOverdue ? "text-destructive" : "text-foreground")}>
+                    ${balance.toLocaleString()}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <Button variant="link" className="text-accent text-[13px] p-0 mt-3 h-auto" onClick={() => navigate("/invoices")}>
+          View all invoices →
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 /* ── Main Dashboard ── */
 export default function Dashboard() {
   const { user } = useAuth();
