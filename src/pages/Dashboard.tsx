@@ -118,17 +118,17 @@ function ActiveReviewsQueue({ projects, navigate }: { projects: any[]; navigate:
                 </td>
                 <td className="px-4 py-3 text-xs text-muted-foreground">{p.jurisdiction || p.county || "—"}</td>
                 <td className="px-4 py-3"><StatusChip status={p.status} /></td>
-                <td className="px-4 py-3"><ConfidenceBar score={0.75} /></td>
+                <td className="px-4 py-3"><ConfidenceBar score={0} /></td>
                 <td className="px-4 py-3"><DaysActiveBadge days={p.daysActive} /></td>
                 <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center justify-end gap-1">
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate(`/review/${p.id}`)}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="View review" onClick={() => navigate(`/review/${p.id}`)}>
                       <Eye className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate(`/projects/${p.id}`)}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="View project" onClick={() => navigate(`/projects/${p.id}`)}>
                       <MessageSquare className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate(`/documents`)}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="View documents" onClick={() => navigate(`/documents`)}>
                       <FileCheck className="h-3.5 w-3.5" />
                     </Button>
                   </div>

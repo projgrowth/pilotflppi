@@ -48,5 +48,5 @@ export async function logFindingStatusChange(
       changed_by: userId,
       note: note || "",
     });
-  if (error) console.error("Failed to log finding status change:", error);
+  if (error) { /* finding history log failed silently */ }
 }

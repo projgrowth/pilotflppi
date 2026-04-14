@@ -297,7 +297,7 @@ export default function PlanReviewDetail() {
           .from("documents")
           .createSignedUrl(filePath, 3600);
         if (signError || !signedData?.signedUrl) {
-          console.error("Failed to get signed URL:", signError);
+          // signed URL generation failed — skip this file
           continue;
         }
         const response = await fetch(signedData.signedUrl);
@@ -310,7 +310,7 @@ export default function PlanReviewDetail() {
       setPageImages(allImages);
       return allImages;
     } catch (err) {
-      console.error("Failed to render pages:", err);
+      // page rendering failed silently
       return [];
     } finally {
       setRenderingPages(false);
@@ -434,7 +434,7 @@ export default function PlanReviewDetail() {
           round: maxRound + 1,
           file_urls: review.file_urls,
           previous_findings: JSON.parse(JSON.stringify(review.ai_findings || [])),
-        } as any)
+        })
         .select("id")
         .single();
       if (error) throw error;

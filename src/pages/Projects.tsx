@@ -72,7 +72,10 @@ export default function Projects() {
   };
 
   const handleCreate = async () => {
-    if (!name.trim() || !address.trim()) {
+    const trimmedName = name.trim().slice(0, 200);
+    const trimmedAddress = address.trim().slice(0, 500);
+    const trimmedJurisdiction = jurisdiction.trim().slice(0, 200);
+    if (!trimmedName || !trimmedAddress) {
       toast.error("Name and address are required");
       return;
     }
@@ -82,10 +85,10 @@ export default function Projects() {
       const { data, error } = await supabase
         .from("projects")
         .insert({
-          name: name.trim(),
-          address: address.trim(),
+          name: trimmedName,
+          address: trimmedAddress,
           county: county || "",
-          jurisdiction: jurisdiction || "",
+          jurisdiction: trimmedJurisdiction,
           trade_type: tradeType,
           contractor_id: contractorId || null,
           status: "intake" as const,
@@ -250,12 +253,12 @@ export default function Projects() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Project Name *</Label>
-              <Input placeholder="Oceanview Residences" value={name} onChange={(e) => setName(e.target.value)} />
+              <Label htmlFor="project-name">Project Name *</Label>
+              <Input id="project-name" placeholder="Oceanview Residences" maxLength={200} value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label>Address *</Label>
-              <Input placeholder="123 Main St, Miami, FL 33131" value={address} onChange={(e) => setAddress(e.target.value)} />
+              <Label htmlFor="project-address">Address *</Label>
+              <Input id="project-address" placeholder="123 Main St, Miami, FL 33131" maxLength={500} value={address} onChange={(e) => setAddress(e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -270,8 +273,8 @@ export default function Projects() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Jurisdiction</Label>
-                <Input placeholder="City of Miami" value={jurisdiction} onChange={(e) => setJurisdiction(e.target.value)} />
+                <Label htmlFor="project-jurisdiction">Jurisdiction</Label>
+                <Input id="project-jurisdiction" placeholder="City of Miami" maxLength={200} value={jurisdiction} onChange={(e) => setJurisdiction(e.target.value)} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">

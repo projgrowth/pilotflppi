@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import DOMPurify from "dompurify";
 import { useProjects } from "@/hooks/useProjects";
 import { useReviewFlags } from "@/hooks/useReviewData";
 import { useFirmSettings } from "@/hooks/useFirmSettings";
@@ -196,7 +197,7 @@ export default function DocumentsPage() {
             {generatedHtml ? (
               <div
                 className="aspect-[8.5/11] bg-white border rounded p-4 max-h-[400px] overflow-auto text-foreground"
-                dangerouslySetInnerHTML={{ __html: generatedHtml }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(generatedHtml) }}
               />
             ) : (
               <div className="aspect-[8.5/11] bg-white border rounded p-8 max-h-[400px] overflow-auto">
