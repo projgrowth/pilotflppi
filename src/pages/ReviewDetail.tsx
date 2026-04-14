@@ -46,9 +46,20 @@ export default function ReviewDetail() {
 
   const project = projects?.find((p) => p.id === projectId);
 
-  // Auto-redirect to the functional plan review page if a plan_review exists
+  // All hooks must be before any early returns
   const [redirectChecked, setRedirectChecked] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [severityFilter, setSeverityFilter] = useState("all");
+  const [confFilter, setConfFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("active");
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [selectedFlag, setSelectedFlag] = useState<any>(null);
+  const [correctionForm, setCorrectionForm] = useState({ corrected_value: "", original_value: "", fbc_section: "", context_notes: "", correction_type: "override" });
+  const [fieldMode, setFieldMode] = useState(() => {
+    try { return localStorage.getItem("field-mode") === "true"; } catch { return false; }
+  });
+
+  // Auto-redirect to the functional plan review page if a plan_review exists
   useEffect(() => {
     if (!projectId) return;
     supabase
@@ -65,6 +76,26 @@ export default function ReviewDetail() {
         }
       });
   }, [projectId, navigate]);
+
+  const filteredFlags = useMemo(() => {
+    return (flags || []).filter((f) => {
+      if (severityFilter !== "all" && f.severity !== severityFilter) return false;
+      if (confFilter !== "all" && f.confidence !== confFilter) return false;
+      if (statusFilter === "active" && f.status !== "active") return false;
+      if (statusFilter === "resolved" && f.status !== "resolved") return false;
+      if (fieldMode && f.severity !== "critical" && f.severity !== "major") return false;
+      return true;
+    });
+  }, [flags, severityFilter, confFilter, statusFilter, fieldMode]);
+
+  const counts = useMemo(() => {
+    const c = { critical: 0, major: 0, minor: 0, admin: 0, resolved: 0 };
+    (flags || []).forEach((f) => {
+      if (f.status === "resolved") c.resolved++;
+      else if (f.severity && f.severity in c) (c as any)[f.severity]++;
+    });
+    return c;
+  }, [flags]);
 
   const handleStartReview = async () => {
     if (!projectId || !user?.id) return;
@@ -113,16 +144,6 @@ export default function ReviewDetail() {
       </div>
     );
   }
-
-  const [severityFilter, setSeverityFilter] = useState("all");
-  const [confFilter, setConfFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("active");
-  const [correctionOpen, setCorrectionOpen] = useState(false);
-  const [selectedFlag, setSelectedFlag] = useState<any>(null);
-  const [correctionForm, setCorrectionForm] = useState({ corrected_value: "", original_value: "", fbc_section: "", context_notes: "", correction_type: "override" });
-  const [fieldMode, setFieldMode] = useState(() => {
-    try { return localStorage.getItem("field-mode") === "true"; } catch { return false; }
-  });
 
   const filteredFlags = useMemo(() => {
     return (flags || []).filter((f) => {
