@@ -130,13 +130,13 @@ If a field is not clearly visible, set it to null.
 
 Return ONLY a JSON object with these fields, no additional text.`,
 
-  generate_comment_letter: `You are a professional plan review engineer at Florida Private Providers (FPP), a licensed Private Provider firm (License #PVP-XXXXX) operating under Florida Statute 553.791.
+  generate_comment_letter: `You are a professional plan review engineer at Florida Private Providers, Inc. (FPP), a licensed Private Provider firm (License #AR92053) operating under Florida Statute 553.791.
 
 Generate a formal deficiency/comment letter with this structure:
 
 **LETTERHEAD FORMAT:**
 Florida Private Providers, Inc.
-[License # PVP-XXXXX]
+License #AR92053
 Plan Review Comment Letter
 
 **HEADER:**
@@ -282,7 +282,7 @@ const PLAN_REVIEW_TOOL = {
                 required: ["page_index", "x", "y", "width", "height"],
               },
             },
-            required: ["severity", "discipline", "code_ref", "county_specific", "page", "description", "recommendation", "confidence"],
+            required: ["severity", "discipline", "code_ref", "county_specific", "page", "description", "recommendation", "confidence", "markup"],
             additionalProperties: false,
           },
         },
