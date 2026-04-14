@@ -145,25 +145,6 @@ export default function ReviewDetail() {
     );
   }
 
-  const filteredFlags = useMemo(() => {
-    return (flags || []).filter((f) => {
-      if (severityFilter !== "all" && f.severity !== severityFilter) return false;
-      if (confFilter !== "all" && f.confidence !== confFilter) return false;
-      if (statusFilter === "active" && f.status !== "active") return false;
-      if (statusFilter === "resolved" && f.status !== "resolved") return false;
-      if (fieldMode && f.severity !== "critical" && f.severity !== "major") return false;
-      return true;
-    });
-  }, [flags, severityFilter, confFilter, statusFilter, fieldMode]);
-
-  const counts = useMemo(() => {
-    const c = { critical: 0, major: 0, minor: 0, admin: 0, resolved: 0 };
-    (flags || []).forEach((f) => {
-      if (f.status === "resolved") c.resolved++;
-      else if (f.severity && f.severity in c) (c as any)[f.severity]++;
-    });
-    return c;
-  }, [flags]);
 
   const handleResolve = async (flagId: string) => {
     await supabase.from("review_flags").update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: user?.id }).eq("id", flagId);
