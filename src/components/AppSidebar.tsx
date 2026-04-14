@@ -121,7 +121,7 @@ function SidebarContent({ onNavigate, collapsed, setCollapsed, onOpenAI }: { onN
   };
 
   return (
-    <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
+    <div className="flex h-full flex-col bg-sidebar/95 backdrop-blur-xl text-sidebar-foreground">
       {/* Header with branding + collapse toggle */}
       <div className="px-4 py-6 flex items-start justify-between">
         <Link to="/dashboard" className={cn("block", collapsed && "w-full text-center")}>
