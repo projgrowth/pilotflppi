@@ -139,18 +139,18 @@ export default function ReviewDetail() {
       <div className="flex flex-1 min-h-0">
         {/* Left - Plan viewer */}
         <div className="hidden md:flex w-[60%] bg-fpp-navy-mid relative flex-col">
-          <div className="flex-1 relative flex items-center justify-center">
-            <p className="text-fpp-gray-400 text-lg font-display opacity-30">Plan Sheet Viewer</p>
-            {/* Mock pins */}
-            {mockPins.map((pin) => (
-              <div
-                key={pin.id}
-                className="absolute flex items-center justify-center h-7 w-7 rounded-full border-2 border-white shadow-lg cursor-pointer hover:scale-110 transition-transform"
-                style={{ left: `${pin.x}%`, top: `${pin.y}%`, backgroundColor: pinColor[pin.severity] }}
-              >
-                <span className="text-white font-mono text-[10px] font-medium">{pin.id}</span>
-              </div>
-            ))}
+           <div className="flex-1 relative flex items-center justify-center">
+             <p className="text-fpp-gray-400 text-lg font-display opacity-30">Plan Sheet Viewer</p>
+             {/* Pins from real flags */}
+             {flagsToPins(flags || []).map((pin) => (
+               <div
+                 key={pin.id}
+                 className="absolute flex items-center justify-center h-7 w-7 rounded-full border-2 border-white shadow-lg cursor-pointer hover:scale-110 transition-transform"
+                 style={{ left: `${pin.x}%`, top: `${pin.y}%`, backgroundColor: pinColor[pin.severity] }}
+               >
+                 <span className="text-white font-mono text-[10px] font-medium">{pin.id}</span>
+               </div>
+             ))}
           </div>
           <div className="absolute top-3 right-3 flex gap-1">
             <Button variant="secondary" size="icon" className="h-7 w-7"><ZoomIn className="h-3.5 w-3.5" /></Button>
