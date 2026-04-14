@@ -56,7 +56,7 @@ const bottomTabs: NavItem[] = [
   { label: "Documents", path: "/documents", icon: FileText },
 ];
 
-function NavSection({ title, items, onNavigate, collapsed }: { title: string; items: NavItem[]; onNavigate?: () => void; collapsed?: boolean }) {
+const NavSection = React.forwardRef<HTMLDivElement, { title: string; items: NavItem[]; onNavigate?: () => void; collapsed?: boolean }>(function NavSection({ title, items, onNavigate, collapsed }, ref) {
   const location = useLocation();
   return (
     <div className="mb-6">
