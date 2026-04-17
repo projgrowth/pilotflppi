@@ -4,7 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { callAI, streamAI } from "@/lib/ai";
-import { renderPDFPagesToImages, renderPDFPagesForVision, type PDFPageImage } from "@/lib/pdf-utils";
+import { renderPDFPagesToImages, renderPDFPagesForVisionWithGrid, gridCellToCenter, type PDFPageImage } from "@/lib/pdf-utils";
 import { useFirmSettings } from "@/hooks/useFirmSettings";
 import { useFindingHistory, logFindingStatusChange } from "@/hooks/useFindingHistory";
 import { useAuth } from "@/contexts/AuthContext";
@@ -141,7 +141,16 @@ export default function PlanReviewDetail() {
   const handleRepositionConfirm = useCallback(async (idx: number, newMarkup: { page_index: number; x: number; y: number; width: number; height: number }) => {
     if (!review) return;
     const current = (review.ai_findings as Finding[]) || [];
-    const updated = current.map((f, i) => i === idx ? { ...f, markup: { ...(f.markup || {}), ...newMarkup } } : f);
+    // A human-placed pin is always high confidence and must never be downgraded on reload.
+    const updated = current.map((f, i) => i === idx ? {
+      ...f,
+      markup: {
+        ...(f.markup || {}),
+        ...newMarkup,
+        pin_confidence: "high" as const,
+        user_repositioned: true,
+      },
+    } : f);
     await supabase.from("plan_reviews").update({ ai_findings: JSON.parse(JSON.stringify(updated)) }).eq("id", review.id);
     queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
     setRepositioningIndex(null);
@@ -305,7 +314,9 @@ export default function PlanReviewDetail() {
   };
 
   /**
-   * Render the same PDFs at higher DPI for AI vision. Returns base64 strings only,
+   * Render the same PDFs at higher DPI for AI vision, with a 10×10 labelled grid
+   * overlaid on each page. The model uses the visible cell labels (e.g. "H7") to
+   * anchor each finding to a known coordinate cell. Returns base64 strings only,
    * in the same order as `displayImages`, so page_index lines up.
    */
   const renderVisionImages = async (r: PlanReviewRow): Promise<string[]> => {
@@ -323,7 +334,7 @@ export default function PlanReviewDetail() {
       const response = await fetch(signedData.signedUrl);
       const blob = await response.blob();
       const file = new File([blob], `vision-${filePath}`, { type: "application/pdf" });
-      const base64s = await renderPDFPagesForVision(file, 10, 220);
+      const base64s = await renderPDFPagesForVisionWithGrid(file, 10, 220);
       visionImages.push(...base64s);
     }
     return visionImages;
