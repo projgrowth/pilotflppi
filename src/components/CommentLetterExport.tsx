@@ -4,7 +4,7 @@ import type { Finding } from "@/components/FindingCard";
 import { getDisciplineLabel, getCountyLabel, DISCIPLINE_ORDER } from "@/lib/county-utils";
 import { getCountyRequirements, getSupplementalSectionLabel, type CountyRequirements, type SupplementalSection } from "@/lib/county-requirements";
 import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
+import { printViaIframe } from "@/lib/print-utils";
 
 export interface FirmInfo {
   firm_name: string;
@@ -327,35 +327,6 @@ ${buildSupplementalSections(config)}
 </body></html>`;
 }
 
-function printViaIframe(html: string) {
-  const iframe = document.createElement("iframe");
-  iframe.style.position = "fixed";
-  iframe.style.left = "-9999px";
-  iframe.style.top = "-9999px";
-  iframe.style.width = "0";
-  iframe.style.height = "0";
-  document.body.appendChild(iframe);
-
-  const doc = iframe.contentDocument || iframe.contentWindow?.document;
-  if (!doc) {
-    document.body.removeChild(iframe);
-    return;
-  }
-
-  doc.open();
-  doc.write(html);
-  doc.close();
-
-  iframe.onload = () => {
-    setTimeout(() => {
-      iframe.contentWindow?.print();
-      setTimeout(() => {
-        document.body.removeChild(iframe);
-      }, 1000);
-    }, 300);
-  };
-}
-
 async function persistToStorage(html: string, projectId: string | undefined, filename: string) {
   if (!projectId) return;
   // Best-effort archive copy; download path still works on failure.
@@ -368,22 +339,15 @@ async function persistToStorage(html: string, projectId: string | undefined, fil
 }
 
 export function CommentLetterExport(props: CommentLetterExportProps & { onDocumentGenerated?: () => void }) {
-  const handlePrint = () => {
+  const buildAndExport = () => {
     const html = buildLetterHTML(props);
-    printViaIframe(html);
-    // Persist HTML to storage and notify
     const filename = `Comment-Letter-R${props.round}-${props.projectName.replace(/\s+/g, "_")}.html`;
+    printViaIframe(html, filename);
     persistToStorage(html, props.projectId, filename).then(() => props.onDocumentGenerated?.());
   };
 
-  const handleSaveAsPDF = () => {
-    const html = buildLetterHTML(props);
-    // Use print dialog — user selects "Save as PDF" in browser
-    printViaIframe(html);
-    const filename = `Comment-Letter-R${props.round}-${props.projectName.replace(/\s+/g, "_")}.html`;
-    persistToStorage(html, props.projectId, filename).then(() => props.onDocumentGenerated?.());
-    toast.info('In the print dialog, select "Save as PDF" as the destination to download a PDF.');
-  };
+  const handlePrint = () => buildAndExport();
+  const handleSaveAsPDF = () => buildAndExport();
 
   return (
     <div className="flex gap-2">

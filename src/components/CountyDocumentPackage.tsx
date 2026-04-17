@@ -12,7 +12,7 @@ import type { Finding } from "@/components/FindingCard";
 import { getCountyRequirements, getSupplementalSectionLabel, type SupplementalSection } from "@/lib/county-requirements";
 import { CommentLetterExport, type FirmInfo } from "@/components/CommentLetterExport";
 import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
+import { printViaIframe } from "@/lib/print-utils";
 
 interface CountyDocumentPackageProps {
   projectId?: string;
@@ -115,27 +115,6 @@ function buildInspectionReadinessHTML(props: CountyDocumentPackageProps): string
 </body></html>`;
 }
 
-function printViaIframe(html: string) {
-  const iframe = document.createElement("iframe");
-  iframe.style.position = "fixed";
-  iframe.style.left = "-9999px";
-  iframe.style.top = "-9999px";
-  iframe.style.width = "0";
-  iframe.style.height = "0";
-  document.body.appendChild(iframe);
-  const doc = iframe.contentDocument || iframe.contentWindow?.document;
-  if (!doc) { document.body.removeChild(iframe); return; }
-  doc.open();
-  doc.write(html);
-  doc.close();
-  iframe.onload = () => {
-    setTimeout(() => {
-      iframe.contentWindow?.print();
-      setTimeout(() => document.body.removeChild(iframe), 1000);
-    }, 300);
-  };
-}
-
 async function persistAndNotify(html: string, filename: string, projectId?: string, onDone?: () => void) {
   if (projectId) {
     const blob = new Blob([html], { type: "text/html" });
@@ -151,16 +130,16 @@ export function CountyDocumentPackage(props: CountyDocumentPackageProps) {
 
   const handleDownloadProductChecklist = () => {
     const html = buildProductChecklistHTML(props);
-    printViaIframe(html);
-    toast.info('Select "Save as PDF" in the print dialog to download.');
-    persistAndNotify(html, `Product-Checklist-${safeName}.html`, props.projectId, props.onDocumentGenerated);
+    const filename = `Product-Checklist-${safeName}.html`;
+    printViaIframe(html, filename);
+    persistAndNotify(html, filename, props.projectId, props.onDocumentGenerated);
   };
 
   const handleDownloadInspectionPacket = () => {
     const html = buildInspectionReadinessHTML(props);
-    printViaIframe(html);
-    toast.info('Select "Save as PDF" in the print dialog to download.');
-    persistAndNotify(html, `Inspection-Readiness-${safeName}.html`, props.projectId, props.onDocumentGenerated);
+    const filename = `Inspection-Readiness-${safeName}.html`;
+    printViaIframe(html, filename);
+    persistAndNotify(html, filename, props.projectId, props.onDocumentGenerated);
   };
 
   const handleFullPackage = async () => {
