@@ -377,9 +377,230 @@ export default function PlanReviewDetail() {
     setAiRunning(true);
     setRightPanel("findings");
     setActiveFindingIndex(null);
+    setAiPhase("rendering");
     try {
-      await supabase.from("plan_reviews").update({ ai_check_status: "running" }).eq("id", r.id);
+      // Stamp the reviewer at AI run time so we can later block self-QC.
+      await supabase.from("plan_reviews").update({ ai_check_status: "running", reviewer_id: user?.id ?? null }).eq("id", r.id);
 
+      let findings: Finding[] = [];
+      const hasFiles = r.file_urls && r.file_urls.length > 0;
+
+      if (hasFiles) {
+        // Always re-render display pages first so we have provenance metadata
+        // AND a vector text index to snap pins against.
+        const displayImages = pageImages.length > 0 ? pageImages : await renderDocumentPages(r);
+        // Pull whatever text-layer index we have (newly built or from prior render).
+        const textIndex = pageTextItems;
+        if (displayImages.length > 0) {
+          setAiPhase("extracting_text");
+          // Build the manifest BEFORE the vision render so model has full grounding.
+          const imageManifest = displayImages.map((img, idx) => ({
+            index: idx,
+            file: img.fileName || `file-${img.fileIndex ?? 0}`,
+            page_in_file: img.pageInFile ?? idx + 1,
+            // Hand the model up to ~30 readable strings per page so it can pick a
+            // real callout/note/dimension as `nearest_text` instead of inventing one.
+            text_items: (textIndex[idx] || [])
+              .filter((t) => t.text.length >= 1 && t.text.length <= 40)
+              .slice(0, 30)
+              .map((t) => t.text),
+          }));
+
+          setAiPhase("vision");
+          // Render at 220 DPI specifically for the AI call (kept in memory only briefly).
+          const visionBase64s = await renderVisionImages(r);
+          const imagesForAI = visionBase64s.length === displayImages.length
+            ? visionBase64s
+            : displayImages.map((img) => img.base64);
+
+          const countyConfig = getCountyRequirements(r.project?.county || "");
+          const result = await withRetry(() =>
+            callAI({
+              action: "plan_review_check_visual",
+              payload: {
+                project_name: r.project?.name,
+                address: r.project?.address,
+                trade_type: r.project?.trade_type,
+                county: r.project?.county,
+                jurisdiction: r.project?.jurisdiction,
+                round: r.round,
+                county_requirements: {
+                  hvhz: countyConfig.hvhz,
+                  productApprovalFormat: countyConfig.productApprovalFormat,
+                  designWindSpeed: countyConfig.designWindSpeed,
+                  amendments: countyConfig.amendments,
+                  cccl: countyConfig.cccl,
+                },
+                image_manifest: imageManifest,
+                images: imagesForAI,
+              },
+            })
+          );
+          try {
+            findings = JSON.parse(result);
+            if (!Array.isArray(findings)) {
+              const match = result.match(/\[[\s\S]*\]/);
+              findings = match ? JSON.parse(match[0]) : [];
+            }
+          } catch {
+            // Model returned prose around the JSON; salvage the array.
+            const match = result.match(/\[[\s\S]*\]/);
+            try { findings = match ? JSON.parse(match[0]) : []; } catch { findings = []; }
+          }
+
+          setAiPhase("validating");
+          // ── Validate & repair page_index, anchor pin to grid_cell, then SNAP to vector text ──
+          const maxIndex = displayImages.length - 1;
+          findings = findings.map((f) => {
+            if (!f.markup) return f;
+            const pi = f.markup.page_index;
+            const pageStr = (f.page || "").trim().toLowerCase();
+
+            // Out of range → try to remap by sheet name; otherwise drop the markup.
+            if (typeof pi !== "number" || pi < 0 || pi > maxIndex) {
+              if (pageStr) {
+                const remap = displayImages.findIndex((img) =>
+                  (img.fileName || "").toLowerCase().includes(pageStr) ||
+                  pageStr.includes(`page ${img.pageInFile}`)
+                );
+                if (remap >= 0) {
+                  return { ...f, markup: { ...f.markup, page_index: remap } };
+                }
+              }
+              console.warn(`[ai-check] dropping out-of-range page_index=${pi} for finding "${f.code_ref}"`);
+              const { markup: _drop, ...rest } = f;
+              return rest as Finding;
+            }
+
+            const m = f.markup;
+            const gridCell: string | undefined = typeof m.grid_cell === "string" ? m.grid_cell.trim().toUpperCase() : undefined;
+            const nearestText: string = typeof m.nearest_text === "string" ? m.nearest_text.trim() : "";
+            const cellCenter = gridCellToCenter(gridCell);
+
+            // Clamp box dimensions so a misbehaving model can't paint a 50% × 50% rectangle.
+            let x = Math.max(0, Math.min(98, m.x ?? 0));
+            let y = Math.max(0, Math.min(98, m.y ?? 0));
+            const width = Math.max(1, Math.min(15, m.width ?? 4));
+            const height = Math.max(1, Math.min(10, m.height ?? 4));
+
+            // ── Vector-text snap (precision 1% instead of 10%) ──
+            // If we have a text-layer match for the model's `nearest_text` on
+            // the same page, jump the pin's center to the actual text bbox
+            // center. This is the single biggest precision win — we use the
+            // PDF's own coordinates instead of trusting the model's eyeballed %.
+            let snapped = false;
+            const pageItems = textIndex[pi] || [];
+            if (nearestText && pageItems.length > 0) {
+              const hit = snapToNearestText(pageItems, nearestText, cellCenter);
+              if (hit) {
+                x = Math.max(0, Math.min(100 - width, hit.x - width / 2));
+                y = Math.max(0, Math.min(100 - height, hit.y - height / 2));
+                snapped = true;
+              }
+            }
+
+            // If we did NOT snap to vector text but we have a valid grid cell,
+            // force the BOX CENTER to sit inside that cell, clamped to ±5% of
+            // the cell center. Bounds worst-case error to one grid cell (~10%).
+            if (!snapped && cellCenter) {
+              const desiredCx = Math.max(cellCenter.x - 5, Math.min(cellCenter.x + 5, x + width / 2));
+              const desiredCy = Math.max(cellCenter.y - 5, Math.min(cellCenter.y + 5, y + height / 2));
+              x = Math.max(0, Math.min(100 - width, desiredCx - width / 2));
+              y = Math.max(0, Math.min(100 - height, desiredCy - height / 2));
+            }
+
+            // Confidence:
+            //  - high: snapped to real text OR (grid_cell + non-empty nearest_text)
+            //  - medium: grid_cell only
+            //  - low: neither (raw guess)
+            // (User-repositioned pins are forced to "high" elsewhere on save.)
+            let pin_confidence: "high" | "medium" | "low";
+            if (snapped) {
+              pin_confidence = "high";
+            } else if (cellCenter && nearestText.length >= 2) {
+              pin_confidence = "high";
+            } else if (cellCenter) {
+              pin_confidence = "medium";
+            } else {
+              pin_confidence = "low";
+            }
+
+            return {
+              ...f,
+              markup: {
+                ...m,
+                page_index: pi,
+                x,
+                y,
+                width,
+                height,
+                grid_cell: gridCell,
+                nearest_text: nearestText,
+                pin_confidence,
+              },
+            };
+          });
+        }
+      }
+
+      if (findings.length === 0) {
+        setAiPhase("vision");
+        const countyConfigFallback = getCountyRequirements(r.project?.county || "");
+        const payload: Record<string, unknown> = {
+          project_name: r.project?.name,
+          address: r.project?.address,
+          trade_type: r.project?.trade_type,
+          county: r.project?.county,
+          jurisdiction: r.project?.jurisdiction,
+          round: r.round,
+          county_requirements: {
+            hvhz: countyConfigFallback.hvhz,
+            productApprovalFormat: countyConfigFallback.productApprovalFormat,
+            designWindSpeed: countyConfigFallback.designWindSpeed,
+            amendments: countyConfigFallback.amendments,
+            cccl: countyConfigFallback.cccl,
+          },
+        };
+        if (hasFiles) {
+          payload.document_context = `Plans attached: ${r.file_urls.map((u) => decodeURIComponent(u.split("/").pop() || "")).join(", ")}`;
+        }
+        const result = await withRetry(() => callAI({ action: "plan_review_check", payload }));
+        try {
+          findings = JSON.parse(result);
+          if (!Array.isArray(findings)) {
+            const match = result.match(/\[[\s\S]*\]/);
+            findings = match ? JSON.parse(match[0]) : [];
+          }
+        } catch {
+          try {
+            const match = result.match(/\[[\s\S]*\]/);
+            if (match) findings = JSON.parse(match[0]);
+          } catch { findings = []; }
+        }
+      }
+
+      setAiPhase("saving");
+      const prevFindings = r.ai_findings || [];
+
+      await supabase.from("plan_reviews").update({
+        ai_check_status: "complete",
+        ai_findings: JSON.parse(JSON.stringify(findings)),
+        previous_findings: JSON.parse(JSON.stringify(prevFindings)),
+        finding_statuses: {},
+      }).eq("id", r.id);
+
+      queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+      setFindingStatuses({});
+      setAiCompleteFlash(findings.length);
+      setTimeout(() => setAiCompleteFlash(null), 3500);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "AI check failed");
+      await supabase.from("plan_reviews").update({ ai_check_status: "error" }).eq("id", r.id);
+    } finally {
+      setAiPhase("idle");
+      setAiRunning(false);
+    }
+  };
       let findings: Finding[] = [];
       const hasFiles = r.file_urls && r.file_urls.length > 0;
 
