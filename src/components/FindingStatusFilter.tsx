@@ -1,8 +1,9 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { CheckCheck, Clock, ArrowRightLeft } from "lucide-react";
+import type { FindingStatus } from "@/types";
 
-export type FindingStatus = "open" | "resolved" | "deferred";
+export type { FindingStatus } from "@/types";
 
 interface FindingStatusFilterProps {
   activeFilter: FindingStatus | "all";
