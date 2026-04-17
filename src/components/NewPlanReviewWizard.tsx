@@ -38,6 +38,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { isHVHZ, getCountyLabel } from "@/lib/county-utils";
+import { geocodeAddress } from "@/lib/geocode";
 
 const FLORIDA_COUNTIES = [
   "miami-dade", "broward", "palm-beach", "hillsborough", "orange", "duval",
