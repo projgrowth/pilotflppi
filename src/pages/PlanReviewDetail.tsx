@@ -120,6 +120,7 @@ export default function PlanReviewDetail() {
   const [scanStep, setScanStep] = useState(0);
   const [commentLetter, setCommentLetter] = useState("");
   const [generatingLetter, setGeneratingLetter] = useState(false);
+  const letterAbortRef = useRef<AbortController | null>(null);
   const [copied, setCopied] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [rightPanel, setRightPanel] = useState<RightPanelMode>("findings");
@@ -413,6 +414,11 @@ export default function PlanReviewDetail() {
   };
 
   const generateCommentLetter = async (r: PlanReviewRow) => {
+    // Abort any in-flight letter generation before starting a new one.
+    letterAbortRef.current?.abort();
+    const controller = new AbortController();
+    letterAbortRef.current = controller;
+
     setGeneratingLetter(true);
     setCommentLetter("");
     setRightPanel("letter");
@@ -430,11 +436,23 @@ export default function PlanReviewDetail() {
         },
         onDelta: (chunk) => setCommentLetter((prev) => prev + chunk),
         onDone: () => setGeneratingLetter(false),
+        signal: controller.signal,
       });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to generate letter");
+      const msg = err instanceof Error ? err.message : "Failed to generate letter";
+      if (msg === "AI request cancelled") {
+        toast.message("Letter generation cancelled");
+      } else {
+        toast.error(msg);
+      }
       setGeneratingLetter(false);
+    } finally {
+      if (letterAbortRef.current === controller) letterAbortRef.current = null;
     }
+  };
+
+  const cancelCommentLetter = () => {
+    letterAbortRef.current?.abort();
   };
 
   const copyLetter = () => {
