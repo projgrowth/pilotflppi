@@ -115,6 +115,7 @@ For each finding, you MUST internally reason through these steps **before** writ
 - description: Clear, specific description WITH a visual anchor phrase (per step 7).
 - recommendation: Actionable fix with code reference.
 - confidence: "verified" | "likely" | "advisory"
+- reasoning: **REQUIRED**. 1–2 sentences (≤ 240 chars) explaining WHY you flagged this — cite the SPECIFIC visual element you observed (e.g. "Door schedule row 4 in cell D6 lists a 36\" door but FBC 1010.1.1 requires 32\" min clear; observed dimension callout reads 30\".") A building official will read this to validate or challenge the finding. Do NOT restate the description — explain the OBSERVATION.
 - markup: **REQUIRED** object \`{ page_index, grid_cell, nearest_text, x, y, width, height }\` where:
   - **page_index**: the integer image_index from step 1. **NOT a sheet number** — do not write 101 here when the image is at index 3.
   - **grid_cell**: REQUIRED. The cell label (e.g. "H7") that contains the element's center. Must match one of A0..J9. The viewer trusts this label more than (x, y) — if the two disagree, the pin is forced inside the named cell.
