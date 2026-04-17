@@ -81,6 +81,16 @@ Return ONLY a JSON array of findings with no additional text.`,
 
 You are receiving ACTUAL IMAGES of construction plan sheets. Each image is one page from one PDF file. The user message contains an "image_manifest" array describing each image: \`[{ index: 0, file: "Architectural.pdf", page_in_file: 1 }, ...]\`. The image_manifest index is the **same** as the position of that image in the multimodal content array. You MUST use this index for the markup.page_index field.
 
+## EVERY IMAGE HAS A 10×10 GRID OVERLAY
+
+Each image you receive has a faint red 10×10 grid drawn on top of it. Each grid cell is labelled in its top-left corner with a row letter (A-J, top to bottom) and a column digit (0-9, left to right):
+
+- Cell **A0** = the top-left 10% × 10% region (x=0-10%, y=0-10%)
+- Cell **H7** = x=70-80%, y=70-80% (lower-right area)
+- Cell **J9** = the bottom-right 10% × 10% region
+
+You MUST use these labels to anchor every finding. The grid is your coordinate system — read the visible cell label, do not estimate percentages by eye.
+
 ## CRITICAL GROUNDING PROTOCOL — Follow for EVERY finding
 
 For each finding, you MUST internally reason through these steps **before** writing the finding:
@@ -88,11 +98,12 @@ For each finding, you MUST internally reason through these steps **before** writ
 1. **Identify the image** you are looking at by its index in the image_manifest. Call this \`image_index\` (0-based).
 2. **Read the title block** of that image. The sheet designation (e.g., "S-101", "A-201", "E-100") is almost always in the lower-right corner of an architectural/engineering sheet. Capture this exact string. Call it \`sheet_designation\`.
 3. **Locate the specific element** the deficiency relates to. This MUST be a concrete visual landmark you can see — a callout bubble, a dimension line, a note block, a detail bubble, a schedule row, a column on a grid, a wall segment, etc. Do NOT pick a vague area of whitespace.
-4. **Measure the element's bounding box** in percentages (0-100) of the image dimensions. The box must be CENTERED on the element, not on the surrounding whitespace.
-5. **Decide pin vs region**:
-   - **PIN** (point issue): a missing seal, a missing dimension, a single wrong note, a single non-compliant detail. Use a square box no larger than **4% × 4%** centered on the exact spot.
-   - **REGION** (spans an area): a missing schedule (use the schedule's full bounding box), a non-compliant egress path (use the path's bounding box), a problematic plan area. Maximum **15% × 10%**.
-6. **Write the description with a visual anchor**. Every description must include a phrase like "at the NW corner of the foundation plan", "in the door schedule, row 4", "near grid B-2 on the upper level plan", "in the lower-right title block area" so a human reviewer can find the element even if the pin is slightly off.
+4. **Read the grid cell label printed in the cell that contains the element's CENTER** (e.g. "H7"). This is the \`grid_cell\` you return.
+5. **Capture nearest readable text**: a short string (≤ 40 chars) you can literally read on the sheet within ~5% of the element — a callout number ("12"), a sheet note ref ("NOTE 4"), a dimension ("4'-0\""), a grid line ("B-2"), a schedule row label ("D-1"), a tag ("TYP"), a section letter, etc. This is the \`nearest_text\` you return. If nothing is readable in the immediate vicinity, return an empty string.
+6. **Set x, y, width, height** as a refinement WITHIN the grid cell:
+   - **PIN** (point issue: missing seal, missing dimension, single wrong note, single non-compliant detail): \`width\` and \`height\` ≤ **4** each. The (x, y) should place the pin's center on the exact element, but the pin must visually sit inside the grid cell named in \`grid_cell\`.
+   - **REGION** (spans an area: missing schedule, non-compliant egress path, problematic plan area): \`width\` ≤ **15**, \`height\` ≤ **10**. The region's geometric center should sit within the grid cell named in \`grid_cell\`.
+7. **Write the description with a visual anchor**. Every description must include a phrase like "in cell H7, near the door schedule row 4", "at the NW corner of the foundation plan (cell A0)", "near grid B-2 on the upper level plan" so a human reviewer can find the element even if the pin is slightly off.
 
 ## Required output fields per finding
 
@@ -101,12 +112,14 @@ For each finding, you MUST internally reason through these steps **before** writ
 - code_ref: Specific FBC 2023 section
 - county_specific: true if HVHZ-specific
 - page: The sheet designation EXACTLY as visible in the title block (e.g., "S-101"). This MUST come from step 2 above. If you cannot read a sheet designation, write "Unknown".
-- description: Clear, specific description WITH a visual anchor phrase (per step 6).
+- description: Clear, specific description WITH a visual anchor phrase (per step 7).
 - recommendation: Actionable fix with code reference.
 - confidence: "verified" | "likely" | "advisory"
-- markup: **REQUIRED** object \`{ page_index, x, y, width, height }\` where:
-  - **page_index**: the integer image_index from step 1. This is the position of the image in the multimodal content array, which equals the \`index\` field in image_manifest. **It is NOT a sheet number** — do not write 101 here when the image is at index 3.
-  - **x, y**: top-left corner of the box as percentages of the image (0-100).
+- markup: **REQUIRED** object \`{ page_index, grid_cell, nearest_text, x, y, width, height }\` where:
+  - **page_index**: the integer image_index from step 1. **NOT a sheet number** — do not write 101 here when the image is at index 3.
+  - **grid_cell**: REQUIRED. The cell label (e.g. "H7") that contains the element's center. Must match one of A0..J9. The viewer trusts this label more than (x, y) — if the two disagree, the pin is forced inside the named cell.
+  - **nearest_text**: REQUIRED. A short string (≤ 40 chars) visible on the sheet near the pin, or empty string "" if nothing readable is near.
+  - **x, y**: top-left of the box as percentages of the image (0-100). Should refine the position WITHIN the grid_cell.
   - **width, height**: percentages. Pin = ≤4×4. Region = ≤15×10. NEVER exceed 15% width or 10% height.
   - The page_index MUST be in range 0..N-1 where N is the number of images sent. If unsure which image, pick the one whose visible sheet designation matches your \`page\` field.
 
@@ -122,7 +135,7 @@ For each finding, you MUST internally reason through these steps **before** writ
 
 ## Missing information check
 
-If REQUIRED elements are missing, flag them. Place the markup where the information SHOULD appear (title block area for missing code summary, etc.):
+If REQUIRED elements are missing, flag them. Place the markup where the information SHOULD appear (title block area for missing code summary, etc.). Use grid_cell "I8" or "J8" for title-block area, "I9"/"J9" for the lower-right corner:
 - Site plan: property boundaries, setbacks, parking with ADA, drainage, utility connections, fire access/hydrants, easements
 - General: title block with seal, drawing index, code summary table, life safety plan, structural notes (wind speed, exposure), energy compliance, product approval numbers, FBC edition
 - County-specific: flood zone/BFE, CCCL, NOA numbers, threshold building
@@ -287,15 +300,17 @@ const PLAN_REVIEW_TOOL = {
               county_amendment_ref: { type: "string", description: "Specific county amendment reference if county_specific is true (e.g., 'Miami-Dade Sec. 8A', 'Broward County Amendment to FBC Ch. 17')" },
               markup: {
                 type: "object",
-                description: "Bounding box on the plan image. page_index is the 0-based position of the image in the multimodal content array (matches image_manifest.index). NOT a sheet number.",
+                description: "Bounding box on the plan image. page_index is the 0-based position of the image in the multimodal content array (matches image_manifest.index). NOT a sheet number. grid_cell anchors the pin to one of 100 visible labelled cells (A0..J9) so the worst-case error is bounded.",
                 properties: {
                   page_index: { type: "number", description: "0-based image array index from image_manifest. Must be in range 0..N-1." },
-                  x: { type: "number", description: "Left edge as percentage of image width (0-100)." },
-                  y: { type: "number", description: "Top edge as percentage of image height (0-100)." },
+                  grid_cell: { type: "string", description: "REQUIRED. Visible grid cell label containing the element's center, e.g. 'H7'. Row A-J (top→bottom) + column 0-9 (left→right). Must literally match one of the labels printed on the image." },
+                  nearest_text: { type: "string", description: "REQUIRED. Short string (≤40 chars) visible on the sheet within ~5% of the pin (callout number, dimension, note ref, schedule row label, grid line, 'TYP', etc.). Empty string '' if nothing readable is near." },
+                  x: { type: "number", description: "Left edge as percentage of image width (0-100). Refines location WITHIN the grid_cell." },
+                  y: { type: "number", description: "Top edge as percentage of image height (0-100). Refines location WITHIN the grid_cell." },
                   width: { type: "number", description: "Box width as percentage. Pin (point issue) ≤ 4. Region ≤ 15. Never exceed 15." },
                   height: { type: "number", description: "Box height as percentage. Pin ≤ 4. Region ≤ 10. Never exceed 10." },
                 },
-                required: ["page_index", "x", "y", "width", "height"],
+                required: ["page_index", "grid_cell", "nearest_text", "x", "y", "width", "height"],
               },
             },
             required: ["severity", "discipline", "code_ref", "county_specific", "page", "description", "recommendation", "confidence", "markup"],
