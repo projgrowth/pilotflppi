@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { getDisciplineIcon, getDisciplineColor, getDisciplineLabel } from "@/lib/county-utils";
-import { AlertTriangle, AlertCircle, Info, CheckCheck, MapPin, Clock, ArrowRightLeft, ChevronRight, History, Move } from "lucide-react";
+import { AlertTriangle, AlertCircle, Info, CheckCheck, MapPin, Clock, ArrowRightLeft, ChevronRight, History, Move, Crosshair } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, forwardRef } from "react";
 import type { FindingStatus } from "@/components/FindingStatusFilter";
@@ -164,6 +164,42 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
               </div>
             )}
 
+            {/* Approximate-location hint when AI's confidence in pin placement is not high.
+                The user picked "show approximate pin" — keep the pin, but be honest. */}
+            {finding.markup && finding.markup.pin_confidence && finding.markup.pin_confidence !== "high" && (
+              <div className={cn(
+                "flex items-center gap-1.5 rounded border px-2 py-1.5",
+                finding.markup.pin_confidence === "low"
+                  ? "bg-warning/10 border-warning/40"
+                  : "bg-muted/40 border-border/40"
+              )}>
+                <Crosshair className={cn(
+                  "h-3 w-3 shrink-0",
+                  finding.markup.pin_confidence === "low" ? "text-warning" : "text-muted-foreground"
+                )} />
+                <p className="text-2xs text-foreground/80 flex-1 leading-snug">
+                  <span className="font-semibold">
+                    {finding.markup.pin_confidence === "low" ? "Approximate location" : "Pin placed by grid cell"}
+                  </span>
+                  {finding.markup.nearest_text ? (
+                    <> — look near <span className="font-mono text-foreground">"{finding.markup.nearest_text}"</span></>
+                  ) : finding.markup.grid_cell ? (
+                    <> — search cell <span className="font-mono text-foreground">{finding.markup.grid_cell}</span></>
+                  ) : (
+                    <> — verify on sheet</>
+                  )}
+                </p>
+                {onRepositionClick && (
+                  <button
+                    className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs font-medium text-warning hover:bg-warning/20 transition-colors"
+                    onClick={(e) => { e.stopPropagation(); onRepositionClick(); }}
+                  >
+                    <Move className="h-3 w-3" /> Place pin
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Action buttons */}
             <div className="flex items-center gap-1 pt-0.5">
               {finding.markup && onLocateClick && (
@@ -174,7 +210,7 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
                   <MapPin className="h-3 w-3" /> Locate
                 </button>
               )}
-              {finding.markup && onRepositionClick && (
+              {finding.markup && onRepositionClick && finding.markup.pin_confidence === "high" && (
                 <button
                   className="flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs text-muted-foreground hover:text-warning hover:bg-warning/10 transition-colors"
                   onClick={(e) => { e.stopPropagation(); onRepositionClick(); }}
