@@ -127,6 +127,11 @@ export default function PlanReviewDetail() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeFindingIndex, setActiveFindingIndex] = useState<number | null>(null);
   const [pageImages, setPageImages] = useState<PDFPageImage[]>([]);
+  const [pageTextItems, setPageTextItems] = useState<PDFTextItem[][]>([]);
+  /** {totalSheets, renderedSheets} — populated after we open the PDFs. Used to show the "Reviewing first 10 of N" banner. */
+  const [pageCapInfo, setPageCapInfo] = useState<{ total: number; rendered: number } | null>(null);
+  /** Discrete AI run phase — drives the live step indicator instead of a generic spinner. */
+  const [aiPhase, setAiPhase] = useState<"idle" | "rendering" | "extracting_text" | "vision" | "validating" | "saving">("idle");
   const [renderingPages, setRenderingPages] = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);
   const findingRefs = useRef<Map<number, HTMLDivElement>>(new Map());
