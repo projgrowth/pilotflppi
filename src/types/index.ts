@@ -29,6 +29,14 @@ export interface MarkupData {
   width?: number;
   height?: number;
   annotations?: { x: number; y: number; width: number; height: number; label?: string }[];
+  /** Grid cell anchor returned by the AI (e.g. "H7"). Row letter A-J + column digit 0-9. */
+  grid_cell?: string;
+  /** A short string the model claims it could literally read on the sheet near the pin. */
+  nearest_text?: string;
+  /** Confidence in pin location: high = anchor verified or human-placed; medium = grid_cell only; low = no anchor. */
+  pin_confidence?: "high" | "medium" | "low";
+  /** True once a human has manually repositioned this pin — never downgrade after that. */
+  user_repositioned?: boolean;
 }
 
 export interface Finding {
