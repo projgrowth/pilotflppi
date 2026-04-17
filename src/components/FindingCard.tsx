@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { getDisciplineIcon, getDisciplineColor, getDisciplineLabel } from "@/lib/county-utils";
-import { AlertTriangle, AlertCircle, Info, CheckCheck, MapPin, Clock, ArrowRightLeft, ChevronRight, History, Move, Crosshair } from "lucide-react";
+import { AlertTriangle, AlertCircle, Info, CheckCheck, MapPin, Clock, ArrowRightLeft, ChevronRight, History, Move, Crosshair, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, forwardRef } from "react";
 import type { FindingStatus } from "@/components/FindingStatusFilter";
@@ -51,6 +51,7 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
   ({ finding, index, globalIndex, isActive, onLocateClick, onRepositionClick, animationDelay = 0, status = "open", onStatusChange, defaultExpanded = false, history = [] }, ref) => {
     const [expanded, setExpanded] = useState(defaultExpanded);
     const [showHistory, setShowHistory] = useState(false);
+    const [showReasoning, setShowReasoning] = useState(false);
     const sev = severityConfig[finding.severity] || severityConfig.minor;
     const isResolved = status === "resolved";
     const isDeferred = status === "deferred";
