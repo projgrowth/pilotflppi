@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import {
   ChevronLeft, ChevronRight, ZoomIn, ZoomOut,
   Maximize, Columns, PanelLeftClose, PanelLeft,
-  Keyboard,
+  Keyboard, Check, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,16 +26,28 @@ interface MarkupProps {
   findings: Finding[];
   activeFindingIndex: number | null;
   onAnnotationClick: (findingIndex: number) => void;
+  /** When set, viewer enters reposition mode for this finding. Click on the page to set new pin location. */
+  repositioningIndex?: number | null;
+  onRepositionConfirm?: (index: number, markup: { page_index: number; x: number; y: number; width: number; height: number }) => void;
+  onRepositionCancel?: () => void;
   className?: string;
 }
 
 const ZOOM_PRESETS = [0.5, 0.75, 1, 1.5, 2];
+
+/** Treat any annotation ≤ 4×4 percent as a pin (point issue) rather than a region. */
+function isPinSize(a: Annotation): boolean {
+  return a.width <= 4 && a.height <= 4;
+}
 
 export function PlanMarkupViewer({
   pageImages,
   findings,
   activeFindingIndex,
   onAnnotationClick,
+  repositioningIndex,
+  onRepositionConfirm,
+  onRepositionCancel,
   className,
 }: MarkupProps) {
   const [currentPage, setCurrentPage] = useState(0);
@@ -48,6 +60,22 @@ export function PlanMarkupViewer({
   // Drag-to-pan state
   const [isPanning, setIsPanning] = useState(false);
   const panStart = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
+
+  // Reposition draft (where user clicked, before confirming)
+  const [draftPin, setDraftPin] = useState<{ x: number; y: number } | null>(null);
+  const isRepositioning = repositioningIndex !== null && repositioningIndex !== undefined;
+
+  // Reset draft when reposition target changes / clears
+  useEffect(() => { setDraftPin(null); }, [repositioningIndex]);
+
+  // When entering reposition mode, jump to the finding's current page so user has context
+  useEffect(() => {
+    if (!isRepositioning) return;
+    const f = findings[repositioningIndex!];
+    if (f?.markup && typeof f.markup.page_index === "number") {
+      setCurrentPage(f.markup.page_index);
+    }
+  }, [isRepositioning, repositioningIndex, findings]);
 
   const pageFindings = useMemo(() =>
     findings
@@ -107,9 +135,9 @@ export function PlanMarkupViewer({
     return () => container.removeEventListener("wheel", handler);
   }, []);
 
-  // Drag-to-pan handlers
+  // Drag-to-pan handlers (disabled in reposition mode)
   const onPointerDown = useCallback((e: React.PointerEvent) => {
-    // Don't start pan if clicking an annotation
+    if (isRepositioning) return;
     if ((e.target as HTMLElement).closest("[data-annotation]")) return;
     const container = containerRef.current;
     if (!container) return;
@@ -121,7 +149,7 @@ export function PlanMarkupViewer({
       scrollTop: container.scrollTop,
     };
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-  }, []);
+  }, [isRepositioning]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     if (!isPanning) return;
@@ -137,11 +165,36 @@ export function PlanMarkupViewer({
     setIsPanning(false);
   }, []);
 
+  // Click handler for reposition mode
+  const onCanvasClick = useCallback((e: React.MouseEvent) => {
+    if (!isRepositioning) return;
+    const img = imageRef.current;
+    if (!img) return;
+    const rect = img.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    if (x < 0 || x > 100 || y < 0 || y > 100) return;
+    setDraftPin({ x, y });
+  }, [isRepositioning]);
+
+  const confirmReposition = () => {
+    if (!isRepositioning || !draftPin || !onRepositionConfirm) return;
+    // Convert click point to a 3% × 3% pin centered on the click.
+    onRepositionConfirm(repositioningIndex!, {
+      page_index: currentPage,
+      x: Math.max(0, draftPin.x - 1.5),
+      y: Math.max(0, draftPin.y - 1.5),
+      width: 3,
+      height: 3,
+    });
+  };
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Don't capture if typing in an input
       if ((e.target as HTMLElement).tagName === "INPUT" || (e.target as HTMLElement).tagName === "TEXTAREA") return;
+      if (isRepositioning && e.key === "Escape") { onRepositionCancel?.(); return; }
+      if (isRepositioning && e.key === "Enter" && draftPin) { confirmReposition(); return; }
 
       switch (e.key) {
         case "ArrowLeft":
@@ -169,7 +222,7 @@ export function PlanMarkupViewer({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [pageImages.length, fitWidth]);
+  }, [pageImages.length, fitWidth, isRepositioning, draftPin, onRepositionCancel]);
 
   if (pageImages.length === 0) {
     return (
@@ -183,6 +236,31 @@ export function PlanMarkupViewer({
 
   return (
     <div className={cn("flex flex-col h-full overflow-hidden bg-muted/10", className)}>
+      {/* Reposition banner */}
+      {isRepositioning && (
+        <div className="shrink-0 bg-accent/10 border-b border-accent/30 px-3 py-1.5 flex items-center gap-2">
+          <span className="text-xs font-medium text-accent">
+            Reposition pin for finding #{repositioningIndex! + 1}
+          </span>
+          <span className="text-2xs text-muted-foreground">
+            Click anywhere on the sheet to set the new location · Esc to cancel · Enter to save
+          </span>
+          <div className="ml-auto flex items-center gap-1">
+            <Button size="sm" variant="ghost" className="h-6 px-2 text-2xs" onClick={onRepositionCancel}>
+              <X className="h-3 w-3 mr-1" /> Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="h-6 px-2 text-2xs bg-accent text-accent-foreground"
+              disabled={!draftPin}
+              onClick={confirmReposition}
+            >
+              <Check className="h-3 w-3 mr-1" /> Save pin
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="flex items-center justify-between border-b bg-card px-3 py-1.5 shrink-0 gap-2">
         {/* Left: page nav */}
@@ -301,12 +379,13 @@ export function PlanMarkupViewer({
           ref={containerRef}
           className={cn(
             "flex-1 overflow-auto relative",
-            isPanning ? "cursor-grabbing" : "cursor-grab"
+            isRepositioning ? "cursor-crosshair" : isPanning ? "cursor-grabbing" : "cursor-grab"
           )}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerLeave={onPointerUp}
+          onClick={onCanvasClick}
         >
           <div
             className="relative inline-block"
@@ -320,7 +399,6 @@ export function PlanMarkupViewer({
                 className="block max-w-none select-none"
                 draggable={false}
                 onLoad={() => {
-                  // Auto fit-width on first load
                   if (zoom === 1 && imageRef.current && containerRef.current) {
                     const available = containerRef.current.clientWidth;
                     const natural = imageRef.current.naturalWidth;
@@ -335,16 +413,72 @@ export function PlanMarkupViewer({
             {/* Annotation overlays */}
             {pageFindings.map(({ finding, globalIndex }) => {
               if (!finding.markup) return null;
+              // Skip drawing the existing pin for the finding being repositioned
+              if (isRepositioning && globalIndex === repositioningIndex) return null;
               const annots = finding.markup.annotations || [
                 {
                   x: finding.markup.x || 0,
                   y: finding.markup.y || 0,
-                  width: finding.markup.width || 10,
-                  height: finding.markup.height || 5,
+                  width: finding.markup.width || 4,
+                  height: finding.markup.height || 4,
                 },
               ];
               return annots.map((a: Annotation, ai: number) => {
                 const isActive = activeFindingIndex === globalIndex;
+                const pin = isPinSize(a);
+                const sheetLabel = finding.page && finding.page !== "Unknown" ? finding.page : null;
+                const badgeText = sheetLabel ? `${sheetLabel} · #${globalIndex + 1}` : `#${globalIndex + 1}`;
+
+                if (pin) {
+                  // Crosshair pin: render at the CENTER of the (small) box
+                  const cx = a.x + a.width / 2;
+                  const cy = a.y + a.height / 2;
+                  return (
+                    <div
+                      key={`${globalIndex}-${ai}`}
+                      data-annotation
+                      ref={(el) => (ai === 0 ? setAnnotationRef(globalIndex, el) : undefined)}
+                      className="absolute pointer-events-auto cursor-pointer"
+                      style={{
+                        left: `${cx}%`,
+                        top: `${cy}%`,
+                        transform: "translate(-50%, -50%)",
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAnnotationClick(globalIndex);
+                      }}
+                    >
+                      {/* Crosshair: outer circle + inner dot + cross lines */}
+                      <div className={cn(
+                        "relative rounded-full border-2 transition-all",
+                        isActive
+                          ? "h-7 w-7 border-destructive bg-destructive/20 shadow-[0_0_12px_hsl(var(--destructive)/0.5)]"
+                          : "h-5 w-5 border-destructive/70 bg-destructive/10 hover:border-destructive hover:bg-destructive/20"
+                      )}>
+                        {/* center dot */}
+                        <div className={cn(
+                          "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-destructive",
+                          isActive ? "h-2 w-2" : "h-1.5 w-1.5"
+                        )} />
+                        {/* cross lines */}
+                        <div className="absolute top-1/2 left-0 right-0 h-px bg-destructive/60 -translate-y-1/2" />
+                        <div className="absolute left-1/2 top-0 bottom-0 w-px bg-destructive/60 -translate-x-1/2" />
+                      </div>
+                      {/* Badge to the right of the pin */}
+                      <div className={cn(
+                        "absolute left-full ml-1 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-2xs font-bold whitespace-nowrap shadow-md",
+                        isActive
+                          ? "bg-destructive text-destructive-foreground"
+                          : "bg-destructive/85 text-destructive-foreground"
+                      )}>
+                        {badgeText}
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Region box (for findings that span an area)
                 return (
                   <div
                     key={`${globalIndex}-${ai}`}
@@ -353,7 +487,7 @@ export function PlanMarkupViewer({
                     className={cn(
                       "absolute border-2 cursor-pointer transition-all duration-300",
                       isActive
-                        ? "border-destructive bg-destructive/20 shadow-[0_0_12px_rgba(220,38,38,0.4)] animate-pulse"
+                        ? "border-destructive bg-destructive/20 shadow-[0_0_12px_hsl(var(--destructive)/0.4)] animate-pulse"
                         : "border-destructive/60 bg-destructive/10 hover:bg-destructive/20"
                     )}
                     style={{
@@ -369,18 +503,36 @@ export function PlanMarkupViewer({
                   >
                     <div
                       className={cn(
-                        "absolute -top-3 -left-3 h-6 w-6 rounded-full flex items-center justify-center text-2xs font-bold shadow-md",
+                        "absolute -top-3 -left-1 px-1.5 py-0.5 rounded text-2xs font-bold whitespace-nowrap shadow-md",
                         isActive
                           ? "bg-destructive text-destructive-foreground"
-                          : "bg-destructive/80 text-destructive-foreground"
+                          : "bg-destructive/85 text-destructive-foreground"
                       )}
                     >
-                      {globalIndex + 1}
+                      {badgeText}
                     </div>
                   </div>
                 );
               });
             })}
+
+            {/* Reposition draft pin */}
+            {isRepositioning && draftPin && (
+              <div
+                className="absolute pointer-events-none"
+                style={{
+                  left: `${draftPin.x}%`,
+                  top: `${draftPin.y}%`,
+                  transform: "translate(-50%, -50%)",
+                }}
+              >
+                <div className="relative h-8 w-8 rounded-full border-2 border-accent bg-accent/30 shadow-[0_0_16px_hsl(var(--accent)/0.6)] animate-pulse">
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-2.5 w-2.5 rounded-full bg-accent" />
+                  <div className="absolute top-1/2 left-0 right-0 h-px bg-accent/70 -translate-y-1/2" />
+                  <div className="absolute left-1/2 top-0 bottom-0 w-px bg-accent/70 -translate-x-1/2" />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

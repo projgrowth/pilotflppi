@@ -4,7 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { callAI, streamAI } from "@/lib/ai";
-import { renderPDFPagesToImages, type PDFPageImage } from "@/lib/pdf-utils";
+import { renderPDFPagesToImages, renderPDFPagesForVision, type PDFPageImage } from "@/lib/pdf-utils";
 import { useFirmSettings } from "@/hooks/useFirmSettings";
 import { useFindingHistory, logFindingStatusChange } from "@/hooks/useFindingHistory";
 import { useAuth } from "@/contexts/AuthContext";
@@ -136,6 +136,17 @@ export default function PlanReviewDetail() {
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [aiCompleteFlash, setAiCompleteFlash] = useState<number | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState(false);
+  const [repositioningIndex, setRepositioningIndex] = useState<number | null>(null);
+
+  const handleRepositionConfirm = useCallback(async (idx: number, newMarkup: { page_index: number; x: number; y: number; width: number; height: number }) => {
+    if (!review) return;
+    const current = (review.ai_findings as Finding[]) || [];
+    const updated = current.map((f, i) => i === idx ? { ...f, markup: { ...(f.markup || {}), ...newMarkup } } : f);
+    await supabase.from("plan_reviews").update({ ai_findings: JSON.parse(JSON.stringify(updated)) }).eq("id", review.id);
+    queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+    setRepositioningIndex(null);
+    toast.success(`Pin repositioned for finding #${idx + 1}`);
+  }, [review, id, queryClient]);
 
   useEffect(() => {
     if (review?.finding_statuses) {
@@ -267,9 +278,21 @@ export default function PlanReviewDetail() {
         if (signError || !signedData?.signedUrl) continue;
         const response = await fetch(signedData.signedUrl);
         const blob = await response.blob();
-        const file = new File([blob], `doc-${fi}.pdf`, { type: "application/pdf" });
+        const fileName = decodeURIComponent(filePath.split("/").pop() || `doc-${fi}.pdf`);
+        const file = new File([blob], fileName, { type: "application/pdf" });
         const images = await renderPDFPagesToImages(file, 10, 150);
-        allImages.push(...images.map((img, idx) => ({ ...img, pageIndex: allImages.length + idx })));
+        // Keep file/page provenance on each image so we can pass an image_manifest to the AI
+        // and validate page_index round-trips correctly.
+        const baseIndex = allImages.length;
+        allImages.push(
+          ...images.map((img, idx) => ({
+            ...img,
+            pageIndex: baseIndex + idx,
+            fileIndex: fi,
+            fileName,
+            pageInFile: idx + 1,
+          }))
+        );
         setRenderProgress(((fi + 1) / r.file_urls.length) * 100);
       }
       setPageImages(allImages);
@@ -279,6 +302,31 @@ export default function PlanReviewDetail() {
     } finally {
       setRenderingPages(false);
     }
+  };
+
+  /**
+   * Render the same PDFs at higher DPI for AI vision. Returns base64 strings only,
+   * in the same order as `displayImages`, so page_index lines up.
+   */
+  const renderVisionImages = async (r: PlanReviewRow): Promise<string[]> => {
+    if (!r.file_urls || r.file_urls.length === 0) return [];
+    const visionImages: string[] = [];
+    for (const storedPath of r.file_urls) {
+      if (!storedPath) continue;
+      const filePath = storedPath.includes('/storage/v1/')
+        ? storedPath.split('/documents/').pop() || storedPath
+        : storedPath;
+      const { data: signedData, error: signError } = await supabase.storage
+        .from("documents")
+        .createSignedUrl(filePath, 3600);
+      if (signError || !signedData?.signedUrl) continue;
+      const response = await fetch(signedData.signedUrl);
+      const blob = await response.blob();
+      const file = new File([blob], `vision-${filePath}`, { type: "application/pdf" });
+      const base64s = await renderPDFPagesForVision(file, 10, 220);
+      visionImages.push(...base64s);
+    }
+    return visionImages;
   };
 
   const runAICheck = async (r: PlanReviewRow) => {
@@ -292,8 +340,22 @@ export default function PlanReviewDetail() {
       const hasFiles = r.file_urls && r.file_urls.length > 0;
 
       if (hasFiles) {
-        const images = pageImages.length > 0 ? pageImages : await renderDocumentPages(r);
-        if (images.length > 0) {
+        // Always re-render display pages first so we have provenance metadata.
+        const displayImages = pageImages.length > 0 ? pageImages : await renderDocumentPages(r);
+        if (displayImages.length > 0) {
+          // Build the manifest BEFORE the vision render so model has full grounding.
+          const imageManifest = displayImages.map((img, idx) => ({
+            index: idx,
+            file: img.fileName || `file-${img.fileIndex ?? 0}`,
+            page_in_file: img.pageInFile ?? idx + 1,
+          }));
+
+          // Render at 220 DPI specifically for the AI call (kept in memory only briefly).
+          const visionBase64s = await renderVisionImages(r);
+          const imagesForAI = visionBase64s.length === displayImages.length
+            ? visionBase64s
+            : displayImages.map((img) => img.base64);
+
           const countyConfig = getCountyRequirements(r.project?.county || "");
           const result = await withRetry(() =>
             callAI({
@@ -312,7 +374,8 @@ export default function PlanReviewDetail() {
                   amendments: countyConfig.amendments,
                   cccl: countyConfig.cccl,
                 },
-                images: images.map((img) => img.base64),
+                image_manifest: imageManifest,
+                images: imagesForAI,
               },
             })
           );
@@ -327,6 +390,40 @@ export default function PlanReviewDetail() {
             const match = result.match(/\[[\s\S]*\]/);
             try { findings = match ? JSON.parse(match[0]) : []; } catch { findings = []; }
           }
+
+          // ── Validate & repair page_index against manifest ──
+          const maxIndex = displayImages.length - 1;
+          findings = findings.map((f) => {
+            if (!f.markup) return f;
+            const pi = f.markup.page_index;
+            const pageStr = (f.page || "").trim().toLowerCase();
+
+            // Out of range → try to remap by sheet name; otherwise drop the markup.
+            if (typeof pi !== "number" || pi < 0 || pi > maxIndex) {
+              if (pageStr) {
+                const remap = displayImages.findIndex((img) =>
+                  (img.fileName || "").toLowerCase().includes(pageStr) ||
+                  pageStr.includes(`page ${img.pageInFile}`)
+                );
+                if (remap >= 0) {
+                  return { ...f, markup: { ...f.markup, page_index: remap } };
+                }
+              }
+              console.warn(`[ai-check] dropping out-of-range page_index=${pi} for finding "${f.code_ref}"`);
+              const { markup: _drop, ...rest } = f;
+              return rest as Finding;
+            }
+            // Clamp box dimensions so a misbehaving model can't paint a 50% × 50% rectangle.
+            const m = f.markup;
+            const cleaned = {
+              page_index: pi,
+              x: Math.max(0, Math.min(98, m.x ?? 0)),
+              y: Math.max(0, Math.min(98, m.y ?? 0)),
+              width: Math.max(1, Math.min(15, m.width ?? 4)),
+              height: Math.max(1, Math.min(10, m.height ?? 4)),
+            };
+            return { ...f, markup: { ...m, ...cleaned } };
+          });
         }
       }
 
@@ -684,7 +781,7 @@ export default function PlanReviewDetail() {
                                   {group.map((finding, i) => {
                                     const gi = globalIndexMap.get(finding)!;
                                     return (
-                                      <FindingCard key={i} ref={(el) => { if (el) findingRefs.current.set(gi, el); }} finding={finding} index={i} globalIndex={gi} isActive={activeFindingIndex === gi} onLocateClick={() => { handleLocateFinding(gi); setMobileTab("plans"); }} animationDelay={i * 40} status={findingStatuses[gi] || "open"} onStatusChange={(status) => updateFindingStatus(gi, status)} history={(findingHistory || []).filter(h => h.finding_index === gi)} />
+                                      <FindingCard key={i} ref={(el) => { if (el) findingRefs.current.set(gi, el); }} finding={finding} index={i} globalIndex={gi} isActive={activeFindingIndex === gi} onLocateClick={() => { handleLocateFinding(gi); setMobileTab("plans"); }} onRepositionClick={() => { setRepositioningIndex(gi); setMobileTab("plans"); }} animationDelay={i * 40} status={findingStatuses[gi] || "open"} onStatusChange={(status) => updateFindingStatus(gi, status)} history={(findingHistory || []).filter(h => h.finding_index === gi)} />
                                     );
                                   })}
                                 </AccordionContent>
@@ -728,6 +825,9 @@ export default function PlanReviewDetail() {
                     findings={findings}
                     activeFindingIndex={activeFindingIndex}
                     onAnnotationClick={handleAnnotationClick}
+                    repositioningIndex={repositioningIndex}
+                    onRepositionConfirm={handleRepositionConfirm}
+                    onRepositionCancel={() => setRepositioningIndex(null)}
                     className="flex-1"
                   />
                 )}
@@ -895,6 +995,7 @@ export default function PlanReviewDetail() {
                                           globalIndex={gi}
                                           isActive={activeFindingIndex === gi}
                                           onLocateClick={() => handleLocateFinding(gi)}
+                                          onRepositionClick={() => setRepositioningIndex(gi)}
                                           animationDelay={i * 40}
                                           status={findingStatuses[gi] || "open"}
                                           onStatusChange={(status) => updateFindingStatus(gi, status)}

@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { getDisciplineIcon, getDisciplineColor, getDisciplineLabel } from "@/lib/county-utils";
-import { AlertTriangle, AlertCircle, Info, CheckCheck, MapPin, Clock, ArrowRightLeft, ChevronRight, History } from "lucide-react";
+import { AlertTriangle, AlertCircle, Info, CheckCheck, MapPin, Clock, ArrowRightLeft, ChevronRight, History, Move } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, forwardRef } from "react";
 import type { FindingStatus } from "@/components/FindingStatusFilter";
@@ -39,6 +39,7 @@ interface FindingCardProps {
   globalIndex?: number;
   isActive?: boolean;
   onLocateClick?: () => void;
+  onRepositionClick?: () => void;
   animationDelay?: number;
   status?: FindingStatus;
   onStatusChange?: (status: FindingStatus) => void;
@@ -47,7 +48,7 @@ interface FindingCardProps {
 }
 
 export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
-  ({ finding, index, globalIndex, isActive, onLocateClick, animationDelay = 0, status = "open", onStatusChange, defaultExpanded = false, history = [] }, ref) => {
+  ({ finding, index, globalIndex, isActive, onLocateClick, onRepositionClick, animationDelay = 0, status = "open", onStatusChange, defaultExpanded = false, history = [] }, ref) => {
     const [expanded, setExpanded] = useState(defaultExpanded);
     const [showHistory, setShowHistory] = useState(false);
     const sev = severityConfig[finding.severity] || severityConfig.minor;
@@ -171,6 +172,15 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
                   onClick={(e) => { e.stopPropagation(); onLocateClick(); }}
                 >
                   <MapPin className="h-3 w-3" /> Locate
+                </button>
+              )}
+              {finding.markup && onRepositionClick && (
+                <button
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs text-muted-foreground hover:text-warning hover:bg-warning/10 transition-colors"
+                  onClick={(e) => { e.stopPropagation(); onRepositionClick(); }}
+                  title="Pin in the wrong place? Click to reposition."
+                >
+                  <Move className="h-3 w-3" /> Wrong location?
                 </button>
               )}
               <button

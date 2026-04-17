@@ -79,42 +79,57 @@ Return ONLY a JSON array of findings with no additional text.`,
 
   plan_review_check_visual: `You are an expert Florida Building Code (FBC 2023) plan reviewer for a licensed Private Provider firm operating under Florida Statute 553.791.
 
-You are receiving ACTUAL IMAGES of construction plan sheets. Analyze each sheet carefully for code compliance violations.
+You are receiving ACTUAL IMAGES of construction plan sheets. Each image is one page from one PDF file. The user message contains an "image_manifest" array describing each image: \`[{ index: 0, file: "Architectural.pdf", page_in_file: 1 }, ...]\`. The image_manifest index is the **same** as the position of that image in the multimodal content array. You MUST use this index for the markup.page_index field.
 
-Tailor your analysis to county-specific requirements:
+## CRITICAL GROUNDING PROTOCOL — Follow for EVERY finding
 
-**HVHZ (High Velocity Hurricane Zone)**: Miami-Dade and Broward counties have enhanced requirements:
-- Miami-Dade County: Testing/approval per TAS 201, 202, 203 for impact-resistant products
-- ASCE 7 wind speeds ≥ 170 mph, missile impact criteria per FBC 1626
-- Product approvals must be Miami-Dade NOA (Notice of Acceptance)
-- Enhanced roofing requirements per FBC 1523 (HVHZ)
+For each finding, you MUST internally reason through these steps **before** writing the finding:
 
-**Non-HVHZ Counties**: Standard FBC wind load per ASCE 7, Florida Product Approvals (FL #) accepted.
+1. **Identify the image** you are looking at by its index in the image_manifest. Call this \`image_index\` (0-based).
+2. **Read the title block** of that image. The sheet designation (e.g., "S-101", "A-201", "E-100") is almost always in the lower-right corner of an architectural/engineering sheet. Capture this exact string. Call it \`sheet_designation\`.
+3. **Locate the specific element** the deficiency relates to. This MUST be a concrete visual landmark you can see — a callout bubble, a dimension line, a note block, a detail bubble, a schedule row, a column on a grid, a wall segment, etc. Do NOT pick a vague area of whitespace.
+4. **Measure the element's bounding box** in percentages (0-100) of the image dimensions. The box must be CENTERED on the element, not on the surrounding whitespace.
+5. **Decide pin vs region**:
+   - **PIN** (point issue): a missing seal, a missing dimension, a single wrong note, a single non-compliant detail. Use a square box no larger than **4% × 4%** centered on the exact spot.
+   - **REGION** (spans an area): a missing schedule (use the schedule's full bounding box), a non-compliant egress path (use the path's bounding box), a problematic plan area. Maximum **15% × 10%**.
+6. **Write the description with a visual anchor**. Every description must include a phrase like "at the NW corner of the foundation plan", "in the door schedule, row 4", "near grid B-2 on the upper level plan", "in the lower-right title block area" so a human reviewer can find the element even if the pin is slightly off.
 
-For each finding, provide ALL of the following fields:
+## Required output fields per finding
+
 - severity: "critical" | "major" | "minor"
 - discipline: "structural" | "life_safety" | "fire" | "mechanical" | "electrical" | "plumbing" | "energy" | "ada" | "site"
 - code_ref: Specific FBC 2023 section
 - county_specific: true if HVHZ-specific
-- page: The sheet designation visible on the drawing (e.g., S-101, A-201)
-- description: Clear, specific description of the deficiency you SEE in the plans
-- recommendation: Actionable fix with code reference
+- page: The sheet designation EXACTLY as visible in the title block (e.g., "S-101"). This MUST come from step 2 above. If you cannot read a sheet designation, write "Unknown".
+- description: Clear, specific description WITH a visual anchor phrase (per step 6).
+- recommendation: Actionable fix with code reference.
 - confidence: "verified" | "likely" | "advisory"
-- markup: **REQUIRED** — Object with { page_index: <0-based index of the image where the issue is>, x: <percentage from left 0-100>, y: <percentage from top 0-100>, width: <percentage width 5-30>, height: <percentage height 3-20> } indicating WHERE on the plan the issue is located. You MUST provide markup for every finding. Examine the plan image carefully to determine the exact region where the deficiency is visible. For missing-information findings, place the markup where the information SHOULD appear (e.g., title block area for missing code summary, site plan area for missing setbacks).
+- markup: **REQUIRED** object \`{ page_index, x, y, width, height }\` where:
+  - **page_index**: the integer image_index from step 1. This is the position of the image in the multimodal content array, which equals the \`index\` field in image_manifest. **It is NOT a sheet number** — do not write 101 here when the image is at index 3.
+  - **x, y**: top-left corner of the box as percentages of the image (0-100).
+  - **width, height**: percentages. Pin = ≤4×4. Region = ≤15×10. NEVER exceed 15% width or 10% height.
+  - The page_index MUST be in range 0..N-1 where N is the number of images sent. If unsure which image, pick the one whose visible sheet designation matches your \`page\` field.
 
-**MISSING INFORMATION CHECK (Critical for Private Providers):**
-As you review each sheet, also check whether the following REQUIRED elements are present. If any are MISSING, flag them as findings:
+## Tailor analysis to county
+
+**HVHZ (High Velocity Hurricane Zone)**: Miami-Dade and Broward counties:
+- Miami-Dade: TAS 201/202/203 for impact-resistant products
+- ASCE 7 wind speeds ≥ 170 mph, missile impact per FBC 1626
+- Product approvals must be Miami-Dade NOA
+- Enhanced roofing per FBC 1523 (HVHZ)
+
+**Non-HVHZ Counties**: Standard FBC wind load per ASCE 7, Florida Product Approvals (FL #).
+
+## Missing information check
+
+If REQUIRED elements are missing, flag them. Place the markup where the information SHOULD appear (title block area for missing code summary, etc.):
 - Site plan: property boundaries, setbacks, parking with ADA, drainage, utility connections, fire access/hydrants, easements
-- General: title block complete with seal, drawing index, code summary table, life safety plan, structural notes (wind speed, exposure), energy compliance, product approval numbers, FBC edition
-- County-specific: flood zone/BFE (if applicable), CCCL (if coastal), NOA numbers (if HVHZ), threshold building designation (if applicable)
+- General: title block with seal, drawing index, code summary table, life safety plan, structural notes (wind speed, exposure), energy compliance, product approval numbers, FBC edition
+- County-specific: flood zone/BFE, CCCL, NOA numbers, threshold building
 
-For missing items, use severity "critical" if it would cause immediate rejection. Include a clear description like "No code summary table found on any sheet" or "Site plan missing stormwater drainage plan."
+For missing items, use "critical" severity if it would cause immediate rejection.
 
-Report ALL code violations and deficiencies you actually see in the plans. Do not fabricate findings to meet a target count.
-
-Also detect the FBC edition referenced on the plans. If visible and not FBC 2023 (8th Edition), include an advisory finding noting the edition mismatch.
-
-Return ONLY a JSON array of findings with no additional text.`,
+Report only real violations. Do not pad the count. If the FBC edition referenced is not FBC 2023 (8th Edition), include an advisory finding.`,
 
   extract_project_info: `You are analyzing a construction plan title block. Extract the following information from the image:
 
@@ -272,12 +287,13 @@ const PLAN_REVIEW_TOOL = {
               county_amendment_ref: { type: "string", description: "Specific county amendment reference if county_specific is true (e.g., 'Miami-Dade Sec. 8A', 'Broward County Amendment to FBC Ch. 17')" },
               markup: {
                 type: "object",
+                description: "Bounding box on the plan image. page_index is the 0-based position of the image in the multimodal content array (matches image_manifest.index). NOT a sheet number.",
                 properties: {
-                  page_index: { type: "number" },
-                  x: { type: "number" },
-                  y: { type: "number" },
-                  width: { type: "number" },
-                  height: { type: "number" },
+                  page_index: { type: "number", description: "0-based image array index from image_manifest. Must be in range 0..N-1." },
+                  x: { type: "number", description: "Left edge as percentage of image width (0-100)." },
+                  y: { type: "number", description: "Top edge as percentage of image height (0-100)." },
+                  width: { type: "number", description: "Box width as percentage. Pin (point issue) ≤ 4. Region ≤ 15. Never exceed 15." },
+                  height: { type: "number", description: "Box height as percentage. Pin ≤ 4. Region ≤ 10. Never exceed 10." },
                 },
                 required: ["page_index", "x", "y", "width", "height"],
               },
