@@ -1,13 +1,6 @@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Mail, Phone, CreditCard } from "lucide-react";
-
-interface ContractorInfo {
-  id: string;
-  name: string;
-  email: string | null;
-  phone: string | null;
-  license_number: string | null;
-}
+import type { ContractorInfo } from "@/types";
 
 export function ContractorHoverCard({ contractor }: { contractor: ContractorInfo }) {
   return (

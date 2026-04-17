@@ -14,17 +14,14 @@ import { DeadlineRing } from "@/components/DeadlineRing";
 import { isHVHZ, getCountyLabel } from "@/lib/county-utils";
 import { useState, useCallback } from "react";
 import type { Finding } from "@/components/FindingCard";
+import type { PlanReviewRow as SharedPlanReviewRow } from "@/types";
 
-interface PlanReviewRow {
-  id: string;
-  project_id: string;
-  ai_check_status: string;
-  ai_findings: unknown;
-  file_urls: string[];
-  round: number;
-  created_at: string;
+type PlanReviewRow = Pick<
+  SharedPlanReviewRow,
+  "id" | "project_id" | "ai_check_status" | "ai_findings" | "file_urls" | "round" | "created_at"
+> & {
   project?: { id: string; name: string; address: string; trade_type: string; county: string; jurisdiction: string } | null;
-}
+};
 
 function usePlanReviews() {
   return useQuery({

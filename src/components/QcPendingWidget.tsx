@@ -11,7 +11,7 @@ interface PendingReview {
   id: string;
   round: number;
   created_at: string;
-  ai_findings: any;
+  ai_findings: unknown;
   project: { id: string; name: string; address: string } | null;
 }
 

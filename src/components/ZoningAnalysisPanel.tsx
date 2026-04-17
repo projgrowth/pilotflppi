@@ -147,9 +147,8 @@ export function ZoningAnalysisPanel({ projectId, initialData, onSaved }: ZoningA
 
       setAiFilledFields(filled);
       toast.success(`AI extracted ${filled.size} field${filled.size !== 1 ? "s" : ""} from the site plan`);
-    } catch (err: any) {
-      // zoning extraction error handled by toast below
-      toast.error(err?.message || "Failed to extract zoning data");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to extract zoning data");
     } finally {
       setExtracting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";

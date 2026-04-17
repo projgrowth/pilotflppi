@@ -1,6 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
+interface CorrectionRow {
+  id: string;
+  correction_type: string | null;
+}
+
 export function useAILearningStats() {
   return useQuery({
     queryKey: ["ai_learning_stats"],
@@ -20,11 +25,12 @@ export function useAILearningStats() {
       ]);
 
       const totalFlags = outputsRes.data?.length || 0;
-      const corrections = correctionsRes.data || [];
+      const corrections = (correctionsRes.data || []) as CorrectionRow[];
       const totalCorrections = corrections.length;
       const byType: Record<string, number> = {};
-      corrections.forEach((c: any) => {
-        byType[c.correction_type] = (byType[c.correction_type] || 0) + 1;
+      corrections.forEach((c) => {
+        const key = c.correction_type ?? "unknown";
+        byType[key] = (byType[key] || 0) + 1;
       });
 
       const hcr = totalFlags > 0 ? totalCorrections / totalFlags : 0;

@@ -7,14 +7,7 @@ import { ContractorHoverCard } from "@/components/ContractorHoverCard";
 import { getCountyLabel } from "@/lib/county-utils";
 import { cn } from "@/lib/utils";
 import type { Finding } from "@/components/FindingCard";
-
-interface ContractorInfo {
-  id: string;
-  name: string;
-  email: string | null;
-  phone: string | null;
-  license_number: string | null;
-}
+import type { ContractorInfo } from "@/types";
 
 interface ReviewTopBarProps {
   projectName: string;

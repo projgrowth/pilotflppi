@@ -64,7 +64,7 @@ export default function Review() {
     });
   }, [projects, search, countyFilter]);
 
-  const daysActive = (p: any) => Math.floor((Date.now() - new Date(p.created_at).getTime()) / 86400000);
+  const daysActive = (p: { created_at: string }) => Math.floor((Date.now() - new Date(p.created_at).getTime()) / 86400000);
 
   const handleProjectClick = (projectId: string) => {
     const reviewId = latestReviews?.[projectId];

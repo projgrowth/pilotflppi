@@ -37,40 +37,7 @@ import {
   isHVHZ, getDisciplineIcon, getDisciplineColor,
   getDisciplineLabel, DISCIPLINE_ORDER, SCANNING_STEPS,
 } from "@/lib/county-utils";
-
-interface ContractorInfo {
-  id: string;
-  name: string;
-  email: string | null;
-  phone: string | null;
-  license_number: string | null;
-}
-
-interface ProjectInfo {
-  id: string;
-  name: string;
-  address: string;
-  trade_type: string;
-  county: string;
-  jurisdiction: string;
-  contractor: ContractorInfo | null;
-}
-
-interface PlanReviewRow {
-  id: string;
-  project_id: string;
-  ai_check_status: string;
-  ai_findings: unknown;
-  file_urls: string[];
-  round: number;
-  created_at: string;
-  finding_statuses?: Record<string, string> | null;
-  previous_findings?: unknown;
-  project?: ProjectInfo | null;
-  qc_status?: string;
-  qc_reviewer_id?: string | null;
-  qc_notes?: string;
-}
+import type { PlanReviewRow } from "@/types";
 
 type RightPanelMode = "findings" | "checklist" | "completeness" | "letter" | "county";
 

@@ -91,7 +91,7 @@ export function GenerateInvoiceDialog({
     setLineItems([...lineItems, { description: "", quantity: 1, unit_price: 0, service_type: "custom", sort_order: lineItems.length }]);
   };
 
-  const updateLineItem = (idx: number, field: keyof LineItemDraft, value: any) => {
+  const updateLineItem = <K extends keyof LineItemDraft>(idx: number, field: K, value: LineItemDraft[K]) => {
     setLineItems(lineItems.map((li, i) => i === idx ? { ...li, [field]: value } : li));
   };
 
