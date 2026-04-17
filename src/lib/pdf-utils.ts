@@ -179,11 +179,52 @@ export function gridCellToCenter(cell: string | undefined | null): { x: number; 
 }
 
 /**
- * Render just the first page (title block) at higher resolution for extraction.
+ * Render just the first page's title block region for extraction.
+ *
+ * Title blocks live on the right ~32% (or bottom ~25%) of the sheet. We render
+ * the full page at modest DPI, then crop to the title-block strip and emit JPEG.
+ * This keeps the base64 payload small enough to fit in edge-function memory
+ * (~150MB hard cap) — a full 200 DPI E-size PNG was hitting that limit.
  */
 export async function renderTitleBlock(file: File): Promise<string> {
-  const images = await renderPDFPagesToImages(file, 1, 200);
-  return images[0]?.base64 || "";
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 130 / 72 }); // 130 DPI is plenty for text OCR
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const ctx = canvas.getContext("2d")!;
+  await page.render({ canvasContext: ctx, viewport }).promise;
+
+  // Crop to right 32% of the sheet (where title blocks almost always live on
+  // landscape architectural/engineering plans). Fall back to bottom 28% strip
+  // composed beneath it so portrait sheets and bottom-aligned blocks still work.
+  const w = canvas.width;
+  const h = canvas.height;
+  const rightW = Math.round(w * 0.32);
+  const bottomH = Math.round(h * 0.28);
+
+  const out = document.createElement("canvas");
+  out.width = rightW + w; // right strip + bottom strip side by side
+  out.height = Math.max(h, bottomH);
+  const octx = out.getContext("2d")!;
+  octx.fillStyle = "#ffffff";
+  octx.fillRect(0, 0, out.width, out.height);
+  // Right strip (full height)
+  octx.drawImage(canvas, w - rightW, 0, rightW, h, 0, 0, rightW, h);
+  // Bottom strip (full width) placed to the right of the right strip
+  octx.drawImage(canvas, 0, h - bottomH, w, bottomH, rightW, 0, w, bottomH);
+
+  // Cleanup full-page canvas
+  canvas.width = 0;
+  canvas.height = 0;
+
+  // JPEG at quality 0.75 — title-block text stays crisp, payload shrinks ~5×
+  const dataUrl = out.toDataURL("image/jpeg", 0.75);
+  out.width = 0;
+  out.height = 0;
+  return dataUrl;
 }
 
 /**
