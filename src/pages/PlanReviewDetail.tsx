@@ -792,15 +792,39 @@ export default function PlanReviewDetail() {
         onNewRound={createNewRound}
       />
 
+      {/* ── Page-cap banner: surface silent 10-page truncation honestly ── */}
+      {!aiRunning && pageCapInfo && pageCapInfo.total > pageCapInfo.rendered && (
+        <div className="shrink-0 border-b bg-warning/10 px-4 py-1.5 flex items-center gap-2">
+          <span className="text-2xs font-semibold text-warning uppercase tracking-wide">Limited review</span>
+          <span className="text-xs text-foreground/80">
+            Reviewing the first <strong>{pageCapInfo.rendered}</strong> of <strong>{pageCapInfo.total}</strong> sheet{pageCapInfo.total !== 1 ? "s" : ""}.
+            Findings on later sheets cannot be detected by AI in this round.
+          </span>
+        </div>
+      )}
+
       {/* ── AI Scanning Overlay ── */}
       {aiRunning && (
         <div className="shrink-0 border-b bg-accent/5 px-4 py-3">
-          <div className="max-w-lg">
+          <div className="max-w-lg space-y-2">
+            {/* Real per-phase progress: shows the user we're not frozen. */}
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-3.5 w-3.5 text-accent animate-spin shrink-0" />
+              <p className="text-xs text-accent font-medium">
+                {aiPhase === "rendering" && (
+                  pageCapInfo
+                    ? `Rendering ${pageCapInfo.rendered} sheet${pageCapInfo.rendered !== 1 ? "s" : ""} for analysis…`
+                    : "Rendering plan pages…"
+                )}
+                {aiPhase === "extracting_text" && "Extracting text + dimensions from PDF vector layer…"}
+                {aiPhase === "vision" && "Running visual code review (this may take 60–120s)…"}
+                {aiPhase === "validating" && "Snapping pins to actual callouts and validating findings…"}
+                {aiPhase === "saving" && "Saving findings…"}
+                {aiPhase === "idle" && "Preparing analysis…"}
+              </p>
+            </div>
             {renderingPages && (
-              <div className="mb-2 space-y-1">
-                <p className="text-xs text-accent font-medium">Rendering plan pages for visual analysis...</p>
-                <Progress value={renderProgress} className="h-1" />
-              </div>
+              <Progress value={renderProgress} className="h-1" />
             )}
             <ScanTimeline currentStep={scanStep} />
           </div>
