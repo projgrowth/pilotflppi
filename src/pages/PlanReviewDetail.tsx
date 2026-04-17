@@ -582,9 +582,17 @@ export default function PlanReviewDetail() {
       setAiPhase("saving");
       const prevFindings = r.ai_findings || [];
 
+      // Stamp every finding with prompt + model version so audits work even
+      // after we change prompts later. (Defensibility for FS 553.791.)
+      const stampedFindings = findings.map((f) => ({
+        ...f,
+        prompt_version: f.prompt_version ?? "v2.1-grid+text-snap",
+        model_version: f.model_version ?? "google/gemini-2.5-pro",
+      }));
+
       await supabase.from("plan_reviews").update({
         ai_check_status: "complete",
-        ai_findings: JSON.parse(JSON.stringify(findings)),
+        ai_findings: JSON.parse(JSON.stringify(stampedFindings)),
         previous_findings: JSON.parse(JSON.stringify(prevFindings)),
         finding_statuses: {},
       }).eq("id", r.id);
