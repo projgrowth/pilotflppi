@@ -50,6 +50,13 @@ export interface Finding {
   confidence?: string;
   markup?: MarkupData;
   resolved?: boolean;
+  /** Short audit trail: WHY the AI flagged this. 1–2 sentences citing the specific
+   *  visual element (dimension, callout, missing note) it observed. Persisted so
+   *  building officials can challenge a finding and we can defend it. */
+  reasoning?: string;
+  /** Stamp of which prompt + model produced this finding (for post-hoc audits). */
+  prompt_version?: string;
+  model_version?: string;
 }
 
 export type FindingStatus = "open" | "resolved" | "deferred";

@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { getDisciplineIcon, getDisciplineColor, getDisciplineLabel } from "@/lib/county-utils";
-import { AlertTriangle, AlertCircle, Info, CheckCheck, MapPin, Clock, ArrowRightLeft, ChevronRight, History, Move, Crosshair } from "lucide-react";
+import { AlertTriangle, AlertCircle, Info, CheckCheck, MapPin, Clock, ArrowRightLeft, ChevronRight, History, Move, Crosshair, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, forwardRef } from "react";
 import type { FindingStatus } from "@/components/FindingStatusFilter";
@@ -51,6 +51,7 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
   ({ finding, index, globalIndex, isActive, onLocateClick, onRepositionClick, animationDelay = 0, status = "open", onStatusChange, defaultExpanded = false, history = [] }, ref) => {
     const [expanded, setExpanded] = useState(defaultExpanded);
     const [showHistory, setShowHistory] = useState(false);
+    const [showReasoning, setShowReasoning] = useState(false);
     const sev = severityConfig[finding.severity] || severityConfig.minor;
     const isResolved = status === "resolved";
     const isDeferred = status === "deferred";
@@ -219,6 +220,20 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
                   <Move className="h-3 w-3" /> Wrong location?
                 </button>
               )}
+              {finding.reasoning && (
+                <button
+                  className={cn(
+                    "flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs transition-colors",
+                    showReasoning
+                      ? "text-accent bg-accent/10"
+                      : "text-muted-foreground hover:text-accent hover:bg-accent/10"
+                  )}
+                  onClick={(e) => { e.stopPropagation(); setShowReasoning(!showReasoning); }}
+                  title="See exactly what the AI observed and why it flagged this"
+                >
+                  <Eye className="h-3 w-3" /> Why?
+                </button>
+              )}
               <button
                 className={cn(
                   "flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs transition-colors",
@@ -238,6 +253,25 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
                 </button>
               )}
             </div>
+
+            {/* AI reasoning disclosure — defensibility for FS 553.791. Shows the
+                model's specific observation and stamps the prompt + model
+                version so audits work even after we change prompts. */}
+            {showReasoning && finding.reasoning && (
+              <div className="rounded border border-accent/30 bg-accent/5 px-2.5 py-2 space-y-1">
+                <div className="flex items-center gap-1 text-2xs font-semibold text-accent uppercase tracking-wide">
+                  <Eye className="h-3 w-3" /> AI Observation
+                </div>
+                <p className="text-xs text-foreground/85 leading-relaxed">{finding.reasoning}</p>
+                {(finding.model_version || finding.prompt_version) && (
+                  <p className="text-caption font-mono text-muted-foreground/70 pt-0.5 border-t border-accent/15">
+                    {finding.model_version && <span>{finding.model_version}</span>}
+                    {finding.model_version && finding.prompt_version && <span> · </span>}
+                    {finding.prompt_version && <span>prompt {finding.prompt_version}</span>}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* History log */}
             {showHistory && history.length > 0 && (

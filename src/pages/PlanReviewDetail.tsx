@@ -582,9 +582,17 @@ export default function PlanReviewDetail() {
       setAiPhase("saving");
       const prevFindings = r.ai_findings || [];
 
+      // Stamp every finding with prompt + model version so audits work even
+      // after we change prompts later. (Defensibility for FS 553.791.)
+      const stampedFindings = findings.map((f) => ({
+        ...f,
+        prompt_version: f.prompt_version ?? "v2.1-grid+text-snap",
+        model_version: f.model_version ?? "google/gemini-2.5-pro",
+      }));
+
       await supabase.from("plan_reviews").update({
         ai_check_status: "complete",
-        ai_findings: JSON.parse(JSON.stringify(findings)),
+        ai_findings: JSON.parse(JSON.stringify(stampedFindings)),
         previous_findings: JSON.parse(JSON.stringify(prevFindings)),
         finding_statuses: {},
       }).eq("id", r.id);
@@ -691,6 +699,62 @@ export default function PlanReviewDetail() {
       await renderDocumentPages(review);
     }
   }, [pageImages.length, review]);
+
+  // ── Reviewer keyboard shortcuts (global to the page) ───────────────────
+  // J / K       — next / prev finding
+  // R           — reposition active pin
+  // S           — mark resolved
+  // X           — mark deferred
+  // O           — mark open
+  // Skip when typing in inputs/textareas; the viewer handles its own arrows/+/-/0.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const findingsList = (review?.ai_findings as Finding[] | undefined) || [];
+      if (findingsList.length === 0) return;
+
+      const cur = activeFindingIndex;
+      const last = findingsList.length - 1;
+
+      switch (e.key.toLowerCase()) {
+        case "j": {
+          e.preventDefault();
+          const next = cur === null ? 0 : Math.min(last, cur + 1);
+          setActiveFindingIndex(next);
+          break;
+        }
+        case "k": {
+          e.preventDefault();
+          const prev = cur === null ? 0 : Math.max(0, cur - 1);
+          setActiveFindingIndex(prev);
+          break;
+        }
+        case "r": {
+          if (cur !== null && findingsList[cur]?.markup) {
+            e.preventDefault();
+            setRepositioningIndex(cur);
+          }
+          break;
+        }
+        case "s": {
+          if (cur !== null) { e.preventDefault(); updateFindingStatus(cur, "resolved"); }
+          break;
+        }
+        case "x": {
+          if (cur !== null) { e.preventDefault(); updateFindingStatus(cur, "deferred"); }
+          break;
+        }
+        case "o": {
+          if (cur !== null) { e.preventDefault(); updateFindingStatus(cur, "open"); }
+          break;
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [activeFindingIndex, review, updateFindingStatus]);
 
   if (isLoading) {
     return (

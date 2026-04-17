@@ -335,9 +335,9 @@ export function PlanMarkupViewer({
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-2xs space-y-0.5">
                 <p>← → Page nav</p>
-                <p>+ / − Zoom</p>
-                <p>0 Fit width</p>
-                <p>Ctrl+Scroll Zoom</p>
+                <p>+ / − Zoom · 0 Fit width · Ctrl+Scroll Zoom</p>
+                <p className="pt-1 border-t border-border/30">J / K Next / prev finding</p>
+                <p>R Reposition · S Resolve · X Defer · O Open</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
