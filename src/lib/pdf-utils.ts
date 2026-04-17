@@ -8,6 +8,12 @@ export interface PDFPageImage {
   base64: string; // data:image/png;base64,...
   width: number;
   height: number;
+  /** 0-based index of the source PDF in the plan_review.file_urls array. Set by the caller, not by render. */
+  fileIndex?: number;
+  /** Filename of the source PDF (decoded). Set by the caller. */
+  fileName?: string;
+  /** 1-based page number within the source PDF. Set by the caller. */
+  pageInFile?: number;
 }
 
 /**
