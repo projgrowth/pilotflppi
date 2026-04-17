@@ -423,16 +423,28 @@ export function PlanMarkupViewer({
                   height: finding.markup.height || 4,
                 },
               ];
+              const confidence = finding.markup.pin_confidence ?? "low";
               return annots.map((a: Annotation, ai: number) => {
                 const isActive = activeFindingIndex === globalIndex;
                 const pin = isPinSize(a);
                 const sheetLabel = finding.page && finding.page !== "Unknown" ? finding.page : null;
-                const badgeText = sheetLabel ? `${sheetLabel} · #${globalIndex + 1}` : `#${globalIndex + 1}`;
+                // Sheet badge gets a confidence dot prefix.
+                const dot = confidence === "high" ? "●" : confidence === "medium" ? "◐" : "○";
+                const badgeText = sheetLabel ? `${dot} ${sheetLabel} · #${globalIndex + 1}` : `${dot} #${globalIndex + 1}`;
 
                 if (pin) {
                   // Crosshair pin: render at the CENTER of the (small) box
                   const cx = a.x + a.width / 2;
                   const cy = a.y + a.height / 2;
+
+                  // Confidence-driven palette:
+                  //  high   → solid red crosshair (unchanged from prior look)
+                  //  medium → dashed red, slightly muted
+                  //  low    → dashed amber + 10%-radius search ring
+                  const isLow = confidence === "low";
+                  const isMed = confidence === "medium";
+                  const colorVar = isLow ? "warning" : "destructive";
+
                   return (
                     <div
                       key={`${globalIndex}-${ai}`}
@@ -449,36 +461,65 @@ export function PlanMarkupViewer({
                         onAnnotationClick(globalIndex);
                       }}
                     >
+                      {/* Search ring for LOW confidence — visualises the ~10% area where
+                          the user should look. Sized to ~20% of the image (10% radius). */}
+                      {isLow && (
+                        <div
+                          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-warning/40 bg-warning/5 pointer-events-none"
+                          style={{
+                            width: `${20 / (zoom || 1)}vw`,
+                            height: `${20 / (zoom || 1)}vw`,
+                            maxWidth: 240,
+                            maxHeight: 240,
+                            borderStyle: "dashed",
+                          }}
+                        />
+                      )}
                       {/* Crosshair: outer circle + inner dot + cross lines */}
                       <div className={cn(
                         "relative rounded-full border-2 transition-all",
+                        (isMed || isLow) && "border-dashed",
                         isActive
-                          ? "h-7 w-7 border-destructive bg-destructive/20 shadow-[0_0_12px_hsl(var(--destructive)/0.5)]"
-                          : "h-5 w-5 border-destructive/70 bg-destructive/10 hover:border-destructive hover:bg-destructive/20"
+                          ? `h-7 w-7 bg-${colorVar}/20 shadow-[0_0_12px_hsl(var(--${colorVar})/0.5)]`
+                          : `h-5 w-5 bg-${colorVar}/10 hover:bg-${colorVar}/20`,
+                        isLow
+                          ? (isActive ? "border-warning" : "border-warning/70 hover:border-warning")
+                          : (isActive ? "border-destructive" : "border-destructive/70 hover:border-destructive"),
                       )}>
                         {/* center dot */}
                         <div className={cn(
-                          "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-destructive",
+                          "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full",
+                          isLow ? "bg-warning" : "bg-destructive",
                           isActive ? "h-2 w-2" : "h-1.5 w-1.5"
                         )} />
                         {/* cross lines */}
-                        <div className="absolute top-1/2 left-0 right-0 h-px bg-destructive/60 -translate-y-1/2" />
-                        <div className="absolute left-1/2 top-0 bottom-0 w-px bg-destructive/60 -translate-x-1/2" />
+                        <div className={cn(
+                          "absolute top-1/2 left-0 right-0 h-px -translate-y-1/2",
+                          isLow ? "bg-warning/60" : "bg-destructive/60"
+                        )} />
+                        <div className={cn(
+                          "absolute left-1/2 top-0 bottom-0 w-px -translate-x-1/2",
+                          isLow ? "bg-warning/60" : "bg-destructive/60"
+                        )} />
                       </div>
                       {/* Badge to the right of the pin */}
                       <div className={cn(
-                        "absolute left-full ml-1 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-2xs font-bold whitespace-nowrap shadow-md",
-                        isActive
-                          ? "bg-destructive text-destructive-foreground"
-                          : "bg-destructive/85 text-destructive-foreground"
+                        "absolute left-full ml-1 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-2xs font-bold whitespace-nowrap shadow-md flex items-center gap-1",
+                        isLow
+                          ? "bg-warning text-warning-foreground"
+                          : isActive ? "bg-destructive text-destructive-foreground" : "bg-destructive/85 text-destructive-foreground"
                       )}>
-                        {badgeText}
+                        <span>{badgeText}</span>
+                        {isLow && <span className="font-normal opacity-90">approx</span>}
+                        {isMed && !isLow && <span className="font-normal opacity-90">~</span>}
                       </div>
                     </div>
                   );
                 }
 
                 // Region box (for findings that span an area)
+                const isLowR = confidence === "low";
+                const isMedR = confidence === "medium";
                 return (
                   <div
                     key={`${globalIndex}-${ai}`}
@@ -486,9 +527,12 @@ export function PlanMarkupViewer({
                     ref={(el) => (ai === 0 ? setAnnotationRef(globalIndex, el) : undefined)}
                     className={cn(
                       "absolute border-2 cursor-pointer transition-all duration-300",
-                      isActive
-                        ? "border-destructive bg-destructive/20 shadow-[0_0_12px_hsl(var(--destructive)/0.4)] animate-pulse"
-                        : "border-destructive/60 bg-destructive/10 hover:bg-destructive/20"
+                      (isMedR || isLowR) && "border-dashed",
+                      isLowR
+                        ? "border-warning/70 bg-warning/10 hover:bg-warning/20"
+                        : isActive
+                          ? "border-destructive bg-destructive/20 shadow-[0_0_12px_hsl(var(--destructive)/0.4)] animate-pulse"
+                          : "border-destructive/60 bg-destructive/10 hover:bg-destructive/20"
                     )}
                     style={{
                       left: `${a.x}%`,
@@ -503,13 +547,14 @@ export function PlanMarkupViewer({
                   >
                     <div
                       className={cn(
-                        "absolute -top-3 -left-1 px-1.5 py-0.5 rounded text-2xs font-bold whitespace-nowrap shadow-md",
-                        isActive
-                          ? "bg-destructive text-destructive-foreground"
-                          : "bg-destructive/85 text-destructive-foreground"
+                        "absolute -top-3 -left-1 px-1.5 py-0.5 rounded text-2xs font-bold whitespace-nowrap shadow-md flex items-center gap-1",
+                        isLowR
+                          ? "bg-warning text-warning-foreground"
+                          : isActive ? "bg-destructive text-destructive-foreground" : "bg-destructive/85 text-destructive-foreground"
                       )}
                     >
-                      {badgeText}
+                      <span>{badgeText}</span>
+                      {isLowR && <span className="font-normal opacity-90">approx</span>}
                     </div>
                   </div>
                 );
