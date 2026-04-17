@@ -1212,6 +1212,11 @@ export default function PlanReviewDetail() {
                     onCopyLetter={copyLetter}
                     onLetterChange={setCommentLetter}
                     onQcApprove={async () => {
+                      // FS 553.791 sign-off integrity: a reviewer cannot QC their own work.
+                      if (review.reviewer_id && review.reviewer_id === user?.id) {
+                        toast.error("You ran this review — a different team member must approve QC.");
+                        return;
+                      }
                       await supabase.from("plan_reviews").update({ qc_status: "qc_approved", qc_reviewer_id: user?.id }).eq("id", review.id);
                       await supabase.from("activity_log").insert({ event_type: "qc_approved", description: "Plan review QC approved", project_id: review.project_id, actor_id: user?.id, actor_type: "user" });
                       queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
