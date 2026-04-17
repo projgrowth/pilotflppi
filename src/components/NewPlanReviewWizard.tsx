@@ -79,7 +79,7 @@ interface UploadedFile {
 interface NewPlanReviewWizardProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onComplete: (reviewId: string) => void;
+  onComplete: (reviewId: string, projectId: string) => void;
   preselectedProjectId?: string;
 }
 
@@ -318,7 +318,8 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
       }
 
       queryClient.invalidateQueries({ queryKey: ["plan-reviews"] });
-      onComplete(review.id);
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      onComplete(review.id, projectId);
       handleClose();
       toast.success("Review created — ready for AI analysis");
     } catch (err) {
