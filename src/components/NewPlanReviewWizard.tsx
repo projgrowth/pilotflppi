@@ -225,11 +225,26 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
 
       // Pre-fill fields
       if (extracted.project_name) setProjectName(extracted.project_name);
-      if (extracted.address) setAddress(extracted.address);
-      if (extracted.county) setCounty(extracted.county);
-      if (extracted.jurisdiction) setJurisdiction(extracted.jurisdiction);
+      const extractedAddress = extracted.address || "";
+      if (extractedAddress) setAddress(extractedAddress);
       if (extracted.trade_type) setTradeType(extracted.trade_type);
       if (extracted.architect) setArchitect(extracted.architect);
+
+      // Geocode the address to auto-determine county + jurisdiction (overrides AI guess)
+      let geocoded = false;
+      if (extractedAddress) {
+        const geo = await geocodeAddress(extractedAddress);
+        if (geo) {
+          setCounty(geo.county);
+          if (geo.jurisdiction) setJurisdiction(geo.jurisdiction);
+          geocoded = true;
+        }
+      }
+      // Fall back to AI-extracted county/jurisdiction only if geocoding failed
+      if (!geocoded) {
+        if (extracted.county) setCounty(extracted.county);
+        if (extracted.jurisdiction) setJurisdiction(extracted.jurisdiction);
+      }
       setAiExtracted(true);
 
       // Check for existing project match
@@ -242,7 +257,7 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
       }
 
       setExtractProgress(100);
-      toast.success("Project details extracted from plans");
+      toast.success(geocoded ? "Project details extracted & address geocoded" : "Project details extracted");
       setStep(2);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "AI extraction failed");
