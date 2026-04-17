@@ -750,14 +750,31 @@ export default function PlanReviewDetail() {
     }
   }
 
+  // Per-finding diff classification (for the inline dot beside each card).
   const diffMap = new Map<number, "new" | "carried">();
-  if (showDiff && previousFindings.length > 0) {
+  // Roll-up counts for the round-comparison header. Match key is `code_ref|page`.
+  const findingKey = (f: Finding) => `${(f.code_ref || "").trim().toLowerCase()}|${(f.page || "").trim().toLowerCase()}`;
+  let newCount = 0;
+  let persistedCount = 0;
+  let newlyResolvedCount = 0;
+  if (review.round > 1 && previousFindings.length > 0) {
+    const prevKeys = new Set(previousFindings.map(findingKey));
+    const currKeys = new Set(findings.map(findingKey));
     for (let i = 0; i < findings.length; i++) {
-      const f = findings[i];
-      const match = previousFindings.find((pf) => pf.code_ref === f.code_ref && pf.discipline === f.discipline);
-      diffMap.set(i, match ? "carried" : "new");
+      const k = findingKey(findings[i]);
+      if (prevKeys.has(k)) {
+        diffMap.set(i, "carried");
+        persistedCount++;
+      } else {
+        diffMap.set(i, "new");
+        newCount++;
+      }
+    }
+    for (const pk of prevKeys) {
+      if (!currKeys.has(pk)) newlyResolvedCount++;
     }
   }
+  const hasRoundDiff = review.round > 1 && previousFindings.length > 0;
 
   const projectRounds = (allRounds || []).map((r) => ({
     id: r.id,
