@@ -23,15 +23,6 @@ const FLORIDA_COUNTIES = [
   "polk", "seminole", "pasco", "osceola", "st-lucie", "escambia", "marion",
 ];
 
-const TRADE_TYPES = [
-  { value: "building", label: "Building (General)" },
-  { value: "structural", label: "Structural" },
-  { value: "mechanical", label: "Mechanical" },
-  { value: "electrical", label: "Electrical" },
-  { value: "plumbing", label: "Plumbing" },
-  { value: "roofing", label: "Roofing" },
-  { value: "fire", label: "Fire Protection" },
-];
 
 export default function Projects() {
   const [activeFilter, setActiveFilter] = useState<typeof filters[number]>("All");
