@@ -69,4 +69,5 @@ export interface PlanReviewRow {
   qc_status?: string;
   qc_reviewer_id?: string | null;
   qc_notes?: string;
+  reviewer_id?: string | null;
 }

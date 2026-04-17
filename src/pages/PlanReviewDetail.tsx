@@ -4,7 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { callAI, streamAI } from "@/lib/ai";
-import { renderPDFPagesToImages, renderPDFPagesForVisionWithGrid, gridCellToCenter, type PDFPageImage } from "@/lib/pdf-utils";
+import { renderPDFPagesToImages, renderPDFPagesForVisionWithGrid, gridCellToCenter, extractPagesTextItems, snapToNearestText, getPDFPageCount, type PDFPageImage, type PDFTextItem } from "@/lib/pdf-utils";
 import { useFirmSettings } from "@/hooks/useFirmSettings";
 import { useFindingHistory, logFindingStatusChange } from "@/hooks/useFindingHistory";
 import { useAuth } from "@/contexts/AuthContext";
@@ -127,6 +127,11 @@ export default function PlanReviewDetail() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeFindingIndex, setActiveFindingIndex] = useState<number | null>(null);
   const [pageImages, setPageImages] = useState<PDFPageImage[]>([]);
+  const [pageTextItems, setPageTextItems] = useState<PDFTextItem[][]>([]);
+  /** {totalSheets, renderedSheets} — populated after we open the PDFs. Used to show the "Reviewing first 10 of N" banner. */
+  const [pageCapInfo, setPageCapInfo] = useState<{ total: number; rendered: number } | null>(null);
+  /** Discrete AI run phase — drives the live step indicator instead of a generic spinner. */
+  const [aiPhase, setAiPhase] = useState<"idle" | "rendering" | "extracting_text" | "vision" | "validating" | "saving">("idle");
   const [renderingPages, setRenderingPages] = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);
   const findingRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -274,6 +279,9 @@ export default function PlanReviewDetail() {
     setRenderProgress(0);
     try {
       const allImages: PDFPageImage[] = [];
+      const allTextItems: PDFTextItem[][] = [];
+      let totalSheetsAcrossFiles = 0;
+      let renderedSheetsAcrossFiles = 0;
       for (let fi = 0; fi < r.file_urls.length; fi++) {
         const storedPath = r.file_urls[fi];
         if (!storedPath) continue;
@@ -289,7 +297,26 @@ export default function PlanReviewDetail() {
         const blob = await response.blob();
         const fileName = decodeURIComponent(filePath.split("/").pop() || `doc-${fi}.pdf`);
         const file = new File([blob], fileName, { type: "application/pdf" });
+
+        // Track total page count for the cap banner before rendering caps to 10.
+        try {
+          const total = await getPDFPageCount(file);
+          totalSheetsAcrossFiles += total;
+          renderedSheetsAcrossFiles += Math.min(total, 10);
+        } catch {
+          // If page count fails, fall through; render still attempts.
+        }
+
         const images = await renderPDFPagesToImages(file, 10, 150);
+        // Extract real vector text + bboxes from the same pages — this is the
+        // ground-truth coordinate index used to snap AI pin guesses to actual
+        // visible callouts/dimensions/notes.
+        let textItems: PDFTextItem[][] = [];
+        try {
+          textItems = await extractPagesTextItems(file, 10);
+        } catch {
+          textItems = images.map(() => []);
+        }
         // Keep file/page provenance on each image so we can pass an image_manifest to the AI
         // and validate page_index round-trips correctly.
         const baseIndex = allImages.length;
@@ -302,9 +329,15 @@ export default function PlanReviewDetail() {
             pageInFile: idx + 1,
           }))
         );
+        // Pad text items array if extraction returned fewer pages than images.
+        for (let idx = 0; idx < images.length; idx++) {
+          allTextItems.push(textItems[idx] || []);
+        }
         setRenderProgress(((fi + 1) / r.file_urls.length) * 100);
       }
       setPageImages(allImages);
+      setPageTextItems(allTextItems);
+      setPageCapInfo({ total: totalSheetsAcrossFiles, rendered: renderedSheetsAcrossFiles });
       return allImages;
     } catch {
       return [];
@@ -344,23 +377,36 @@ export default function PlanReviewDetail() {
     setAiRunning(true);
     setRightPanel("findings");
     setActiveFindingIndex(null);
+    setAiPhase("rendering");
     try {
-      await supabase.from("plan_reviews").update({ ai_check_status: "running" }).eq("id", r.id);
+      // Stamp the reviewer at AI run time so we can later block self-QC.
+      await supabase.from("plan_reviews").update({ ai_check_status: "running", reviewer_id: user?.id ?? null }).eq("id", r.id);
 
       let findings: Finding[] = [];
       const hasFiles = r.file_urls && r.file_urls.length > 0;
 
       if (hasFiles) {
-        // Always re-render display pages first so we have provenance metadata.
+        // Always re-render display pages first so we have provenance metadata
+        // AND a vector text index to snap pins against.
         const displayImages = pageImages.length > 0 ? pageImages : await renderDocumentPages(r);
+        // Pull whatever text-layer index we have (newly built or from prior render).
+        const textIndex = pageTextItems;
         if (displayImages.length > 0) {
+          setAiPhase("extracting_text");
           // Build the manifest BEFORE the vision render so model has full grounding.
           const imageManifest = displayImages.map((img, idx) => ({
             index: idx,
             file: img.fileName || `file-${img.fileIndex ?? 0}`,
             page_in_file: img.pageInFile ?? idx + 1,
+            // Hand the model up to ~30 readable strings per page so it can pick a
+            // real callout/note/dimension as `nearest_text` instead of inventing one.
+            text_items: (textIndex[idx] || [])
+              .filter((t) => t.text.length >= 1 && t.text.length <= 40)
+              .slice(0, 30)
+              .map((t) => t.text),
           }));
 
+          setAiPhase("vision");
           // Render at 220 DPI specifically for the AI call (kept in memory only briefly).
           const visionBase64s = await renderVisionImages(r);
           const imagesForAI = visionBase64s.length === displayImages.length
@@ -402,7 +448,8 @@ export default function PlanReviewDetail() {
             try { findings = match ? JSON.parse(match[0]) : []; } catch { findings = []; }
           }
 
-          // ── Validate & repair page_index against manifest, anchor pin to grid_cell ──
+          setAiPhase("validating");
+          // ── Validate & repair page_index, anchor pin to grid_cell, then SNAP to vector text ──
           const maxIndex = displayImages.length - 1;
           findings = findings.map((f) => {
             if (!f.markup) return f;
@@ -436,11 +483,26 @@ export default function PlanReviewDetail() {
             const width = Math.max(1, Math.min(15, m.width ?? 4));
             const height = Math.max(1, Math.min(10, m.height ?? 4));
 
-            // If we have a valid grid cell, force the BOX CENTER to sit inside that cell,
-            // clamped to ±5% of the cell center (i.e. somewhere within the cell). This
-            // bounds worst-case error to one grid cell (~10%) when the model returns
-            // an x/y that drifts outside its own anchor.
-            if (cellCenter) {
+            // ── Vector-text snap (precision 1% instead of 10%) ──
+            // If we have a text-layer match for the model's `nearest_text` on
+            // the same page, jump the pin's center to the actual text bbox
+            // center. This is the single biggest precision win — we use the
+            // PDF's own coordinates instead of trusting the model's eyeballed %.
+            let snapped = false;
+            const pageItems = textIndex[pi] || [];
+            if (nearestText && pageItems.length > 0) {
+              const hit = snapToNearestText(pageItems, nearestText, cellCenter);
+              if (hit) {
+                x = Math.max(0, Math.min(100 - width, hit.x - width / 2));
+                y = Math.max(0, Math.min(100 - height, hit.y - height / 2));
+                snapped = true;
+              }
+            }
+
+            // If we did NOT snap to vector text but we have a valid grid cell,
+            // force the BOX CENTER to sit inside that cell, clamped to ±5% of
+            // the cell center. Bounds worst-case error to one grid cell (~10%).
+            if (!snapped && cellCenter) {
               const desiredCx = Math.max(cellCenter.x - 5, Math.min(cellCenter.x + 5, x + width / 2));
               const desiredCy = Math.max(cellCenter.y - 5, Math.min(cellCenter.y + 5, y + height / 2));
               x = Math.max(0, Math.min(100 - width, desiredCx - width / 2));
@@ -448,12 +510,14 @@ export default function PlanReviewDetail() {
             }
 
             // Confidence:
-            //  - high: grid_cell + non-empty nearest_text (both anchors agree to model-side)
+            //  - high: snapped to real text OR (grid_cell + non-empty nearest_text)
             //  - medium: grid_cell only
             //  - low: neither (raw guess)
             // (User-repositioned pins are forced to "high" elsewhere on save.)
             let pin_confidence: "high" | "medium" | "low";
-            if (cellCenter && nearestText.length >= 2) {
+            if (snapped) {
+              pin_confidence = "high";
+            } else if (cellCenter && nearestText.length >= 2) {
               pin_confidence = "high";
             } else if (cellCenter) {
               pin_confidence = "medium";
@@ -480,6 +544,7 @@ export default function PlanReviewDetail() {
       }
 
       if (findings.length === 0) {
+        setAiPhase("vision");
         const countyConfigFallback = getCountyRequirements(r.project?.county || "");
         const payload: Record<string, unknown> = {
           project_name: r.project?.name,
@@ -514,6 +579,7 @@ export default function PlanReviewDetail() {
         }
       }
 
+      setAiPhase("saving");
       const prevFindings = r.ai_findings || [];
 
       await supabase.from("plan_reviews").update({
@@ -531,6 +597,7 @@ export default function PlanReviewDetail() {
       toast.error(err instanceof Error ? err.message : "AI check failed");
       await supabase.from("plan_reviews").update({ ai_check_status: "error" }).eq("id", r.id);
     } finally {
+      setAiPhase("idle");
       setAiRunning(false);
     }
   };
@@ -683,14 +750,31 @@ export default function PlanReviewDetail() {
     }
   }
 
+  // Per-finding diff classification (for the inline dot beside each card).
   const diffMap = new Map<number, "new" | "carried">();
-  if (showDiff && previousFindings.length > 0) {
+  // Roll-up counts for the round-comparison header. Match key is `code_ref|page`.
+  const findingKey = (f: Finding) => `${(f.code_ref || "").trim().toLowerCase()}|${(f.page || "").trim().toLowerCase()}`;
+  let newCount = 0;
+  let persistedCount = 0;
+  let newlyResolvedCount = 0;
+  if (review.round > 1 && previousFindings.length > 0) {
+    const prevKeys = new Set(previousFindings.map(findingKey));
+    const currKeys = new Set(findings.map(findingKey));
     for (let i = 0; i < findings.length; i++) {
-      const f = findings[i];
-      const match = previousFindings.find((pf) => pf.code_ref === f.code_ref && pf.discipline === f.discipline);
-      diffMap.set(i, match ? "carried" : "new");
+      const k = findingKey(findings[i]);
+      if (prevKeys.has(k)) {
+        diffMap.set(i, "carried");
+        persistedCount++;
+      } else {
+        diffMap.set(i, "new");
+        newCount++;
+      }
+    }
+    for (const pk of prevKeys) {
+      if (!currKeys.has(pk)) newlyResolvedCount++;
     }
   }
+  const hasRoundDiff = review.round > 1 && previousFindings.length > 0;
 
   const projectRounds = (allRounds || []).map((r) => ({
     id: r.id,
@@ -725,15 +809,39 @@ export default function PlanReviewDetail() {
         onNewRound={createNewRound}
       />
 
+      {/* ── Page-cap banner: surface silent 10-page truncation honestly ── */}
+      {!aiRunning && pageCapInfo && pageCapInfo.total > pageCapInfo.rendered && (
+        <div className="shrink-0 border-b bg-warning/10 px-4 py-1.5 flex items-center gap-2">
+          <span className="text-2xs font-semibold text-warning uppercase tracking-wide">Limited review</span>
+          <span className="text-xs text-foreground/80">
+            Reviewing the first <strong>{pageCapInfo.rendered}</strong> of <strong>{pageCapInfo.total}</strong> sheet{pageCapInfo.total !== 1 ? "s" : ""}.
+            Findings on later sheets cannot be detected by AI in this round.
+          </span>
+        </div>
+      )}
+
       {/* ── AI Scanning Overlay ── */}
       {aiRunning && (
         <div className="shrink-0 border-b bg-accent/5 px-4 py-3">
-          <div className="max-w-lg">
+          <div className="max-w-lg space-y-2">
+            {/* Real per-phase progress: shows the user we're not frozen. */}
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-3.5 w-3.5 text-accent animate-spin shrink-0" />
+              <p className="text-xs text-accent font-medium">
+                {aiPhase === "rendering" && (
+                  pageCapInfo
+                    ? `Rendering ${pageCapInfo.rendered} sheet${pageCapInfo.rendered !== 1 ? "s" : ""} for analysis…`
+                    : "Rendering plan pages…"
+                )}
+                {aiPhase === "extracting_text" && "Extracting text + dimensions from PDF vector layer…"}
+                {aiPhase === "vision" && "Running visual code review (this may take 60–120s)…"}
+                {aiPhase === "validating" && "Snapping pins to actual callouts and validating findings…"}
+                {aiPhase === "saving" && "Saving findings…"}
+                {aiPhase === "idle" && "Preparing analysis…"}
+              </p>
+            </div>
             {renderingPages && (
-              <div className="mb-2 space-y-1">
-                <p className="text-xs text-accent font-medium">Rendering plan pages for visual analysis...</p>
-                <Progress value={renderProgress} className="h-1" />
-              </div>
+              <Progress value={renderProgress} className="h-1" />
             )}
             <ScanTimeline currentStep={scanStep} />
           </div>
@@ -1003,10 +1111,12 @@ export default function PlanReviewDetail() {
                           counts={{ all: findings.length, open: openCount, resolved: resolvedCount, deferred: deferredCount }}
                           onFilterChange={setStatusFilter}
                         />
-                        {showDiff && previousFindings.length > 0 && (
-                          <div className="flex items-center gap-3 text-2xs bg-muted/30 rounded-md px-2 py-1">
-                            <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-accent" /> New</span>
-                            <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40" /> Carried</span>
+                        {hasRoundDiff && (
+                          <div className="rounded-md border border-accent/30 bg-accent/5 px-2.5 py-1.5 flex items-center gap-3 text-2xs">
+                            <span className="font-semibold text-accent uppercase tracking-wide">Round {review.round} vs R{review.round - 1}</span>
+                            <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-accent" /> <strong>{newCount}</strong> new</span>
+                            <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50" /> <strong>{persistedCount}</strong> persisted</span>
+                            <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-success" /> <strong>{newlyResolvedCount}</strong> resolved since R{review.round - 1}</span>
                           </div>
                         )}
                         <Accordion type="multiple" defaultValue={DISCIPLINE_ORDER.filter((d) => filteredGrouped[d])} className="space-y-1">
@@ -1034,7 +1144,7 @@ export default function PlanReviewDetail() {
                                     const diffStatus = diffMap.get(gi);
                                     return (
                                       <div key={i} className="relative">
-                                        {showDiff && diffStatus && (
+                                        {hasRoundDiff && diffStatus && (
                                           <div className={cn(
                                             "absolute -left-2 top-1/2 -translate-y-1/2 w-1 h-1 rounded-full z-10",
                                             diffStatus === "new" ? "bg-accent" : "bg-muted-foreground/40"
@@ -1102,6 +1212,11 @@ export default function PlanReviewDetail() {
                     onCopyLetter={copyLetter}
                     onLetterChange={setCommentLetter}
                     onQcApprove={async () => {
+                      // FS 553.791 sign-off integrity: a reviewer cannot QC their own work.
+                      if (review.reviewer_id && review.reviewer_id === user?.id) {
+                        toast.error("You ran this review — a different team member must approve QC.");
+                        return;
+                      }
                       await supabase.from("plan_reviews").update({ qc_status: "qc_approved", qc_reviewer_id: user?.id }).eq("id", review.id);
                       await supabase.from("activity_log").insert({ event_type: "qc_approved", description: "Plan review QC approved", project_id: review.project_id, actor_id: user?.id, actor_type: "user" });
                       queryClient.invalidateQueries({ queryKey: ["plan-review", id] });

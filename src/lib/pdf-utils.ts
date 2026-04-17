@@ -16,6 +16,101 @@ export interface PDFPageImage {
   pageInFile?: number;
 }
 
+/** A single text item extracted from a PDF page's text layer, with its bounding box in PERCENT coordinates of the rendered page. */
+export interface PDFTextItem {
+  /** The literal string visible on the page. */
+  text: string;
+  /** Center X (0-100). */
+  x: number;
+  /** Center Y (0-100). */
+  y: number;
+  /** Bounding box width as % of page width (approximation; pdfjs gives us width only). */
+  width: number;
+  /** Bounding box height as % of page height. */
+  height: number;
+}
+
+/**
+ * Extract all text items with bounding boxes (in % of page) from a PDF page.
+ * This is the GROUND-TRUTH coordinate index for snapping AI pin guesses to
+ * actual visible callouts/dimensions/notes — vector PDFs from architects/
+ * engineers contain the text as real strings with exact coordinates, so we
+ * never need to OCR them.
+ */
+export async function extractPagesTextItems(
+  file: File,
+  maxPages = 10
+): Promise<PDFTextItem[][]> {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const totalPages = Math.min(pdf.numPages, maxPages);
+  const out: PDFTextItem[][] = [];
+
+  for (let i = 0; i < totalPages; i++) {
+    const page = await pdf.getPage(i + 1);
+    // Use scale=1 viewport so transform values are in PDF user space, then
+    // normalize against viewport dimensions to get percent coords.
+    const viewport = page.getViewport({ scale: 1 });
+    const content = await page.getTextContent();
+    const items: PDFTextItem[] = [];
+    for (const it of content.items) {
+      // pdfjs TextItem: { str, transform: [a,b,c,d,e,f], width, height }
+      const item = it as { str?: string; transform?: number[]; width?: number; height?: number };
+      const str = (item.str || "").trim();
+      if (!str) continue;
+      const tx = item.transform || [1, 0, 0, 1, 0, 0];
+      const w = item.width || 0;
+      const h = item.height || Math.abs(tx[3]) || 8;
+      // pdfjs origin = bottom-left in user space; convert to top-left.
+      const xPct = (tx[4] / viewport.width) * 100;
+      const yTopPct = ((viewport.height - tx[5]) / viewport.height) * 100;
+      const wPct = (w / viewport.width) * 100;
+      const hPct = (h / viewport.height) * 100;
+      items.push({
+        text: str,
+        x: xPct + wPct / 2,
+        y: yTopPct - hPct / 2,
+        width: wPct,
+        height: hPct,
+      });
+    }
+    out.push(items);
+  }
+  return out;
+}
+
+/**
+ * Find the text item on `pageItems` whose visible string best matches `target`,
+ * preferring items whose bbox center sits inside the supplied grid cell. Returns
+ * null if nothing reasonable matches.
+ *
+ * Matching is case-insensitive and normalised: "DETAIL 3" matches "Detail 3";
+ * "12" matches a callout bubble labelled "12". We require ≥ 2 chars to avoid
+ * false hits on single punctuation glyphs.
+ */
+export function snapToNearestText(
+  pageItems: PDFTextItem[],
+  target: string,
+  gridCellCenter: { x: number; y: number } | null
+): PDFTextItem | null {
+  const needle = (target || "").trim().toLowerCase();
+  if (needle.length < 2) return null;
+
+  const candidates = pageItems.filter((it) => {
+    const hay = it.text.toLowerCase();
+    return hay === needle || hay.includes(needle) || needle.includes(hay);
+  });
+  if (candidates.length === 0) return null;
+  if (!gridCellCenter) {
+    // No anchor — return the shortest match (most likely the exact callout).
+    return candidates.sort((a, b) => Math.abs(a.text.length - needle.length) - Math.abs(b.text.length - needle.length))[0];
+  }
+  // Prefer the candidate whose center is closest to the AI's grid cell.
+  return candidates
+    .map((c) => ({ c, d: Math.hypot(c.x - gridCellCenter.x, c.y - gridCellCenter.y) }))
+    .sort((a, b) => a.d - b.d)[0].c;
+}
+
 /**
  * Render specific pages of a PDF file to base64 PNG images.
  * @param file - The PDF File object
