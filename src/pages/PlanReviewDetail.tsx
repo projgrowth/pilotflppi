@@ -774,6 +774,7 @@ export default function PlanReviewDetail() {
         ai_findings: JSON.parse(JSON.stringify(stampedFindings)),
         previous_findings: JSON.parse(JSON.stringify(prevFindings)),
         finding_statuses: {},
+        ai_run_progress: { phase: "complete", updated_at: new Date().toISOString() },
       }).eq("id", r.id);
 
       queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
@@ -782,10 +783,14 @@ export default function PlanReviewDetail() {
       setTimeout(() => setAiCompleteFlash(null), 3500);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "AI check failed");
-      await supabase.from("plan_reviews").update({ ai_check_status: "error" }).eq("id", r.id);
+      await supabase.from("plan_reviews").update({
+        ai_check_status: "error",
+        ai_run_progress: { phase: "error", updated_at: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) },
+      }).eq("id", r.id);
     } finally {
       setAiPhase("idle");
       setAiRunning(false);
+      setResumingFromOtherTab(false);
     }
   };
 
