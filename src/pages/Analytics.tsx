@@ -10,6 +10,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { PageHeader } from "@/components/PageHeader";
 
 const COLORS = ["#0E7C7B", "#C8972A", "#1A3250", "#2E7D52", "#5B8DB8", "#D4A017"];
 
@@ -162,19 +163,21 @@ export default function Analytics() {
   }
 
   return (
-    <div className="page-enter space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-semibold text-foreground">Analytics</h1>
-        <Select value={range} onValueChange={setRange}>
-          <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="30">Last 30 Days</SelectItem>
-            <SelectItem value="90">Last 90 Days</SelectItem>
-            <SelectItem value="365">Last 12 Months</SelectItem>
-            <SelectItem value="all">All Time</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+    <div className="p-8 md:p-10 max-w-7xl mx-auto">
+      <PageHeader
+        title="Analytics"
+        actions={
+          <Select value={range} onValueChange={setRange}>
+            <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="30">Last 30 Days</SelectItem>
+              <SelectItem value="90">Last 90 Days</SelectItem>
+              <SelectItem value="365">Last 12 Months</SelectItem>
+              <SelectItem value="all">All Time</SelectItem>
+            </SelectContent>
+          </Select>
+        }
+      />
 
       {/* KPI row */}
       {projectsLoading ? (

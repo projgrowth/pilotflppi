@@ -17,6 +17,7 @@ import {
   PanelLeftOpen,
   Sparkles,
   FileText,
+  TrendingUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -32,20 +33,19 @@ interface NavItem {
   icon: React.ElementType;
 }
 
-const coreNav: NavItem[] = [
+// Single, flat nav. Sections felt like clutter for ~11 items.
+// Order is workflow-first (review pipeline) then library/admin.
+const mainNav: NavItem[] = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
   { label: "Projects", path: "/projects", icon: FolderKanban },
   { label: "Plan Review", path: "/review", icon: Search },
   { label: "Inspections", path: "/inspections", icon: ClipboardCheck },
-  { label: "Documents", path: "/documents", icon: Receipt },
+  { label: "Documents", path: "/documents", icon: FileText },
+  { label: "Invoices", path: "/invoices", icon: Receipt },
   { label: "Jurisdictions", path: "/jurisdictions", icon: Building2 },
   { label: "Deficiencies", path: "/deficiencies", icon: Radar },
-];
-
-const toolsNav: NavItem[] = [
-  { label: "Invoices", path: "/invoices", icon: Receipt },
-  { label: "Analytics", path: "/analytics", icon: Settings },
   { label: "Contractors", path: "/contractors", icon: Users },
+  { label: "Analytics", path: "/analytics", icon: TrendingUp },
   { label: "Settings", path: "/settings", icon: Settings },
 ];
 
@@ -57,48 +57,41 @@ const bottomTabs: NavItem[] = [
   { label: "Documents", path: "/documents", icon: FileText },
 ];
 
-const NavSection = React.forwardRef<HTMLDivElement, { title: string; items: NavItem[]; onNavigate?: () => void; collapsed?: boolean }>(function NavSection({ title, items, onNavigate, collapsed }, ref) {
+const NavList = React.forwardRef<HTMLDivElement, { items: NavItem[]; onNavigate?: () => void; collapsed?: boolean }>(function NavList({ items, onNavigate, collapsed }, ref) {
   const location = useLocation();
   return (
-    <div className="mb-6">
-      {!collapsed && (
-        <p className="mb-2 px-4 text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/50">
-          {title}
-        </p>
-      )}
-      <nav className="space-y-0.5">
-        {items.map((item) => {
-          const active = location.pathname.startsWith(item.path);
-          const link = (
-            <Link
-              key={item.path}
-              to={item.path}
-              onClick={onNavigate}
-              className={cn(
-                "flex items-center gap-3 mx-3 px-3 py-2 text-sm rounded-md transition-all duration-150 min-h-[44px]",
-                collapsed && "justify-center px-0 mx-1",
-                active
-                  ? "bg-sidebar-accent text-sidebar-primary font-medium shadow-sm"
-                  : "text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
-              )}
-            >
-              <item.icon className="h-4 w-4 shrink-0" />
-              {!collapsed && <span>{item.label}</span>}
-            </Link>
-          );
+    <nav ref={ref} className="space-y-0.5 px-2">
+      {items.map((item) => {
+        const active = location.pathname.startsWith(item.path);
+        const link = (
+          <Link
+            key={item.path}
+            to={item.path}
+            onClick={onNavigate}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-all duration-150 min-h-[40px]",
+              collapsed && "justify-center px-0",
+              active
+                ? "bg-sidebar-accent text-sidebar-primary font-medium"
+                : "text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
+            )}
+          >
+            <item.icon className="h-4 w-4 shrink-0" />
+            {!collapsed && <span>{item.label}</span>}
+          </Link>
+        );
 
-          if (collapsed) {
-            return (
-              <Tooltip key={item.path} delayDuration={0}>
-                <TooltipTrigger asChild>{link}</TooltipTrigger>
-                <TooltipContent side="right" className="text-xs">{item.label}</TooltipContent>
-              </Tooltip>
-            );
-          }
-          return link;
-        })}
-      </nav>
-    </div>
+        if (collapsed) {
+          return (
+            <Tooltip key={item.path} delayDuration={0}>
+              <TooltipTrigger asChild>{link}</TooltipTrigger>
+              <TooltipContent side="right" className="text-xs">{item.label}</TooltipContent>
+            </Tooltip>
+          );
+        }
+        return link;
+      })}
+    </nav>
   );
 });
 
@@ -144,10 +137,6 @@ function SidebarContent({ onNavigate, collapsed, setCollapsed, onOpenAI }: { onN
           </button>
         )}
       </div>
-      {!collapsed && (
-        <p className="px-4 -mt-4 mb-2 text-[9px] tracking-wide text-sidebar-foreground/40">License #AR92053 · Est. 1980</p>
-      )}
-
       {/* Expand button when collapsed */}
       {collapsed && setCollapsed && (
         <div className="flex justify-center mb-2">
@@ -161,9 +150,8 @@ function SidebarContent({ onNavigate, collapsed, setCollapsed, onOpenAI }: { onN
       )}
 
       {/* Navigation */}
-      <div className="flex-1 overflow-y-auto py-2">
-        <NavSection title="Core" items={coreNav} onNavigate={onNavigate} collapsed={collapsed} />
-        <NavSection title="Tools" items={toolsNav} onNavigate={onNavigate} collapsed={collapsed} />
+      <div className="flex-1 min-h-0 overflow-y-auto py-2">
+        <NavList items={mainNav} onNavigate={onNavigate} collapsed={collapsed} />
       </div>
 
       {/* AI Assistant + ⌘K */}
@@ -318,7 +306,7 @@ export function AppSidebar({ onOpenAI }: { onOpenAI?: () => void }) {
     <TooltipProvider>
       <aside className={cn(
         "hidden md:flex shrink-0 h-screen sticky top-0 transition-all duration-200",
-        collapsed ? "w-14" : "w-[240px]"
+        collapsed ? "w-[60px]" : "w-[224px]"
       )}>
         <SidebarContent collapsed={collapsed} setCollapsed={setCollapsed} onOpenAI={onOpenAI} />
       </aside>

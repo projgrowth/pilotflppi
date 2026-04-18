@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Search, ExternalLink } from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
 
 interface Jurisdiction {
   id: string;
@@ -60,8 +61,8 @@ export default function Jurisdictions() {
   }, [search, region]);
 
   return (
-    <div className="page-enter space-y-6">
-      <h1 className="text-3xl font-semibold text-foreground">Jurisdiction Tracker</h1>
+    <div className="p-8 md:p-10 max-w-7xl mx-auto">
+      <PageHeader title="Jurisdiction Tracker" />
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-md">

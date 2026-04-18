@@ -12,6 +12,7 @@ import SeverityBadge from "@/components/shared/SeverityBadge";
 import FppEmptyState from "@/components/shared/FppEmptyState";
 import { Search, Copy, PlusCircle, ExternalLink, ChevronDown, BookOpen } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/PageHeader";
 
 export default function Deficiencies() {
   const { data: deficiencies, isLoading } = useDeficiencies();
@@ -64,14 +65,12 @@ export default function Deficiencies() {
   };
 
   return (
-    <div className="page-enter space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold text-foreground">Deficiency Library</h1>
-          <p className="text-sm text-fpp-gray-600 mt-1">Pre-written Florida Building Code deficiencies with professional comment language.</p>
-        </div>
-        <Badge variant="secondary" className="text-xs font-mono">{filtered.length} / {deficiencies?.length || 0}</Badge>
-      </div>
+    <div className="p-8 md:p-10 max-w-7xl mx-auto">
+      <PageHeader
+        title="Deficiency Library"
+        subtitle="Pre-written Florida Building Code deficiencies with professional comment language."
+        actions={<Badge variant="secondary" className="text-xs font-mono">{filtered.length} / {deficiencies?.length || 0}</Badge>}
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 max-w-md">

@@ -14,6 +14,7 @@ import SkeletonRow from "@/components/shared/SkeletonRow";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
 import { useRevenueStats, useInvoices } from "@/hooks/useInvoices";
+import { PageHeader } from "@/components/PageHeader";
 import {
   FileText, CheckCircle, ClipboardCheck, AlertTriangle,
   Calendar, Zap, Eye, MessageSquare, FileCheck, Clipboard,
@@ -412,14 +413,11 @@ export default function Dashboard() {
   const approvalDiff = (approvalsData?.thisWeek ?? 0) - (approvalsData?.lastWeek ?? 0);
 
   return (
-    <div className="p-4 sm:p-8 md:p-10 max-w-7xl">
-      {/* Greeting */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-          {greeting}, {displayName}.
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">{format(now, "EEEE, MMMM d, yyyy")}</p>
-      </div>
+    <div className="p-4 sm:p-8 md:p-10 max-w-7xl mx-auto">
+      <PageHeader
+        title={`${greeting}, ${displayName}.`}
+        subtitle={format(now, "EEEE, MMMM d, yyyy")}
+      />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
