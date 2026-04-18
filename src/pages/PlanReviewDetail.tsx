@@ -4,7 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { callAI, streamAI } from "@/lib/ai";
-import { renderPDFPagesToImages, renderPDFPagesForVisionWithGrid, gridCellToCenter, extractPagesTextItems, snapToNearestText, getPDFPageCount, type PDFPageImage, type PDFTextItem } from "@/lib/pdf-utils";
+import { renderPDFPagesToImages, renderPDFPagesForVisionWithGrid, gridCellToCenter, extractPagesTextItems, snapToNearestText, getPDFPageCount, renderZoomCropForCell, type PDFPageImage, type PDFTextItem } from "@/lib/pdf-utils";
 import { useFirmSettings } from "@/hooks/useFirmSettings";
 import { useFindingHistory, logFindingStatusChange } from "@/hooks/useFindingHistory";
 import { useAuth } from "@/contexts/AuthContext";
@@ -30,6 +30,7 @@ import { SeverityDonut } from "@/components/SeverityDonut";
 import { ScanTimeline } from "@/components/ScanTimeline";
 import { PlanMarkupViewer } from "@/components/PlanMarkupViewer";
 import { FindingStatusFilter, type FindingStatus } from "@/components/FindingStatusFilter";
+import { BulkTriageFilters, type ConfidenceFilter } from "@/components/BulkTriageFilters";
 import { DisciplineChecklist } from "@/components/DisciplineChecklist";
 import { SitePlanChecklist } from "@/components/SitePlanChecklist";
 import { getCountyRequirements } from "@/lib/county-requirements";
@@ -131,12 +132,15 @@ export default function PlanReviewDetail() {
   /** {totalSheets, renderedSheets} — populated after we open the PDFs. Used to show the "Reviewing first 10 of N" banner. */
   const [pageCapInfo, setPageCapInfo] = useState<{ total: number; rendered: number } | null>(null);
   /** Discrete AI run phase — drives the live step indicator instead of a generic spinner. */
-  const [aiPhase, setAiPhase] = useState<"idle" | "rendering" | "extracting_text" | "vision" | "validating" | "saving">("idle");
+  const [aiPhase, setAiPhase] = useState<"idle" | "rendering" | "extracting_text" | "vision" | "validating" | "refining" | "saving">("idle");
   const [renderingPages, setRenderingPages] = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);
   const findingRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const [findingStatuses, setFindingStatuses] = useState<Record<number, FindingStatus>>({});
   const [statusFilter, setStatusFilter] = useState<FindingStatus | "all">("all");
+  const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilter>("all");
+  const [disciplineFilter, setDisciplineFilter] = useState<string | "all">("all");
+  const [sheetFilter, setSheetFilter] = useState<string | "all">("all");
   const [showDiff, setShowDiff] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [aiCompleteFlash, setAiCompleteFlash] = useState<number | null>(null);
