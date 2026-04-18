@@ -404,6 +404,7 @@ export default function PlanReviewDetail() {
     try {
       // Stamp the reviewer at AI run time so we can later block self-QC.
       await supabase.from("plan_reviews").update({ ai_check_status: "running", reviewer_id: user?.id ?? null }).eq("id", r.id);
+      writeAiProgress(r.id, "rendering");
 
       let findings: Finding[] = [];
       const hasFiles = r.file_urls && r.file_urls.length > 0;
@@ -416,6 +417,7 @@ export default function PlanReviewDetail() {
         const textIndex = pageTextItems;
         if (displayImages.length > 0) {
           setAiPhase("extracting_text");
+          writeAiProgress(r.id, "extracting_text");
           // Build the manifest BEFORE the vision render so model has full grounding.
           const imageManifest = displayImages.map((img, idx) => ({
             index: idx,
@@ -430,6 +432,7 @@ export default function PlanReviewDetail() {
           }));
 
           setAiPhase("vision");
+          writeAiProgress(r.id, "vision");
           // Render at 220 DPI specifically for the AI call (kept in memory only briefly).
           const visionBase64s = await renderVisionImages(r);
           const imagesForAI = visionBase64s.length === displayImages.length
@@ -472,6 +475,7 @@ export default function PlanReviewDetail() {
           }
 
           setAiPhase("validating");
+          writeAiProgress(r.id, "validating");
           // ── Validate & repair page_index, anchor pin to grid_cell, then SNAP to vector text ──
           const maxIndex = displayImages.length - 1;
           findings = findings.map((f) => {
