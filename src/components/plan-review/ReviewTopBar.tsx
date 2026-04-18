@@ -43,16 +43,19 @@ export function ReviewTopBar({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="text-sm font-semibold truncate">{projectName || "Plan Review"}</h1>
-            <span className="rounded bg-muted px-1.5 py-0.5 text-caption font-medium capitalize shrink-0">{tradeType}</span>
+            {tradeType && tradeType.toLowerCase() !== "building" && (
+              <span className="rounded bg-muted px-1.5 py-0.5 text-caption font-medium capitalize shrink-0">{tradeType}</span>
+            )}
             {hvhz && (
-              <span className="flex items-center gap-0.5 text-caption font-semibold text-destructive shrink-0">
+              <span className="flex items-center gap-0.5 text-caption font-semibold text-destructive shrink-0" title="High Velocity Hurricane Zone">
                 <Wind className="h-3 w-3" /> HVHZ
               </span>
             )}
           </div>
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="truncate">{address}</span>
-            <span>{getCountyLabel(county)} County</span>
+            <span className="text-muted-foreground/40">·</span>
+            <span className="shrink-0">{getCountyLabel(county)}</span>
             {contractor && <ContractorHoverCard contractor={contractor} />}
           </div>
         </div>

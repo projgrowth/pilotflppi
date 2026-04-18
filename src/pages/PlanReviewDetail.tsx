@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { ReviewTopBar } from "@/components/plan-review/ReviewTopBar";
 import { CountyPanel } from "@/components/plan-review/CountyPanel";
 import { LetterPanel } from "@/components/plan-review/LetterPanel";
+import { RightPanelTabs } from "@/components/plan-review/RightPanelTabs";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { FindingCard, type Finding } from "@/components/FindingCard";
@@ -1252,12 +1253,7 @@ export default function PlanReviewDetail() {
           ) : (
             <div className="flex-1 overflow-y-auto bg-card">
               <div className="shrink-0 px-3 py-2 border-b flex items-center gap-1 overflow-x-auto">
-                {(["findings", "checklist", "completeness", "letter", "county"] as RightPanelMode[]).map((mode) => (
-                  <button key={mode} onClick={() => setRightPanel(mode)} className={cn("px-3 py-1 rounded-md text-xs font-medium transition-all capitalize whitespace-nowrap", rightPanel === mode ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted/50")}>
-                    {mode}
-                    {mode === "findings" && hasFindings && <span className="ml-1 text-caption opacity-70">{findings.length}</span>}
-                  </button>
-                ))}
+                <RightPanelTabs active={rightPanel} onChange={setRightPanel} findingsCount={hasFindings ? findings.length : undefined} />
               </div>
               <div className="overflow-y-auto">
                 {rightPanel === "findings" && (
@@ -1410,19 +1406,7 @@ export default function PlanReviewDetail() {
                 <Button size="icon" variant="ghost" className="h-6 w-6 mr-1" onClick={() => setRightPanelCollapsed(true)} title="Collapse panel">
                   <PanelRightClose className="h-3.5 w-3.5" />
                 </Button>
-                {(["findings", "checklist", "completeness", "letter", "county"] as RightPanelMode[]).map((mode) => (
-                  <button
-                    key={mode}
-                    onClick={() => setRightPanel(mode)}
-                    className={cn(
-                      "px-3 py-1 rounded-md text-xs font-medium transition-all capitalize",
-                      rightPanel === mode ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted/50"
-                    )}
-                  >
-                    {mode}
-                    {mode === "findings" && hasFindings && <span className="ml-1 text-caption opacity-70">{findings.length}</span>}
-                  </button>
-                ))}
+                <RightPanelTabs active={rightPanel} onChange={setRightPanel} findingsCount={hasFindings ? findings.length : undefined} />
                 {hasFindings && rightPanel === "findings" && (
                   <div className="ml-auto flex items-center gap-1.5">
                     <SeverityDonut critical={criticalCount} major={majorCount} minor={minorCount} size={24} />
