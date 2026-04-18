@@ -663,6 +663,8 @@ export default function PlanReviewDetail() {
             if (match) findings = JSON.parse(match[0]);
           } catch { findings = []; }
         }
+        // Fallback path also needs stable ids.
+        findings = findings.map((f) => ({ ...f, finding_id: f.finding_id || crypto.randomUUID() }));
       }
 
       // ── SECOND-PASS ZOOM REFINEMENT ──
