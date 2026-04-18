@@ -583,6 +583,119 @@ export default function PlanReviewDetail() {
         }
       }
 
+      // ── SECOND-PASS ZOOM REFINEMENT ──
+      // For findings still at medium/low pin_confidence, render a 2× zoomed
+      // crop of the implicated grid cell (+ neighbors) and ask the model to
+      // re-identify the element. If it returns a refined nearest_text, snap
+      // again — we already have the page's text-layer index in `pageTextItems`.
+      const displayImagesForRefine = pageImages.length > 0 ? pageImages : await renderDocumentPages(r);
+      const refineCandidates = findings
+        .map((f, i) => ({ f, i }))
+        .filter(({ f }) => {
+          const conf = f.markup?.pin_confidence;
+          return f.markup && (conf === "medium" || conf === "low") && !!f.markup.grid_cell;
+        });
+
+      if (refineCandidates.length > 0 && displayImagesForRefine.length > 0) {
+        setAiPhase("refining");
+        // Cache by `${fileIndex}` to avoid re-downloading the same PDF for many findings on the same file.
+        const fileCache = new Map<number, File>();
+        const getFileForIndex = async (fileIndex: number): Promise<File | null> => {
+          if (fileCache.has(fileIndex)) return fileCache.get(fileIndex)!;
+          const storedPath = r.file_urls[fileIndex];
+          if (!storedPath) return null;
+          const filePath = storedPath.includes('/storage/v1/')
+            ? storedPath.split('/documents/').pop() || storedPath
+            : storedPath;
+          const { data: signedData } = await supabase.storage.from("documents").createSignedUrl(filePath, 3600);
+          if (!signedData?.signedUrl) return null;
+          const blob = await (await fetch(signedData.signedUrl)).blob();
+          const fileName = decodeURIComponent(filePath.split("/").pop() || `doc-${fileIndex}.pdf`);
+          const file = new File([blob], fileName, { type: "application/pdf" });
+          fileCache.set(fileIndex, file);
+          return file;
+        };
+
+        // Limit to the first ~12 candidates so we don't blow latency on huge result sets.
+        const MAX_REFINE = 12;
+        const slice = refineCandidates.slice(0, MAX_REFINE);
+        let upgraded = 0;
+        for (const { f, i } of slice) {
+          try {
+            const pi = f.markup!.page_index;
+            const img = displayImagesForRefine[pi];
+            if (!img || img.fileIndex === undefined || img.pageInFile === undefined) continue;
+            const sourceFile = await getFileForIndex(img.fileIndex);
+            if (!sourceFile) continue;
+            const crop = await renderZoomCropForCell(sourceFile, img.pageInFile, f.markup!.grid_cell!, 280);
+            if (!crop) continue;
+
+            const result = await callAI({
+              action: "refine_finding_pin",
+              payload: {
+                description: f.description,
+                code_ref: f.code_ref,
+                grid_cell: f.markup!.grid_cell,
+                original_nearest_text: f.markup!.nearest_text || "",
+                images: [crop.base64],
+              },
+            });
+            let parsed: { nearest_text?: string; x?: number; y?: number; width?: number; height?: number; found?: boolean } | null = null;
+            try { parsed = JSON.parse(result); } catch {
+              const m = result.match(/\{[\s\S]*\}/);
+              if (m) try { parsed = JSON.parse(m[0]); } catch { parsed = null; }
+            }
+            if (!parsed || parsed.found === false) continue;
+
+            // First try snapping the refined nearest_text against the vector text layer.
+            const pageItems = pageTextItems[pi] || [];
+            const refinedText = (parsed.nearest_text || "").trim();
+            const cellCenter = gridCellToCenter(f.markup!.grid_cell);
+            let snappedToText = false;
+            let newX = f.markup!.x ?? 0;
+            let newY = f.markup!.y ?? 0;
+            const newW = f.markup!.width ?? 4;
+            const newH = f.markup!.height ?? 4;
+
+            if (refinedText && pageItems.length > 0) {
+              const hit = snapToNearestText(pageItems, refinedText, cellCenter);
+              if (hit) {
+                newX = Math.max(0, Math.min(100 - newW, hit.x - newW / 2));
+                newY = Math.max(0, Math.min(100 - newH, hit.y - newH / 2));
+                snappedToText = true;
+              }
+            }
+
+            // Fall back to converting the crop-relative coords back to page coords.
+            if (!snappedToText && typeof parsed.x === "number" && typeof parsed.y === "number") {
+              const cropPctX = Math.max(0, Math.min(100, parsed.x));
+              const cropPctY = Math.max(0, Math.min(100, parsed.y));
+              const pageX = crop.crop.x + (cropPctX / 100) * crop.crop.width;
+              const pageY = crop.crop.y + (cropPctY / 100) * crop.crop.height;
+              newX = Math.max(0, Math.min(100 - newW, pageX));
+              newY = Math.max(0, Math.min(100 - newH, pageY));
+            }
+
+            findings[i] = {
+              ...f,
+              markup: {
+                ...f.markup!,
+                x: newX,
+                y: newY,
+                nearest_text: refinedText || f.markup!.nearest_text,
+                pin_confidence: snappedToText ? "high" : "high", // refined → upgrade
+              },
+            };
+            upgraded++;
+          } catch (refineErr) {
+            console.warn("[ai-check] refine pass failed for finding", i, refineErr);
+          }
+        }
+        if (upgraded > 0) {
+          console.info(`[ai-check] refined ${upgraded}/${slice.length} low-confidence pins via 2× zoom`);
+        }
+      }
+
       setAiPhase("saving");
       const prevFindings = r.ai_findings || [];
 
@@ -590,7 +703,7 @@ export default function PlanReviewDetail() {
       // after we change prompts later. (Defensibility for FS 553.791.)
       const stampedFindings = findings.map((f) => ({
         ...f,
-        prompt_version: f.prompt_version ?? "v2.1-grid+text-snap",
+        prompt_version: f.prompt_version ?? "v2.2-grid+text-snap+zoom-refine",
         model_version: f.model_version ?? "google/gemini-2.5-pro",
       }));
 
