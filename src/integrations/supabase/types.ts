@@ -710,6 +710,7 @@ export type Database = {
         Row: {
           ai_check_status: string
           ai_findings: Json | null
+          ai_run_progress: Json | null
           checklist_state: Json | null
           created_at: string
           fbc_edition: string | null
@@ -728,6 +729,7 @@ export type Database = {
         Insert: {
           ai_check_status?: string
           ai_findings?: Json | null
+          ai_run_progress?: Json | null
           checklist_state?: Json | null
           created_at?: string
           fbc_edition?: string | null
@@ -746,6 +748,7 @@ export type Database = {
         Update: {
           ai_check_status?: string
           ai_findings?: Json | null
+          ai_run_progress?: Json | null
           checklist_state?: Json | null
           created_at?: string
           fbc_edition?: string | null

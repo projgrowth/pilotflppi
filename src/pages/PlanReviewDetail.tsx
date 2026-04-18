@@ -146,6 +146,25 @@ export default function PlanReviewDetail() {
   const [aiCompleteFlash, setAiCompleteFlash] = useState<number | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [repositioningIndex, setRepositioningIndex] = useState<number | null>(null);
+  /** True when we detected another tab is mid-run on this review and we're showing
+   *  a "Resuming…" banner backed by realtime. Disables the "Run AI Check" button. */
+  const [resumingFromOtherTab, setResumingFromOtherTab] = useState(false);
+
+  /** Persist a phase transition so a fresh tab can show a "Resuming…" banner if
+   *  the user closes the original. Best-effort — never fails the run. */
+  const writeAiProgress = useCallback(async (
+    reviewId: string,
+    phase: string,
+    extra: Record<string, unknown> = {}
+  ) => {
+    try {
+      await supabase.from("plan_reviews").update({
+        ai_run_progress: { phase, updated_at: new Date().toISOString(), ...extra },
+      }).eq("id", reviewId);
+    } catch {
+      // Swallow — progress writes must never break the AI run itself.
+    }
+  }, []);
 
   const handleRepositionConfirm = useCallback(async (idx: number, newMarkup: { page_index: number; x: number; y: number; width: number; height: number }) => {
     if (!review) return;
@@ -187,7 +206,8 @@ export default function PlanReviewDetail() {
     }
   }, [review]);
 
-  // Auto-trigger AI check for newly created pending reviews
+  // Auto-trigger AI check for newly created pending reviews — but only if no
+  // other tab is mid-run on this review. The resume effect below detects that.
   const hasAutoTriggered = useRef(false);
   useEffect(() => {
     if (
@@ -195,12 +215,64 @@ export default function PlanReviewDetail() {
       review.ai_check_status === "pending" &&
       review.file_urls?.length > 0 &&
       !aiRunning &&
-      !hasAutoTriggered.current
+      !hasAutoTriggered.current &&
+      !resumingFromOtherTab
     ) {
       hasAutoTriggered.current = true;
       runAICheck(review);
     }
-  }, [review]);
+  }, [review, resumingFromOtherTab]);
+
+  // ── Cross-tab resume: if this review is already "running" elsewhere AND its
+  // ai_run_progress was updated within the last 2 minutes, treat it as a live
+  // run owned by another tab. Subscribe to realtime updates so we mirror its
+  // phase indicator, and disable the local "Run AI Check" button to prevent
+  // double-spending Lovable AI credits. After 2 min of silence we assume the
+  // run is dead and let the user re-trigger.
+  useEffect(() => {
+    if (!review || review.ai_check_status !== "running") {
+      setResumingFromOtherTab(false);
+      return;
+    }
+    if (aiRunning) return; // We're the owner — nothing to resume.
+    const progress = (review as { ai_run_progress?: { phase?: string; updated_at?: string } }).ai_run_progress;
+    const updatedAt = progress?.updated_at ? new Date(progress.updated_at).getTime() : 0;
+    const fresh = updatedAt && Date.now() - updatedAt < 2 * 60 * 1000;
+    if (!fresh) {
+      setResumingFromOtherTab(false);
+      return;
+    }
+    setResumingFromOtherTab(true);
+    if (progress?.phase && progress.phase !== "complete" && progress.phase !== "error") {
+      setAiPhase(progress.phase as typeof aiPhase);
+    }
+
+    const channel = supabase
+      .channel(`plan-review-${review.id}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "plan_reviews", filter: `id=eq.${review.id}` },
+        (payload) => {
+          const next = payload.new as { ai_check_status?: string; ai_run_progress?: { phase?: string } };
+          if (next.ai_run_progress?.phase) {
+            const ph = next.ai_run_progress.phase;
+            if (ph !== "complete" && ph !== "error") {
+              setAiPhase(ph as typeof aiPhase);
+            }
+          }
+          if (next.ai_check_status && next.ai_check_status !== "running") {
+            // Other tab finished — refresh and exit resume mode.
+            setResumingFromOtherTab(false);
+            setAiPhase("idle");
+            queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [review?.id, review?.ai_check_status, aiRunning, id, queryClient]);
+
 
   const statusSaveTimer = useRef<NodeJS.Timeout | null>(null);
   const persistFindingStatuses = useCallback((reviewId: string, statuses: Record<number, FindingStatus>) => {
@@ -385,6 +457,7 @@ export default function PlanReviewDetail() {
     try {
       // Stamp the reviewer at AI run time so we can later block self-QC.
       await supabase.from("plan_reviews").update({ ai_check_status: "running", reviewer_id: user?.id ?? null }).eq("id", r.id);
+      writeAiProgress(r.id, "rendering");
 
       let findings: Finding[] = [];
       const hasFiles = r.file_urls && r.file_urls.length > 0;
@@ -397,6 +470,7 @@ export default function PlanReviewDetail() {
         const textIndex = pageTextItems;
         if (displayImages.length > 0) {
           setAiPhase("extracting_text");
+          writeAiProgress(r.id, "extracting_text");
           // Build the manifest BEFORE the vision render so model has full grounding.
           const imageManifest = displayImages.map((img, idx) => ({
             index: idx,
@@ -411,6 +485,7 @@ export default function PlanReviewDetail() {
           }));
 
           setAiPhase("vision");
+          writeAiProgress(r.id, "vision");
           // Render at 220 DPI specifically for the AI call (kept in memory only briefly).
           const visionBase64s = await renderVisionImages(r);
           const imagesForAI = visionBase64s.length === displayImages.length
@@ -453,6 +528,7 @@ export default function PlanReviewDetail() {
           }
 
           setAiPhase("validating");
+          writeAiProgress(r.id, "validating");
           // ── Validate & repair page_index, anchor pin to grid_cell, then SNAP to vector text ──
           const maxIndex = displayImages.length - 1;
           findings = findings.map((f) => {
@@ -598,6 +674,7 @@ export default function PlanReviewDetail() {
 
       if (refineCandidates.length > 0 && displayImagesForRefine.length > 0) {
         setAiPhase("refining");
+        writeAiProgress(r.id, "refining", { current: 0, total: Math.min(refineCandidates.length, 12) });
         // Cache by `${fileIndex}` to avoid re-downloading the same PDF for many findings on the same file.
         const fileCache = new Map<number, File>();
         const getFileForIndex = async (fileIndex: number): Promise<File | null> => {
@@ -616,10 +693,21 @@ export default function PlanReviewDetail() {
           return file;
         };
 
+        // Convert a "data:image/jpeg;base64,xxx" URL to a Blob for storage upload.
+        const dataUrlToBlob = (dataUrl: string): Blob => {
+          const [meta, b64] = dataUrl.split(",");
+          const mime = (meta.match(/data:(.*?);/) || [])[1] || "image/jpeg";
+          const bin = atob(b64);
+          const bytes = new Uint8Array(bin.length);
+          for (let j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
+          return new Blob([bytes], { type: mime });
+        };
+
         // Limit to the first ~12 candidates so we don't blow latency on huge result sets.
         const MAX_REFINE = 12;
         const slice = refineCandidates.slice(0, MAX_REFINE);
         let upgraded = 0;
+        let processed = 0;
         for (const { f, i } of slice) {
           try {
             const pi = f.markup!.page_index;
@@ -676,6 +764,27 @@ export default function PlanReviewDetail() {
               newY = Math.max(0, Math.min(100 - newH, pageY));
             }
 
+            // ── Persist the crop to Storage as image evidence for this finding ──
+            // Building officials challenge findings; the reviewer needs to show the
+            // exact pixels the AI looked at. We persist the JPEG already in memory
+            // so this is essentially free. Best-effort — never block the run.
+            let cropUrl: string | undefined;
+            try {
+              const cropBlob = dataUrlToBlob(crop.base64);
+              const cropPath = `plan-reviews/${r.id}/finding-crops/${i}-${Date.now()}.jpg`;
+              const { error: upErr } = await supabase.storage
+                .from("documents")
+                .upload(cropPath, cropBlob, { upsert: true, contentType: "image/jpeg" });
+              if (!upErr) {
+                const { data: signed } = await supabase.storage
+                  .from("documents")
+                  .createSignedUrl(cropPath, 60 * 60 * 24 * 365); // 1y signed URL
+                cropUrl = signed?.signedUrl;
+              }
+            } catch (uploadErr) {
+              console.warn("[ai-check] crop upload failed for finding", i, uploadErr);
+            }
+
             findings[i] = {
               ...f,
               markup: {
@@ -685,10 +794,15 @@ export default function PlanReviewDetail() {
                 nearest_text: refinedText || f.markup!.nearest_text,
                 pin_confidence: snappedToText ? "high" : "high", // refined → upgrade
               },
+              crop_url: cropUrl ?? f.crop_url,
             };
             upgraded++;
           } catch (refineErr) {
             console.warn("[ai-check] refine pass failed for finding", i, refineErr);
+          } finally {
+            processed++;
+            // Persist incremental progress so a reopened tab can show "Refining 7/12…".
+            writeAiProgress(r.id, "refining", { current: processed, total: slice.length });
           }
         }
         if (upgraded > 0) {
@@ -697,6 +811,7 @@ export default function PlanReviewDetail() {
       }
 
       setAiPhase("saving");
+      writeAiProgress(r.id, "saving");
       const prevFindings = r.ai_findings || [];
 
       // Stamp every finding with prompt + model version so audits work even
@@ -712,6 +827,7 @@ export default function PlanReviewDetail() {
         ai_findings: JSON.parse(JSON.stringify(stampedFindings)),
         previous_findings: JSON.parse(JSON.stringify(prevFindings)),
         finding_statuses: {},
+        ai_run_progress: { phase: "complete", updated_at: new Date().toISOString() },
       }).eq("id", r.id);
 
       queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
@@ -720,10 +836,14 @@ export default function PlanReviewDetail() {
       setTimeout(() => setAiCompleteFlash(null), 3500);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "AI check failed");
-      await supabase.from("plan_reviews").update({ ai_check_status: "error" }).eq("id", r.id);
+      await supabase.from("plan_reviews").update({
+        ai_check_status: "error",
+        ai_run_progress: { phase: "error", updated_at: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) },
+      }).eq("id", r.id);
     } finally {
       setAiPhase("idle");
       setAiRunning(false);
+      setResumingFromOtherTab(false);
     }
   };
 
@@ -1019,6 +1139,17 @@ export default function PlanReviewDetail() {
         onNavigateRound={(rid) => navigate(`/plan-review/${rid}`)}
         onNewRound={createNewRound}
       />
+
+      {/* ── Resume banner: another tab is mid-run on this review ── */}
+      {resumingFromOtherTab && !aiRunning && (
+        <div className="shrink-0 border-b bg-accent/10 px-4 py-1.5 flex items-center gap-2">
+          <Loader2 className="h-3 w-3 text-accent animate-spin" />
+          <span className="text-2xs font-semibold text-accent uppercase tracking-wide">Resuming review</span>
+          <span className="text-xs text-foreground/80">
+            Another session is analyzing these plans ({aiPhase}). Findings will appear here automatically.
+          </span>
+        </div>
+      )}
 
       {/* ── Page-cap banner: surface silent 10-page truncation honestly ── */}
       {!aiRunning && pageCapInfo && pageCapInfo.total > pageCapInfo.rendered && (

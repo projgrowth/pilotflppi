@@ -57,6 +57,14 @@ export interface Finding {
   /** Stamp of which prompt + model produced this finding (for post-hoc audits). */
   prompt_version?: string;
   model_version?: string;
+  /** Storage path of the JPEG crop the AI analyzed during second-pass refinement.
+   *  Surfaced inline under the "Why?" disclosure so building officials can see
+   *  exactly the image evidence the model worked from. */
+  crop_url?: string;
+  /** Count of historical corrections matching this finding's code_ref — set
+   *  client-side via useSimilarCorrections, NOT persisted. Drives the
+   *  "Corrected N× before" badge that surfaces the learning loop to reviewers. */
+  similar_corrections_count?: number;
 }
 
 export type FindingStatus = "open" | "resolved" | "deferred";

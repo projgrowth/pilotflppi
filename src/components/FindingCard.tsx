@@ -1,8 +1,9 @@
 import { Badge } from "@/components/ui/badge";
 import { getDisciplineIcon, getDisciplineColor, getDisciplineLabel } from "@/lib/county-utils";
-import { AlertTriangle, AlertCircle, Info, CheckCheck, MapPin, Clock, ArrowRightLeft, ChevronRight, History, Move, Crosshair, Eye } from "lucide-react";
+import { AlertTriangle, AlertCircle, Info, CheckCheck, MapPin, Clock, ArrowRightLeft, ChevronRight, History, Move, Crosshair, Eye, ImageIcon, Repeat } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, forwardRef } from "react";
+import { useSimilarCorrections } from "@/hooks/useSimilarCorrections";
 import type { FindingStatus } from "@/components/FindingStatusFilter";
 import type { FindingHistoryEntry } from "@/hooks/useFindingHistory";
 import type { Finding } from "@/types";
@@ -52,6 +53,9 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
     const [expanded, setExpanded] = useState(defaultExpanded);
     const [showHistory, setShowHistory] = useState(false);
     const [showReasoning, setShowReasoning] = useState(false);
+    // Surface the AI learning loop: how often this exact code section was
+    // corrected before. ≥3 hits → amber "review carefully" badge.
+    const similarCount = useSimilarCorrections(finding.code_ref, finding.description) ?? finding.similar_corrections_count ?? 0;
     const sev = severityConfig[finding.severity] || severityConfig.minor;
     const isResolved = status === "resolved";
     const isDeferred = status === "deferred";
@@ -145,6 +149,18 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
               {finding.county_specific && (
                 <Badge variant="outline" className="text-caption font-medium border-accent text-accent bg-accent/5 h-3.5 px-1">
                   County
+                </Badge>
+              )}
+              {/* Corrections-loop signal: this exact code section was historically
+                  challenged/corrected ≥3 times. Tells the reviewer to look harder
+                  before signing off, and visibly closes the AI learning loop. */}
+              {similarCount >= 3 && (
+                <Badge
+                  variant="outline"
+                  className="text-caption font-semibold border-warning/50 text-warning bg-warning/10 h-3.5 px-1 inline-flex items-center gap-0.5"
+                  title={`${similarCount} prior reviewer corrections matched this code section. Verify carefully.`}
+                >
+                  <Repeat className="h-2.5 w-2.5" /> Corrected {similarCount}× before
                 </Badge>
               )}
             </div>
@@ -258,11 +274,27 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
                 model's specific observation and stamps the prompt + model
                 version so audits work even after we change prompts. */}
             {showReasoning && finding.reasoning && (
-              <div className="rounded border border-accent/30 bg-accent/5 px-2.5 py-2 space-y-1">
+              <div className="rounded border border-accent/30 bg-accent/5 px-2.5 py-2 space-y-1.5">
                 <div className="flex items-center gap-1 text-2xs font-semibold text-accent uppercase tracking-wide">
                   <Eye className="h-3 w-3" /> AI Observation
                 </div>
                 <p className="text-xs text-foreground/85 leading-relaxed">{finding.reasoning}</p>
+                {/* Image audit crop: the literal pixels the AI looked at during
+                    second-pass refinement. This is the defensible artifact a
+                    building official sees when challenging a finding. */}
+                {finding.crop_url && (
+                  <div className="space-y-1 pt-1 border-t border-accent/15">
+                    <div className="flex items-center gap-1 text-2xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      <ImageIcon className="h-3 w-3" /> Image evidence
+                    </div>
+                    <img
+                      src={finding.crop_url}
+                      alt={`AI-analyzed region for finding ${finding.code_ref}`}
+                      className="w-full max-h-64 object-contain rounded border border-border/40 bg-card"
+                      loading="lazy"
+                    />
+                  </div>
+                )}
                 {(finding.model_version || finding.prompt_version) && (
                   <p className="text-caption font-mono text-muted-foreground/70 pt-0.5 border-t border-accent/15">
                     {finding.model_version && <span>{finding.model_version}</span>}
