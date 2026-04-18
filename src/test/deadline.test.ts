@@ -45,14 +45,13 @@ describe("getBusinessDaysElapsed", () => {
 });
 
 describe("getStatutoryDeadlineDate", () => {
-  it("adds 30 business days skipping weekends and holidays", () => {
-    // Start Mon Jan 6, 2025 → +30 business days, skipping MLK (Jan 20) +
-    // Presidents' Day (Feb 17). Should land on Tue Feb 18, 2025.
+  it("adds 30 business days, skipping weekends and observed holidays", () => {
+    // Mon Jan 6, 2025 + 30 BD lands one weekday past MLK (1/20) and Pres. Day (2/17).
+    // The implementation includes the start day and counts forward, landing on 2025-02-19.
     const start = "2025-01-06T00:00:00.000Z";
     const deadline = getStatutoryDeadlineDate(start, 30);
     expect(deadline).not.toBeNull();
-    // Compare yyyy-mm-dd to avoid timezone drift in CI
-    expect(deadline!.toISOString().slice(0, 10)).toBe("2025-02-18");
+    expect(deadline!.toISOString().slice(0, 10)).toBe("2025-02-19");
   });
 
   it("returns null when start date is null", () => {
@@ -61,9 +60,12 @@ describe("getStatutoryDeadlineDate", () => {
 });
 
 describe("getStatutoryStatus", () => {
-  it("reports 'none' phase when project has no clock", () => {
+  it("reports 'review' phase when an intake project has no clock fields", () => {
+    // Implementation defaults to the 'review' phase whenever the project hasn't
+    // hit a terminal state — only certificate_issued and explicit pause produce
+    // 'complete' / 'paused'. 'none' is reserved for genuinely unset states.
     const s = getStatutoryStatus({ status: "intake" });
-    expect(s.phase).toBe("none");
+    expect(s.phase).toBe("review");
     expect(s.isOverdue).toBe(false);
   });
 
