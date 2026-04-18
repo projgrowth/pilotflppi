@@ -4,7 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { callAI, streamAI } from "@/lib/ai";
-import { renderPDFPagesToImages, renderPDFPagesForVisionWithGrid, gridCellToCenter, extractPagesTextItems, snapToNearestText, getPDFPageCount, type PDFPageImage, type PDFTextItem } from "@/lib/pdf-utils";
+import { renderPDFPagesToImages, renderPDFPagesForVisionWithGrid, gridCellToCenter, extractPagesTextItems, snapToNearestText, getPDFPageCount, renderZoomCropForCell, type PDFPageImage, type PDFTextItem } from "@/lib/pdf-utils";
 import { useFirmSettings } from "@/hooks/useFirmSettings";
 import { useFindingHistory, logFindingStatusChange } from "@/hooks/useFindingHistory";
 import { useAuth } from "@/contexts/AuthContext";
@@ -30,6 +30,7 @@ import { SeverityDonut } from "@/components/SeverityDonut";
 import { ScanTimeline } from "@/components/ScanTimeline";
 import { PlanMarkupViewer } from "@/components/PlanMarkupViewer";
 import { FindingStatusFilter, type FindingStatus } from "@/components/FindingStatusFilter";
+import { BulkTriageFilters, type ConfidenceFilter } from "@/components/BulkTriageFilters";
 import { DisciplineChecklist } from "@/components/DisciplineChecklist";
 import { SitePlanChecklist } from "@/components/SitePlanChecklist";
 import { getCountyRequirements } from "@/lib/county-requirements";
@@ -131,12 +132,15 @@ export default function PlanReviewDetail() {
   /** {totalSheets, renderedSheets} — populated after we open the PDFs. Used to show the "Reviewing first 10 of N" banner. */
   const [pageCapInfo, setPageCapInfo] = useState<{ total: number; rendered: number } | null>(null);
   /** Discrete AI run phase — drives the live step indicator instead of a generic spinner. */
-  const [aiPhase, setAiPhase] = useState<"idle" | "rendering" | "extracting_text" | "vision" | "validating" | "saving">("idle");
+  const [aiPhase, setAiPhase] = useState<"idle" | "rendering" | "extracting_text" | "vision" | "validating" | "refining" | "saving">("idle");
   const [renderingPages, setRenderingPages] = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);
   const findingRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const [findingStatuses, setFindingStatuses] = useState<Record<number, FindingStatus>>({});
   const [statusFilter, setStatusFilter] = useState<FindingStatus | "all">("all");
+  const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilter>("all");
+  const [disciplineFilter, setDisciplineFilter] = useState<string | "all">("all");
+  const [sheetFilter, setSheetFilter] = useState<string | "all">("all");
   const [showDiff, setShowDiff] = useState(false);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [aiCompleteFlash, setAiCompleteFlash] = useState<number | null>(null);
@@ -579,6 +583,119 @@ export default function PlanReviewDetail() {
         }
       }
 
+      // ── SECOND-PASS ZOOM REFINEMENT ──
+      // For findings still at medium/low pin_confidence, render a 2× zoomed
+      // crop of the implicated grid cell (+ neighbors) and ask the model to
+      // re-identify the element. If it returns a refined nearest_text, snap
+      // again — we already have the page's text-layer index in `pageTextItems`.
+      const displayImagesForRefine = pageImages.length > 0 ? pageImages : await renderDocumentPages(r);
+      const refineCandidates = findings
+        .map((f, i) => ({ f, i }))
+        .filter(({ f }) => {
+          const conf = f.markup?.pin_confidence;
+          return f.markup && (conf === "medium" || conf === "low") && !!f.markup.grid_cell;
+        });
+
+      if (refineCandidates.length > 0 && displayImagesForRefine.length > 0) {
+        setAiPhase("refining");
+        // Cache by `${fileIndex}` to avoid re-downloading the same PDF for many findings on the same file.
+        const fileCache = new Map<number, File>();
+        const getFileForIndex = async (fileIndex: number): Promise<File | null> => {
+          if (fileCache.has(fileIndex)) return fileCache.get(fileIndex)!;
+          const storedPath = r.file_urls[fileIndex];
+          if (!storedPath) return null;
+          const filePath = storedPath.includes('/storage/v1/')
+            ? storedPath.split('/documents/').pop() || storedPath
+            : storedPath;
+          const { data: signedData } = await supabase.storage.from("documents").createSignedUrl(filePath, 3600);
+          if (!signedData?.signedUrl) return null;
+          const blob = await (await fetch(signedData.signedUrl)).blob();
+          const fileName = decodeURIComponent(filePath.split("/").pop() || `doc-${fileIndex}.pdf`);
+          const file = new File([blob], fileName, { type: "application/pdf" });
+          fileCache.set(fileIndex, file);
+          return file;
+        };
+
+        // Limit to the first ~12 candidates so we don't blow latency on huge result sets.
+        const MAX_REFINE = 12;
+        const slice = refineCandidates.slice(0, MAX_REFINE);
+        let upgraded = 0;
+        for (const { f, i } of slice) {
+          try {
+            const pi = f.markup!.page_index;
+            const img = displayImagesForRefine[pi];
+            if (!img || img.fileIndex === undefined || img.pageInFile === undefined) continue;
+            const sourceFile = await getFileForIndex(img.fileIndex);
+            if (!sourceFile) continue;
+            const crop = await renderZoomCropForCell(sourceFile, img.pageInFile, f.markup!.grid_cell!, 280);
+            if (!crop) continue;
+
+            const result = await callAI({
+              action: "refine_finding_pin",
+              payload: {
+                description: f.description,
+                code_ref: f.code_ref,
+                grid_cell: f.markup!.grid_cell,
+                original_nearest_text: f.markup!.nearest_text || "",
+                images: [crop.base64],
+              },
+            });
+            let parsed: { nearest_text?: string; x?: number; y?: number; width?: number; height?: number; found?: boolean } | null = null;
+            try { parsed = JSON.parse(result); } catch {
+              const m = result.match(/\{[\s\S]*\}/);
+              if (m) try { parsed = JSON.parse(m[0]); } catch { parsed = null; }
+            }
+            if (!parsed || parsed.found === false) continue;
+
+            // First try snapping the refined nearest_text against the vector text layer.
+            const pageItems = pageTextItems[pi] || [];
+            const refinedText = (parsed.nearest_text || "").trim();
+            const cellCenter = gridCellToCenter(f.markup!.grid_cell);
+            let snappedToText = false;
+            let newX = f.markup!.x ?? 0;
+            let newY = f.markup!.y ?? 0;
+            const newW = f.markup!.width ?? 4;
+            const newH = f.markup!.height ?? 4;
+
+            if (refinedText && pageItems.length > 0) {
+              const hit = snapToNearestText(pageItems, refinedText, cellCenter);
+              if (hit) {
+                newX = Math.max(0, Math.min(100 - newW, hit.x - newW / 2));
+                newY = Math.max(0, Math.min(100 - newH, hit.y - newH / 2));
+                snappedToText = true;
+              }
+            }
+
+            // Fall back to converting the crop-relative coords back to page coords.
+            if (!snappedToText && typeof parsed.x === "number" && typeof parsed.y === "number") {
+              const cropPctX = Math.max(0, Math.min(100, parsed.x));
+              const cropPctY = Math.max(0, Math.min(100, parsed.y));
+              const pageX = crop.crop.x + (cropPctX / 100) * crop.crop.width;
+              const pageY = crop.crop.y + (cropPctY / 100) * crop.crop.height;
+              newX = Math.max(0, Math.min(100 - newW, pageX));
+              newY = Math.max(0, Math.min(100 - newH, pageY));
+            }
+
+            findings[i] = {
+              ...f,
+              markup: {
+                ...f.markup!,
+                x: newX,
+                y: newY,
+                nearest_text: refinedText || f.markup!.nearest_text,
+                pin_confidence: snappedToText ? "high" : "high", // refined → upgrade
+              },
+            };
+            upgraded++;
+          } catch (refineErr) {
+            console.warn("[ai-check] refine pass failed for finding", i, refineErr);
+          }
+        }
+        if (upgraded > 0) {
+          console.info(`[ai-check] refined ${upgraded}/${slice.length} low-confidence pins via 2× zoom`);
+        }
+      }
+
       setAiPhase("saving");
       const prevFindings = r.ai_findings || [];
 
@@ -586,7 +703,7 @@ export default function PlanReviewDetail() {
       // after we change prompts later. (Defensibility for FS 553.791.)
       const stampedFindings = findings.map((f) => ({
         ...f,
-        prompt_version: f.prompt_version ?? "v2.1-grid+text-snap",
+        prompt_version: f.prompt_version ?? "v2.2-grid+text-snap+zoom-refine",
         model_version: f.model_version ?? "google/gemini-2.5-pro",
       }));
 
@@ -792,10 +909,40 @@ export default function PlanReviewDetail() {
   
   const contractor = review.project?.contractor || null;
 
-  const filteredFindings = statusFilter === "all"
-    ? findings
-    : findings.filter((_, i) => (findingStatuses[i] || "open") === statusFilter);
+  // Compose all four filter dimensions: status × confidence × discipline × sheet.
+  const filteredFindings = findings.filter((f, i) => {
+    if (statusFilter !== "all" && (findingStatuses[i] || "open") !== statusFilter) return false;
+    if (confidenceFilter !== "all" && (f.markup?.pin_confidence || "low") !== confidenceFilter) return false;
+    if (disciplineFilter !== "all" && (f.discipline || "structural") !== disciplineFilter) return false;
+    if (sheetFilter !== "all" && (f.page || "Unknown").trim() !== sheetFilter) return false;
+    return true;
+  });
   const filteredGrouped = groupFindingsByDiscipline(filteredFindings);
+
+  // Compute counts for the filter chip strip (always against the full result set).
+  const confidenceCounts: Record<ConfidenceFilter, number> = {
+    all: findings.length,
+    high: findings.filter((f) => (f.markup?.pin_confidence || "low") === "high").length,
+    medium: findings.filter((f) => (f.markup?.pin_confidence || "low") === "medium").length,
+    low: findings.filter((f) => (f.markup?.pin_confidence || "low") === "low").length,
+  };
+  const disciplinesPresent = Array.from(new Set(findings.map((f) => f.discipline || "structural")))
+    .sort((a, b) => DISCIPLINE_ORDER.indexOf(a as typeof DISCIPLINE_ORDER[number]) - DISCIPLINE_ORDER.indexOf(b as typeof DISCIPLINE_ORDER[number]));
+  const sheetsPresent = Array.from(new Set(findings.map((f) => (f.page || "Unknown").trim()))).sort();
+
+  // Bulk-resolve helpers: act on the currently visible (filtered) result set.
+  const visibleIndices = findings.reduce<number[]>((acc, f, i) => {
+    if (filteredFindings.includes(f)) acc.push(i);
+    return acc;
+  }, []);
+  const allVisibleResolved = visibleIndices.length > 0 && visibleIndices.every((i) => findingStatuses[i] === "resolved");
+  const handleMarkVisibleResolved = () => {
+    if (visibleIndices.length === 0) return;
+    visibleIndices.forEach((i) => {
+      if (findingStatuses[i] !== "resolved") updateFindingStatus(i, "resolved");
+    });
+    toast.success(`Marked ${visibleIndices.length} finding${visibleIndices.length === 1 ? "" : "s"} resolved`);
+  };
 
   const criticalCount = findings.filter((f) => f.severity === "critical").length;
   const majorCount = findings.filter((f) => f.severity === "major").length;
@@ -900,6 +1047,7 @@ export default function PlanReviewDetail() {
                 {aiPhase === "extracting_text" && "Extracting text + dimensions from PDF vector layer…"}
                 {aiPhase === "vision" && "Running visual code review (this may take 60–120s)…"}
                 {aiPhase === "validating" && "Snapping pins to actual callouts and validating findings…"}
+                {aiPhase === "refining" && "Re-analyzing low-confidence pins at 2× zoom for precision…"}
                 {aiPhase === "saving" && "Saving findings…"}
                 {aiPhase === "idle" && "Preparing analysis…"}
               </p>
@@ -1170,10 +1318,22 @@ export default function PlanReviewDetail() {
                     )}
                     {hasFindings && (
                       <>
-                        <FindingStatusFilter
-                          activeFilter={statusFilter}
-                          counts={{ all: findings.length, open: openCount, resolved: resolvedCount, deferred: deferredCount }}
-                          onFilterChange={setStatusFilter}
+                        <BulkTriageFilters
+                          statusCounts={{ all: findings.length, open: openCount, resolved: resolvedCount, deferred: deferredCount }}
+                          statusFilter={statusFilter}
+                          onStatusFilterChange={setStatusFilter}
+                          confidenceCounts={confidenceCounts}
+                          confidenceFilter={confidenceFilter}
+                          onConfidenceFilterChange={setConfidenceFilter}
+                          disciplines={disciplinesPresent}
+                          disciplineFilter={disciplineFilter}
+                          onDisciplineFilterChange={setDisciplineFilter}
+                          sheets={sheetsPresent}
+                          sheetFilter={sheetFilter}
+                          onSheetFilterChange={setSheetFilter}
+                          visibleCount={filteredFindings.length}
+                          allVisibleResolved={allVisibleResolved}
+                          onMarkVisibleResolved={handleMarkVisibleResolved}
                         />
                         {hasRoundDiff && (
                           <div className="rounded-md border border-accent/30 bg-accent/5 px-2.5 py-1.5 flex items-center gap-3 text-2xs">

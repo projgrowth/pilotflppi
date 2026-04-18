@@ -254,6 +254,22 @@ Always:
 - Mention relevant Florida Statutes if applicable
 - Provide practical guidance for compliance`,
 
+  refine_finding_pin: `You are refining the pin location for a SINGLE plan-review finding using a 2× zoomed crop of the original sheet.
+
+You will receive ONE image: a high-resolution crop of approximately 30% of the original page (a 3×3 grid-cell window centered on the cell where the finding was originally pinned).
+
+You will also receive context about the finding: its description, code_ref, the original grid_cell label, and the original nearest_text guess.
+
+YOUR JOB: Look at the zoomed crop and return the EXACT element the finding refers to.
+
+Return:
+- nearest_text: the literal short string (≤40 chars) on the sheet you can read AT or IMMEDIATELY ADJACENT to the actual element. Examples: a callout bubble number ("12"), a dimension ("4'-0\\""), a sheet-note reference ("NOTE 4"), a tag ("TYP"), a schedule row label ("D-1"). If you cannot identify the element with confidence, return "".
+- x, y: top-left of a small bounding box on THE CROP, as percentages of the CROP (0-100). NOT of the full page.
+- width, height: dimensions of the box on the crop, as percentages of the crop. Pin: ≤ 12% width AND ≤ 12% height (the crop is ~3× zoomed in, so a 4% pin on the full sheet equals ~12% of the crop).
+- found: boolean — true if you confidently located the element; false if the crop does not actually contain it.
+
+Return ONLY the JSON, no preface.`,
+
   fbc_county_chat: `You are an expert Florida Building Code (FBC 2023, 8th Edition) consultant specializing in county-specific requirements for Private Providers operating under F.S. 553.791.
 
 You will receive the selected county's requirements as context. Use this to tailor every answer to that county's specific:
