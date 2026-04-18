@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { callAI, streamAI } from "@/lib/ai";
 import { renderPDFPagesToImages, renderPDFPagesForVisionWithGrid, gridCellToCenter, extractPagesTextItems, snapToNearestText, getPDFPageCount, renderZoomCropForCell, type PDFPageImage, type PDFTextItem } from "@/lib/pdf-utils";
+import { chunkPromises } from "@/lib/utils";
 import { useFirmSettings } from "@/hooks/useFirmSettings";
 import { useFindingHistory, logFindingStatusChange } from "@/hooks/useFindingHistory";
 import { useAuth } from "@/contexts/AuthContext";
@@ -527,6 +528,11 @@ export default function PlanReviewDetail() {
             try { findings = match ? JSON.parse(match[0]) : []; } catch { findings = []; }
           }
 
+          // Stamp every finding with a stable UUID at parse time. Status,
+          // history, crop URLs, and corrections lookups all key off this
+          // forever — never the array index.
+          findings = findings.map((f) => ({ ...f, finding_id: f.finding_id || crypto.randomUUID() }));
+
           setAiPhase("validating");
           writeAiProgress(r.id, "validating");
           // ── Validate & repair page_index, anchor pin to grid_cell, then SNAP to vector text ──
@@ -657,6 +663,8 @@ export default function PlanReviewDetail() {
             if (match) findings = JSON.parse(match[0]);
           } catch { findings = []; }
         }
+        // Fallback path also needs stable ids.
+        findings = findings.map((f) => ({ ...f, finding_id: f.finding_id || crypto.randomUUID() }));
       }
 
       // ── SECOND-PASS ZOOM REFINEMENT ──
@@ -706,107 +714,111 @@ export default function PlanReviewDetail() {
         // Limit to the first ~12 candidates so we don't blow latency on huge result sets.
         const MAX_REFINE = 12;
         const slice = refineCandidates.slice(0, MAX_REFINE);
-        let upgraded = 0;
         let processed = 0;
-        for (const { f, i } of slice) {
+
+        // Parallelize 3-at-a-time. Each worker is independent (different finding,
+        // different crop, different AI call), so this is ~3x faster end-to-end
+        // without overwhelming the gateway. Errors per item are isolated.
+        const refineResults = await chunkPromises(slice, 3, async ({ f, i }) => {
+          const pi = f.markup!.page_index;
+          const img = displayImagesForRefine[pi];
+          if (!img || img.fileIndex === undefined || img.pageInFile === undefined) return null;
+          const sourceFile = await getFileForIndex(img.fileIndex);
+          if (!sourceFile) return null;
+          const crop = await renderZoomCropForCell(sourceFile, img.pageInFile, f.markup!.grid_cell!, 280);
+          if (!crop) return null;
+
+          const result = await callAI({
+            action: "refine_finding_pin",
+            payload: {
+              description: f.description,
+              code_ref: f.code_ref,
+              grid_cell: f.markup!.grid_cell,
+              original_nearest_text: f.markup!.nearest_text || "",
+              images: [crop.base64],
+            },
+          });
+          let parsed: { nearest_text?: string; x?: number; y?: number; width?: number; height?: number; found?: boolean } | null = null;
+          try { parsed = JSON.parse(result); } catch {
+            const m = result.match(/\{[\s\S]*\}/);
+            if (m) try { parsed = JSON.parse(m[0]); } catch { parsed = null; }
+          }
+          if (!parsed || parsed.found === false) return null;
+
+          const pageItems = pageTextItems[pi] || [];
+          const refinedText = (parsed.nearest_text || "").trim();
+          const cellCenter = gridCellToCenter(f.markup!.grid_cell);
+          let snappedToText = false;
+          let newX = f.markup!.x ?? 0;
+          let newY = f.markup!.y ?? 0;
+          const newW = f.markup!.width ?? 4;
+          const newH = f.markup!.height ?? 4;
+
+          if (refinedText && pageItems.length > 0) {
+            const hit = snapToNearestText(pageItems, refinedText, cellCenter);
+            if (hit) {
+              newX = Math.max(0, Math.min(100 - newW, hit.x - newW / 2));
+              newY = Math.max(0, Math.min(100 - newH, hit.y - newH / 2));
+              snappedToText = true;
+            }
+          }
+          if (!snappedToText && typeof parsed.x === "number" && typeof parsed.y === "number") {
+            const cropPctX = Math.max(0, Math.min(100, parsed.x));
+            const cropPctY = Math.max(0, Math.min(100, parsed.y));
+            const pageX = crop.crop.x + (cropPctX / 100) * crop.crop.width;
+            const pageY = crop.crop.y + (cropPctY / 100) * crop.crop.height;
+            newX = Math.max(0, Math.min(100 - newW, pageX));
+            newY = Math.max(0, Math.min(100 - newH, pageY));
+          }
+
+          let cropUrl: string | undefined;
           try {
-            const pi = f.markup!.page_index;
-            const img = displayImagesForRefine[pi];
-            if (!img || img.fileIndex === undefined || img.pageInFile === undefined) continue;
-            const sourceFile = await getFileForIndex(img.fileIndex);
-            if (!sourceFile) continue;
-            const crop = await renderZoomCropForCell(sourceFile, img.pageInFile, f.markup!.grid_cell!, 280);
-            if (!crop) continue;
-
-            const result = await callAI({
-              action: "refine_finding_pin",
-              payload: {
-                description: f.description,
-                code_ref: f.code_ref,
-                grid_cell: f.markup!.grid_cell,
-                original_nearest_text: f.markup!.nearest_text || "",
-                images: [crop.base64],
-              },
-            });
-            let parsed: { nearest_text?: string; x?: number; y?: number; width?: number; height?: number; found?: boolean } | null = null;
-            try { parsed = JSON.parse(result); } catch {
-              const m = result.match(/\{[\s\S]*\}/);
-              if (m) try { parsed = JSON.parse(m[0]); } catch { parsed = null; }
-            }
-            if (!parsed || parsed.found === false) continue;
-
-            // First try snapping the refined nearest_text against the vector text layer.
-            const pageItems = pageTextItems[pi] || [];
-            const refinedText = (parsed.nearest_text || "").trim();
-            const cellCenter = gridCellToCenter(f.markup!.grid_cell);
-            let snappedToText = false;
-            let newX = f.markup!.x ?? 0;
-            let newY = f.markup!.y ?? 0;
-            const newW = f.markup!.width ?? 4;
-            const newH = f.markup!.height ?? 4;
-
-            if (refinedText && pageItems.length > 0) {
-              const hit = snapToNearestText(pageItems, refinedText, cellCenter);
-              if (hit) {
-                newX = Math.max(0, Math.min(100 - newW, hit.x - newW / 2));
-                newY = Math.max(0, Math.min(100 - newH, hit.y - newH / 2));
-                snappedToText = true;
-              }
-            }
-
-            // Fall back to converting the crop-relative coords back to page coords.
-            if (!snappedToText && typeof parsed.x === "number" && typeof parsed.y === "number") {
-              const cropPctX = Math.max(0, Math.min(100, parsed.x));
-              const cropPctY = Math.max(0, Math.min(100, parsed.y));
-              const pageX = crop.crop.x + (cropPctX / 100) * crop.crop.width;
-              const pageY = crop.crop.y + (cropPctY / 100) * crop.crop.height;
-              newX = Math.max(0, Math.min(100 - newW, pageX));
-              newY = Math.max(0, Math.min(100 - newH, pageY));
-            }
-
-            // ── Persist the crop to Storage as image evidence for this finding ──
-            // Building officials challenge findings; the reviewer needs to show the
-            // exact pixels the AI looked at. We persist the JPEG already in memory
-            // so this is essentially free. Best-effort — never block the run.
-            let cropUrl: string | undefined;
-            try {
-              const cropBlob = dataUrlToBlob(crop.base64);
-              const cropPath = `plan-reviews/${r.id}/finding-crops/${i}-${Date.now()}.jpg`;
-              const { error: upErr } = await supabase.storage
+            const cropBlob = dataUrlToBlob(crop.base64);
+            // Crop file path keys off finding_id (stable) instead of array index (volatile).
+            const cropPath = `plan-reviews/${r.id}/finding-crops/${f.finding_id || i}.jpg`;
+            const { error: upErr } = await supabase.storage
+              .from("documents")
+              .upload(cropPath, cropBlob, { upsert: true, contentType: "image/jpeg" });
+            if (!upErr) {
+              const { data: signed } = await supabase.storage
                 .from("documents")
-                .upload(cropPath, cropBlob, { upsert: true, contentType: "image/jpeg" });
-              if (!upErr) {
-                const { data: signed } = await supabase.storage
-                  .from("documents")
-                  .createSignedUrl(cropPath, 60 * 60 * 24 * 365); // 1y signed URL
-                cropUrl = signed?.signedUrl;
-              }
-            } catch (uploadErr) {
-              console.warn("[ai-check] crop upload failed for finding", i, uploadErr);
+                .createSignedUrl(cropPath, 60 * 60 * 24 * 365);
+              cropUrl = signed?.signedUrl;
             }
+          } catch (uploadErr) {
+            console.warn("[ai-check] crop upload failed for finding", i, uploadErr);
+          }
 
-            findings[i] = {
+          return {
+            i,
+            updated: {
               ...f,
               markup: {
                 ...f.markup!,
                 x: newX,
                 y: newY,
                 nearest_text: refinedText || f.markup!.nearest_text,
-                pin_confidence: snappedToText ? "high" : "high", // refined → upgrade
+                pin_confidence: "high" as const,
               },
               crop_url: cropUrl ?? f.crop_url,
-            };
+            },
+          };
+        });
+
+        // Apply results in original order; tick progress as each completes.
+        let upgraded = 0;
+        for (const r2 of refineResults) {
+          processed++;
+          if ("value" in r2 && r2.value) {
+            findings[r2.value.i] = r2.value.updated;
             upgraded++;
-          } catch (refineErr) {
-            console.warn("[ai-check] refine pass failed for finding", i, refineErr);
-          } finally {
-            processed++;
-            // Persist incremental progress so a reopened tab can show "Refining 7/12…".
-            writeAiProgress(r.id, "refining", { current: processed, total: slice.length });
+          } else if ("error" in r2) {
+            console.warn("[ai-check] refine pass failed", r2.error);
           }
+          writeAiProgress(r.id, "refining", { current: processed, total: slice.length });
         }
         if (upgraded > 0) {
-          console.info(`[ai-check] refined ${upgraded}/${slice.length} low-confidence pins via 2× zoom`);
+          console.info(`[ai-check] refined ${upgraded}/${slice.length} low-confidence pins via 2× parallel zoom`);
         }
       }
 

@@ -21,6 +21,7 @@ export type Database = {
           created_at: string
           description: string
           event_type: string
+          firm_id: string | null
           id: string
           metadata: Json | null
           project_id: string | null
@@ -31,6 +32,7 @@ export type Database = {
           created_at?: string
           description: string
           event_type: string
+          firm_id?: string | null
           id?: string
           metadata?: Json | null
           project_id?: string | null
@@ -41,6 +43,7 @@ export type Database = {
           created_at?: string
           description?: string
           event_type?: string
+          firm_id?: string | null
           id?: string
           metadata?: Json | null
           project_id?: string | null
@@ -60,6 +63,7 @@ export type Database = {
           confidence_score: number | null
           correction_augmented: boolean | null
           created_at: string | null
+          firm_id: string | null
           id: string
           input_data: Json | null
           model_version: string | null
@@ -71,6 +75,7 @@ export type Database = {
           confidence_score?: number | null
           correction_augmented?: boolean | null
           created_at?: string | null
+          firm_id?: string | null
           id?: string
           input_data?: Json | null
           model_version?: string | null
@@ -82,6 +87,7 @@ export type Database = {
           confidence_score?: number | null
           correction_augmented?: boolean | null
           created_at?: string | null
+          firm_id?: string | null
           id?: string
           input_data?: Json | null
           model_version?: string | null
@@ -103,6 +109,7 @@ export type Database = {
         Row: {
           created_at: string
           email: string | null
+          firm_id: string | null
           id: string
           license_number: string | null
           name: string
@@ -114,6 +121,7 @@ export type Database = {
         Insert: {
           created_at?: string
           email?: string | null
+          firm_id?: string | null
           id?: string
           license_number?: string | null
           name: string
@@ -125,6 +133,7 @@ export type Database = {
         Update: {
           created_at?: string
           email?: string | null
+          firm_id?: string | null
           id?: string
           license_number?: string | null
           name?: string
@@ -142,6 +151,7 @@ export type Database = {
           correction_type: string | null
           created_at: string | null
           fbc_section: string | null
+          firm_id: string | null
           id: string
           original_value: string | null
           output_id: string | null
@@ -153,6 +163,7 @@ export type Database = {
           correction_type?: string | null
           created_at?: string | null
           fbc_section?: string | null
+          firm_id?: string | null
           id?: string
           original_value?: string | null
           output_id?: string | null
@@ -164,6 +175,7 @@ export type Database = {
           correction_type?: string | null
           created_at?: string | null
           fbc_section?: string | null
+          firm_id?: string | null
           id?: string
           original_value?: string | null
           output_id?: string | null
@@ -183,6 +195,7 @@ export type Database = {
         Row: {
           acknowledged: boolean
           alert_type: string
+          firm_id: string | null
           id: string
           project_id: string
           triggered_at: string
@@ -190,6 +203,7 @@ export type Database = {
         Insert: {
           acknowledged?: boolean
           alert_type: string
+          firm_id?: string | null
           id?: string
           project_id: string
           triggered_at?: string
@@ -197,6 +211,7 @@ export type Database = {
         Update: {
           acknowledged?: boolean
           alert_type?: string
+          firm_id?: string | null
           id?: string
           project_id?: string
           triggered_at?: string
@@ -217,6 +232,7 @@ export type Database = {
           description: string | null
           discipline: string | null
           fbc_section: string
+          firm_id: string | null
           id: string
           is_florida_specific: boolean | null
           severity: string | null
@@ -228,6 +244,7 @@ export type Database = {
           description?: string | null
           discipline?: string | null
           fbc_section: string
+          firm_id?: string | null
           id?: string
           is_florida_specific?: boolean | null
           severity?: string | null
@@ -239,6 +256,7 @@ export type Database = {
           description?: string | null
           discipline?: string | null
           fbc_section?: string
+          firm_id?: string | null
           id?: string
           is_florida_specific?: boolean | null
           severity?: string | null
@@ -253,6 +271,7 @@ export type Database = {
           county: string
           created_at: string
           description: string
+          firm_id: string | null
           id: string
           is_active: boolean
           service_type: string
@@ -265,6 +284,7 @@ export type Database = {
           county?: string
           created_at?: string
           description?: string
+          firm_id?: string | null
           id?: string
           is_active?: boolean
           service_type?: string
@@ -277,6 +297,7 @@ export type Database = {
           county?: string
           created_at?: string
           description?: string
+          firm_id?: string | null
           id?: string
           is_active?: boolean
           service_type?: string
@@ -291,6 +312,7 @@ export type Database = {
           changed_at: string
           changed_by: string
           finding_index: number
+          firm_id: string | null
           id: string
           new_status: string
           note: string | null
@@ -301,6 +323,7 @@ export type Database = {
           changed_at?: string
           changed_by: string
           finding_index: number
+          firm_id?: string | null
           id?: string
           new_status: string
           note?: string | null
@@ -311,6 +334,7 @@ export type Database = {
           changed_at?: string
           changed_by?: string
           finding_index?: number
+          firm_id?: string | null
           id?: string
           new_status?: string
           note?: string | null
@@ -323,6 +347,35 @@ export type Database = {
             columns: ["plan_review_id"]
             isOneToOne: false
             referencedRelation: "plan_reviews"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      firm_members: {
+        Row: {
+          created_at: string
+          firm_id: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          firm_id: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          firm_id?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "firm_members_firm_id_fkey"
+            columns: ["firm_id"]
+            isOneToOne: false
+            referencedRelation: "firms"
             referencedColumns: ["id"]
           },
         ]
@@ -372,6 +425,27 @@ export type Database = {
         }
         Relationships: []
       }
+      firms: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          owner_user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          owner_user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          owner_user_id?: string | null
+        }
+        Relationships: []
+      }
       flag_embeddings: {
         Row: {
           correction_id: string | null
@@ -405,6 +479,7 @@ export type Database = {
         Row: {
           certificate_issued: boolean
           created_at: string
+          firm_id: string | null
           id: string
           inspection_type: string
           inspector_id: string | null
@@ -419,6 +494,7 @@ export type Database = {
         Insert: {
           certificate_issued?: boolean
           created_at?: string
+          firm_id?: string | null
           id?: string
           inspection_type?: string
           inspector_id?: string | null
@@ -433,6 +509,7 @@ export type Database = {
         Update: {
           certificate_issued?: boolean
           created_at?: string
+          firm_id?: string | null
           id?: string
           inspection_type?: string
           inspector_id?: string | null
@@ -458,6 +535,7 @@ export type Database = {
         Row: {
           created_at: string
           description: string
+          firm_id: string | null
           id: string
           invoice_id: string
           quantity: number
@@ -469,6 +547,7 @@ export type Database = {
         Insert: {
           created_at?: string
           description?: string
+          firm_id?: string | null
           id?: string
           invoice_id: string
           quantity?: number
@@ -480,6 +559,7 @@ export type Database = {
         Update: {
           created_at?: string
           description?: string
+          firm_id?: string | null
           id?: string
           invoice_id?: string
           quantity?: number
@@ -505,6 +585,7 @@ export type Database = {
           created_at: string
           custom_footer: string
           due_at: string | null
+          firm_id: string | null
           id: string
           invoice_number: string
           issued_at: string | null
@@ -525,6 +606,7 @@ export type Database = {
           created_at?: string
           custom_footer?: string
           due_at?: string | null
+          firm_id?: string | null
           id?: string
           invoice_number?: string
           issued_at?: string | null
@@ -545,6 +627,7 @@ export type Database = {
           created_at?: string
           custom_footer?: string
           due_at?: string | null
+          firm_id?: string | null
           id?: string
           invoice_number?: string
           issued_at?: string | null
@@ -585,6 +668,7 @@ export type Database = {
           contact_name: string | null
           contact_phone: string | null
           created_at: string
+          firm_id: string | null
           id: string
           milestone_deadline: string | null
           status: Database["public"]["Enums"]["milestone_status"]
@@ -599,6 +683,7 @@ export type Database = {
           contact_name?: string | null
           contact_phone?: string | null
           created_at?: string
+          firm_id?: string | null
           id?: string
           milestone_deadline?: string | null
           status?: Database["public"]["Enums"]["milestone_status"]
@@ -613,6 +698,7 @@ export type Database = {
           contact_name?: string | null
           contact_phone?: string | null
           created_at?: string
+          firm_id?: string | null
           id?: string
           milestone_deadline?: string | null
           status?: Database["public"]["Enums"]["milestone_status"]
@@ -629,6 +715,7 @@ export type Database = {
           county: string
           created_at: string
           detected_at: string
+          firm_id: string | null
           id: string
           outreach_status: Database["public"]["Enums"]["outreach_status"]
           permit_type: string
@@ -642,6 +729,7 @@ export type Database = {
           county?: string
           created_at?: string
           detected_at?: string
+          firm_id?: string | null
           id?: string
           outreach_status?: Database["public"]["Enums"]["outreach_status"]
           permit_type?: string
@@ -655,6 +743,7 @@ export type Database = {
           county?: string
           created_at?: string
           detected_at?: string
+          firm_id?: string | null
           id?: string
           outreach_status?: Database["public"]["Enums"]["outreach_status"]
           permit_type?: string
@@ -674,6 +763,7 @@ export type Database = {
       plan_review_files: {
         Row: {
           file_path: string
+          firm_id: string | null
           id: string
           plan_review_id: string
           round: number
@@ -682,6 +772,7 @@ export type Database = {
         }
         Insert: {
           file_path: string
+          firm_id?: string | null
           id?: string
           plan_review_id: string
           round?: number
@@ -690,6 +781,7 @@ export type Database = {
         }
         Update: {
           file_path?: string
+          firm_id?: string | null
           id?: string
           plan_review_id?: string
           round?: number
@@ -716,6 +808,7 @@ export type Database = {
           fbc_edition: string | null
           file_urls: string[]
           finding_statuses: Json | null
+          firm_id: string | null
           id: string
           previous_findings: Json | null
           project_id: string
@@ -735,6 +828,7 @@ export type Database = {
           fbc_edition?: string | null
           file_urls?: string[]
           finding_statuses?: Json | null
+          firm_id?: string | null
           id?: string
           previous_findings?: Json | null
           project_id: string
@@ -754,6 +848,7 @@ export type Database = {
           fbc_edition?: string | null
           file_urls?: string[]
           finding_statuses?: Json | null
+          firm_id?: string | null
           id?: string
           previous_findings?: Json | null
           project_id?: string
@@ -809,6 +904,7 @@ export type Database = {
           county: string
           created_at: string
           deadline_at: string | null
+          firm_id: string | null
           hold_reason: string | null
           id: string
           inspection_clock_started_at: string | null
@@ -833,6 +929,7 @@ export type Database = {
           county?: string
           created_at?: string
           deadline_at?: string | null
+          firm_id?: string | null
           hold_reason?: string | null
           id?: string
           inspection_clock_started_at?: string | null
@@ -857,6 +954,7 @@ export type Database = {
           county?: string
           created_at?: string
           deadline_at?: string | null
+          firm_id?: string | null
           hold_reason?: string | null
           id?: string
           inspection_clock_started_at?: string | null
@@ -891,6 +989,7 @@ export type Database = {
           description: string | null
           detail_ref: string | null
           fbc_section: string | null
+          firm_id: string | null
           id: string
           project_id: string | null
           resolved_at: string | null
@@ -905,6 +1004,7 @@ export type Database = {
           description?: string | null
           detail_ref?: string | null
           fbc_section?: string | null
+          firm_id?: string | null
           id?: string
           project_id?: string | null
           resolved_at?: string | null
@@ -919,6 +1019,7 @@ export type Database = {
           description?: string | null
           detail_ref?: string | null
           fbc_section?: string | null
+          firm_id?: string | null
           id?: string
           project_id?: string | null
           resolved_at?: string | null
@@ -941,6 +1042,7 @@ export type Database = {
         Row: {
           acknowledged: boolean
           alert_type: string
+          firm_id: string | null
           id: string
           project_id: string
           triggered_at: string
@@ -948,6 +1050,7 @@ export type Database = {
         Insert: {
           acknowledged?: boolean
           alert_type: string
+          firm_id?: string | null
           id?: string
           project_id: string
           triggered_at?: string
@@ -955,6 +1058,7 @@ export type Database = {
         Update: {
           acknowledged?: boolean
           alert_type?: string
+          firm_id?: string | null
           id?: string
           project_id?: string
           triggered_at?: string
@@ -1008,6 +1112,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      user_firm_id: { Args: { _user: string }; Returns: string }
     }
     Enums: {
       app_role: "admin" | "reviewer" | "qc" | "viewer"

@@ -40,6 +40,10 @@ export interface MarkupData {
 }
 
 export interface Finding {
+  /** Stable per-finding UUID assigned at parse time. Status, history, crops,
+   *  and corrections lookups all key off this — never the array index. Old
+   *  data without an id is auto-healed on next read (see PlanReviewDetail). */
+  finding_id?: string;
   severity: string;
   discipline?: string;
   code_ref: string;
