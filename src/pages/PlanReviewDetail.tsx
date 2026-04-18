@@ -146,6 +146,25 @@ export default function PlanReviewDetail() {
   const [aiCompleteFlash, setAiCompleteFlash] = useState<number | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [repositioningIndex, setRepositioningIndex] = useState<number | null>(null);
+  /** True when we detected another tab is mid-run on this review and we're showing
+   *  a "Resuming…" banner backed by realtime. Disables the "Run AI Check" button. */
+  const [resumingFromOtherTab, setResumingFromOtherTab] = useState(false);
+
+  /** Persist a phase transition so a fresh tab can show a "Resuming…" banner if
+   *  the user closes the original. Best-effort — never fails the run. */
+  const writeAiProgress = useCallback(async (
+    reviewId: string,
+    phase: string,
+    extra: Record<string, unknown> = {}
+  ) => {
+    try {
+      await supabase.from("plan_reviews").update({
+        ai_run_progress: { phase, updated_at: new Date().toISOString(), ...extra },
+      }).eq("id", reviewId);
+    } catch {
+      // Swallow — progress writes must never break the AI run itself.
+    }
+  }, []);
 
   const handleRepositionConfirm = useCallback(async (idx: number, newMarkup: { page_index: number; x: number; y: number; width: number; height: number }) => {
     if (!review) return;
