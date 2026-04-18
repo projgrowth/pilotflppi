@@ -809,10 +809,12 @@ export default function PlanReviewDetail() {
         let upgraded = 0;
         for (const r2 of refineResults) {
           processed++;
-          if (r2.ok && r2.value) {
-            findings[r2.value.i] = r2.value.updated;
-            upgraded++;
-          } else if (!r2.ok) {
+          if (r2.ok) {
+            if (r2.value) {
+              findings[r2.value.i] = r2.value.updated;
+              upgraded++;
+            }
+          } else {
             console.warn("[ai-check] refine pass failed", r2.error);
           }
           writeAiProgress(r.id, "refining", { current: processed, total: slice.length });
