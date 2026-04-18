@@ -1,14 +1,4 @@
 
-The user wants me to verify the foundation hardening changes end-to-end on the preview. This requires browser automation + a build check. I'm in plan mode (read-only), so I need to present a plan first.
+The user is on `/plan-review/bf25856a-53e2-44eb-93eb-2b0884c4a808` — the PlanReviewDetail page. They want a rethink of the UI to feel more intuitive, natural, less busy. Show only necessary options.
 
-Let me keep this tight — the user knows what they want.
-
-Verification scope:
-1. Build/type check is clean
-2. Open plan review at current route
-3. Run AI check, observe parallel refine reporting
-4. Verify image crops render under "Why?"
-5. Confirm no regressions from tenancy/finding_id/parallel changes
-6. Report findings
-
-I should also do a quick read of the current PlanReviewDetail to know what to look for in the phase indicator (current/total format).
+Let me look at the current state of that page and its top bar to understand what's actually on screen.
