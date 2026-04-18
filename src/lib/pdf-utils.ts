@@ -323,6 +323,74 @@ export async function renderTitleBlock(file: File): Promise<string> {
 }
 
 /**
+ * Render a high-DPI crop of a specific grid cell + its 8 neighbors (3×3 region)
+ * from a single PDF page. Used for the SECOND-PASS zoom on low-confidence pins:
+ * the model sees ~30% of the sheet at effectively 4× the pixel density of the
+ * first pass, so previously unreadable callouts become legible.
+ *
+ * Returns: {
+ *   base64: data:image/jpeg crop,
+ *   crop: {x,y,width,height} in PERCENT of the full page (so we can transform
+ *         model-returned coords back into full-page coordinates).
+ * }
+ */
+export async function renderZoomCropForCell(
+  file: File,
+  pageInFile: number,
+  gridCell: string,
+  dpi = 280
+): Promise<{ base64: string; crop: { x: number; y: number; width: number; height: number } } | null> {
+  const m = (gridCell || "").trim().toUpperCase().match(/^([A-J])([0-9])$/);
+  if (!m) return null;
+  const rowIdx = ["A","B","C","D","E","F","G","H","I","J"].indexOf(m[1]);
+  const colIdx = parseInt(m[2], 10);
+  if (rowIdx < 0 || isNaN(colIdx)) return null;
+
+  // Compute a 3×3 cell window centered on the target cell, clamped to [0,100].
+  const cropX = Math.max(0, (colIdx - 1) * 10);
+  const cropY = Math.max(0, (rowIdx - 1) * 10);
+  const cropRight = Math.min(100, (colIdx + 2) * 10);
+  const cropBottom = Math.min(100, (rowIdx + 2) * 10);
+  const cropW = cropRight - cropX;
+  const cropH = cropBottom - cropY;
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  if (pageInFile < 1 || pageInFile > pdf.numPages) return null;
+  const page = await pdf.getPage(pageInFile);
+  const viewport = page.getViewport({ scale: dpi / 72 });
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const ctx = canvas.getContext("2d")!;
+  await page.render({ canvasContext: ctx, viewport }).promise;
+
+  const sx = Math.round((cropX / 100) * viewport.width);
+  const sy = Math.round((cropY / 100) * viewport.height);
+  const sw = Math.round((cropW / 100) * viewport.width);
+  const sh = Math.round((cropH / 100) * viewport.height);
+
+  const out = document.createElement("canvas");
+  out.width = sw;
+  out.height = sh;
+  const octx = out.getContext("2d")!;
+  octx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+
+  // Cleanup full-page canvas
+  canvas.width = 0;
+  canvas.height = 0;
+
+  const base64 = out.toDataURL("image/jpeg", 0.85);
+  out.width = 0;
+  out.height = 0;
+
+  return {
+    base64,
+    crop: { x: cropX, y: cropY, width: cropW, height: cropH },
+  };
+}
+
+/**
  * Get page count without rendering.
  */
 export async function getPDFPageCount(file: File): Promise<number> {
