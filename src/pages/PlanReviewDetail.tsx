@@ -909,10 +909,40 @@ export default function PlanReviewDetail() {
   
   const contractor = review.project?.contractor || null;
 
-  const filteredFindings = statusFilter === "all"
-    ? findings
-    : findings.filter((_, i) => (findingStatuses[i] || "open") === statusFilter);
+  // Compose all four filter dimensions: status × confidence × discipline × sheet.
+  const filteredFindings = findings.filter((f, i) => {
+    if (statusFilter !== "all" && (findingStatuses[i] || "open") !== statusFilter) return false;
+    if (confidenceFilter !== "all" && (f.markup?.pin_confidence || "low") !== confidenceFilter) return false;
+    if (disciplineFilter !== "all" && (f.discipline || "structural") !== disciplineFilter) return false;
+    if (sheetFilter !== "all" && (f.page || "Unknown").trim() !== sheetFilter) return false;
+    return true;
+  });
   const filteredGrouped = groupFindingsByDiscipline(filteredFindings);
+
+  // Compute counts for the filter chip strip (always against the full result set).
+  const confidenceCounts: Record<ConfidenceFilter, number> = {
+    all: findings.length,
+    high: findings.filter((f) => (f.markup?.pin_confidence || "low") === "high").length,
+    medium: findings.filter((f) => (f.markup?.pin_confidence || "low") === "medium").length,
+    low: findings.filter((f) => (f.markup?.pin_confidence || "low") === "low").length,
+  };
+  const disciplinesPresent = Array.from(new Set(findings.map((f) => f.discipline || "structural")))
+    .sort((a, b) => DISCIPLINE_ORDER.indexOf(a as typeof DISCIPLINE_ORDER[number]) - DISCIPLINE_ORDER.indexOf(b as typeof DISCIPLINE_ORDER[number]));
+  const sheetsPresent = Array.from(new Set(findings.map((f) => (f.page || "Unknown").trim()))).sort();
+
+  // Bulk-resolve helpers: act on the currently visible (filtered) result set.
+  const visibleIndices = findings.reduce<number[]>((acc, f, i) => {
+    if (filteredFindings.includes(f)) acc.push(i);
+    return acc;
+  }, []);
+  const allVisibleResolved = visibleIndices.length > 0 && visibleIndices.every((i) => findingStatuses[i] === "resolved");
+  const handleMarkVisibleResolved = () => {
+    if (visibleIndices.length === 0) return;
+    visibleIndices.forEach((i) => {
+      if (findingStatuses[i] !== "resolved") updateFindingStatus(i, "resolved");
+    });
+    toast.success(`Marked ${visibleIndices.length} finding${visibleIndices.length === 1 ? "" : "s"} resolved`);
+  };
 
   const criticalCount = findings.filter((f) => f.severity === "critical").length;
   const majorCount = findings.filter((f) => f.severity === "major").length;
@@ -1017,6 +1047,7 @@ export default function PlanReviewDetail() {
                 {aiPhase === "extracting_text" && "Extracting text + dimensions from PDF vector layer…"}
                 {aiPhase === "vision" && "Running visual code review (this may take 60–120s)…"}
                 {aiPhase === "validating" && "Snapping pins to actual callouts and validating findings…"}
+                {aiPhase === "refining" && "Re-analyzing low-confidence pins at 2× zoom for precision…"}
                 {aiPhase === "saving" && "Saving findings…"}
                 {aiPhase === "idle" && "Preparing analysis…"}
               </p>
