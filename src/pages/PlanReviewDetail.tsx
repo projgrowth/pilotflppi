@@ -206,7 +206,8 @@ export default function PlanReviewDetail() {
     }
   }, [review]);
 
-  // Auto-trigger AI check for newly created pending reviews
+  // Auto-trigger AI check for newly created pending reviews — but only if no
+  // other tab is mid-run on this review. The resume effect below detects that.
   const hasAutoTriggered = useRef(false);
   useEffect(() => {
     if (
@@ -214,12 +215,64 @@ export default function PlanReviewDetail() {
       review.ai_check_status === "pending" &&
       review.file_urls?.length > 0 &&
       !aiRunning &&
-      !hasAutoTriggered.current
+      !hasAutoTriggered.current &&
+      !resumingFromOtherTab
     ) {
       hasAutoTriggered.current = true;
       runAICheck(review);
     }
-  }, [review]);
+  }, [review, resumingFromOtherTab]);
+
+  // ── Cross-tab resume: if this review is already "running" elsewhere AND its
+  // ai_run_progress was updated within the last 2 minutes, treat it as a live
+  // run owned by another tab. Subscribe to realtime updates so we mirror its
+  // phase indicator, and disable the local "Run AI Check" button to prevent
+  // double-spending Lovable AI credits. After 2 min of silence we assume the
+  // run is dead and let the user re-trigger.
+  useEffect(() => {
+    if (!review || review.ai_check_status !== "running") {
+      setResumingFromOtherTab(false);
+      return;
+    }
+    if (aiRunning) return; // We're the owner — nothing to resume.
+    const progress = (review as { ai_run_progress?: { phase?: string; updated_at?: string } }).ai_run_progress;
+    const updatedAt = progress?.updated_at ? new Date(progress.updated_at).getTime() : 0;
+    const fresh = updatedAt && Date.now() - updatedAt < 2 * 60 * 1000;
+    if (!fresh) {
+      setResumingFromOtherTab(false);
+      return;
+    }
+    setResumingFromOtherTab(true);
+    if (progress?.phase && progress.phase !== "complete" && progress.phase !== "error") {
+      setAiPhase(progress.phase as typeof aiPhase);
+    }
+
+    const channel = supabase
+      .channel(`plan-review-${review.id}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "plan_reviews", filter: `id=eq.${review.id}` },
+        (payload) => {
+          const next = payload.new as { ai_check_status?: string; ai_run_progress?: { phase?: string } };
+          if (next.ai_run_progress?.phase) {
+            const ph = next.ai_run_progress.phase;
+            if (ph !== "complete" && ph !== "error") {
+              setAiPhase(ph as typeof aiPhase);
+            }
+          }
+          if (next.ai_check_status && next.ai_check_status !== "running") {
+            // Other tab finished — refresh and exit resume mode.
+            setResumingFromOtherTab(false);
+            setAiPhase("idle");
+            queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [review?.id, review?.ai_check_status, aiRunning, id, queryClient]);
+
 
   const statusSaveTimer = useRef<NodeJS.Timeout | null>(null);
   const persistFindingStatuses = useCallback((reviewId: string, statuses: Record<number, FindingStatus>) => {
