@@ -53,6 +53,9 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
     const [expanded, setExpanded] = useState(defaultExpanded);
     const [showHistory, setShowHistory] = useState(false);
     const [showReasoning, setShowReasoning] = useState(false);
+    // Surface the AI learning loop: how often this exact code section was
+    // corrected before. ≥3 hits → amber "review carefully" badge.
+    const similarCount = useSimilarCorrections(finding.code_ref, finding.description) ?? finding.similar_corrections_count ?? 0;
     const sev = severityConfig[finding.severity] || severityConfig.minor;
     const isResolved = status === "resolved";
     const isDeferred = status === "deferred";
