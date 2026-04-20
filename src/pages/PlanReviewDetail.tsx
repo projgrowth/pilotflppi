@@ -1027,11 +1027,20 @@ export default function PlanReviewDetail() {
  if (cur !== null) { e.preventDefault(); updateFindingStatus(cur, "deferred"); }
  break;
  }
- case "o": {
- if (cur !== null) { e.preventDefault(); updateFindingStatus(cur, "open"); }
- break;
- }
- }
+  case "o": {
+   if (cur !== null) { e.preventDefault(); updateFindingStatus(cur, "open"); }
+   break;
+  }
+  case "?": {
+   e.preventDefault();
+   setShowShortcuts((s) => !s);
+   break;
+  }
+  case "escape": {
+   if (showShortcuts) { e.preventDefault(); setShowShortcuts(false); }
+   break;
+  }
+  }
  };
  window.addEventListener("keydown", handler);
  return () => window.removeEventListener("keydown", handler);
