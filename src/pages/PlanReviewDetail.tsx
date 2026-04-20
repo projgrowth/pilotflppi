@@ -96,6 +96,7 @@ export default function PlanReviewDetail() {
  const { firmSettings } = useFirmSettings();
  const { user } = useAuth();
  const { data: findingHistory, refetch: refetchHistory } = useFindingHistory(id);
+ const confirm = useConfirm();
 
  const { data: review, isLoading } = useQuery({
  queryKey: ["plan-review", id],
