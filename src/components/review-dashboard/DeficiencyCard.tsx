@@ -39,7 +39,7 @@ export default function DeficiencyCard({ planReviewId, def, showHumanReviewConte
       await updateDeficiencyDisposition(def.id, { reviewer_disposition: d });
       qc.invalidateQueries({ queryKey: ["deficiencies_v2", planReviewId] });
       toast.success(`Marked ${d}`);
-    } catch (e) {
+    } catch {
       toast.error("Could not save");
     } finally {
       setSaving(null);

@@ -12,6 +12,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Projects from "./pages/Projects";
 import PlanReviewDetail from "./pages/PlanReviewDetail";
+import ReviewDashboard from "./pages/ReviewDashboard";
 import Inspections from "./pages/Inspections";
 import LeadRadar from "./pages/LeadRadar";
 import MilestoneRadar from "./pages/MilestoneRadar";
@@ -66,6 +67,7 @@ const App = () => (
               <Route path="/review" element={<Review />} />
               <Route path="/review/:id" element={<ReviewDetail />} />
               <Route path="/plan-review/:id" element={<PlanReviewDetail />} />
+              <Route path="/plan-review/:id/dashboard" element={<ReviewDashboard />} />
               <Route path="/inspections" element={<Inspections />} />
               <Route path="/documents" element={<DocumentsGen />} />
               <Route path="/deficiencies" element={<Deficiencies />} />
