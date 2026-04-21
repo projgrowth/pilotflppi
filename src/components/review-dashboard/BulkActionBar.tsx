@@ -12,7 +12,11 @@ import {
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { type DeficiencyV2Row } from "@/hooks/useReviewDashboard";
-import { recordCorrectionPattern, type RejectionReason } from "@/hooks/useCorrectionPatterns";
+import {
+  recordCorrectionPattern,
+  REJECTION_REASON_LABELS,
+  type RejectionReason,
+} from "@/hooks/useCorrectionPatterns";
 
 interface Props {
   planReviewId: string;
@@ -20,18 +24,14 @@ interface Props {
   onClear: () => void;
 }
 
-const REJECTION_REASONS: { value: RejectionReason; label: string }[] = [
-  { value: "not_applicable", label: "Not applicable" },
-  { value: "false_positive", label: "False positive" },
-  { value: "duplicate", label: "Duplicate" },
-  { value: "out_of_scope", label: "Out of scope" },
-  { value: "code_misread", label: "Code misread" },
-];
+const REJECTION_REASONS = Object.entries(REJECTION_REASON_LABELS).map(
+  ([value, label]) => ({ value: value as RejectionReason, label }),
+);
 
 export default function BulkActionBar({ planReviewId, selected, onClear }: Props) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState<"confirm" | "reject" | null>(null);
-  const [reason, setReason] = useState<RejectionReason>("false_positive");
+  const [reason, setReason] = useState<RejectionReason>(REJECTION_REASONS[0].value);
 
   if (selected.length === 0) return null;
 
