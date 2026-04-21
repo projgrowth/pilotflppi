@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import ReviewStatusBar from "@/components/review-dashboard/ReviewStatusBar";
 import ReviewSummaryHeader from "@/components/review-dashboard/ReviewSummaryHeader";
 import CrossCheckBanner from "@/components/review-dashboard/CrossCheckBanner";
+import VerificationBanner from "@/components/review-dashboard/VerificationBanner";
 import DeficiencyList from "@/components/review-dashboard/DeficiencyList";
 import HumanReviewQueue from "@/components/review-dashboard/HumanReviewQueue";
 import ProjectDNAViewer from "@/components/review-dashboard/ProjectDNAViewer";
@@ -155,6 +156,8 @@ export default function ReviewDashboard() {
       </div>
 
       <ReviewStatusBar planReviewId={id} />
+
+      <VerificationBanner planReviewId={id} />
 
       <CrossCheckBanner planReviewId={id} />
 

@@ -15,17 +15,32 @@ function severityRank(d: DeficiencyV2Row) {
   return 3 + (PRIORITY_RANK[d.priority] ?? 9);
 }
 
+// Within the same severity bucket, push items needing human eyes to the top,
+// then sort by confidence DESC (high-conviction first).
+function compareDefs(a: DeficiencyV2Row, b: DeficiencyV2Row) {
+  const sev = severityRank(a) - severityRank(b);
+  if (sev !== 0) return sev;
+  const aHuman = a.requires_human_review ? 0 : 1;
+  const bHuman = b.requires_human_review ? 0 : 1;
+  if (aHuman !== bHuman) return aHuman - bHuman;
+  const ac = a.confidence_score ?? 0;
+  const bc = b.confidence_score ?? 0;
+  return bc - ac;
+}
+
 export default function DeficiencyList({ planReviewId }: Props) {
   const { data: defs = [], isLoading } = useDeficienciesV2(planReviewId);
 
   const grouped = useMemo(() => {
     const m = new Map<string, DeficiencyV2Row[]>();
     for (const d of defs) {
+      // Hide overturned items from the main list — they shouldn't reach contractor.
+      if (d.verification_status === "overturned") continue;
       const arr = m.get(d.discipline) ?? [];
       arr.push(d);
       m.set(d.discipline, arr);
     }
-    for (const arr of m.values()) arr.sort((a, b) => severityRank(a) - severityRank(b));
+    for (const arr of m.values()) arr.sort(compareDefs);
     return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b));
   }, [defs]);
 
