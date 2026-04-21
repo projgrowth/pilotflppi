@@ -48,7 +48,32 @@ const DISCIPLINES = [
   "Accessibility",
   "Product Approvals",
   "MEP",
+  "Life Safety",
+  "Civil",
+  "Landscape",
 ];
+
+/**
+ * Map AI-extracted sheet_coverage.discipline → our internal DISCIPLINES list.
+ * The sheet_map stage uses an enum {General, Architectural, Structural, MEP,
+ * Energy, Accessibility, Civil, Landscape, Other}. We don't have a 1:1 for
+ * "Product Approvals" (that's a doc category, not a sheet) and "Life Safety"
+ * is sometimes labeled Architectural. This normalizer keeps routing honest.
+ */
+function normalizeAIDiscipline(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const k = raw.trim().toLowerCase();
+  if (k === "general" || k === "other") return null;
+  if (k === "architectural" || k === "arch") return "Architectural";
+  if (k === "structural" || k === "struct") return "Structural";
+  if (k === "mep" || k === "mechanical" || k === "electrical" || k === "plumbing" || k === "fire protection" || k === "fp") return "MEP";
+  if (k === "energy") return "Energy";
+  if (k === "accessibility" || k === "ada") return "Accessibility";
+  if (k === "civil" || k === "site") return "Civil";
+  if (k === "landscape" || k === "irrigation") return "Landscape";
+  if (k === "life safety" || k === "ls") return "Life Safety";
+  return null;
+}
 
 // ---------- helpers ----------
 
