@@ -353,6 +353,8 @@ export type Database = {
           sheet_refs: string[] | null
           status: string
           updated_at: string
+          verification_notes: string
+          verification_status: string
         }
         Insert: {
           code_reference?: Json | null
@@ -382,6 +384,8 @@ export type Database = {
           sheet_refs?: string[] | null
           status?: string
           updated_at?: string
+          verification_notes?: string
+          verification_status?: string
         }
         Update: {
           code_reference?: Json | null
@@ -411,6 +415,8 @@ export type Database = {
           sheet_refs?: string[] | null
           status?: string
           updated_at?: string
+          verification_notes?: string
+          verification_status?: string
         }
         Relationships: [
           {

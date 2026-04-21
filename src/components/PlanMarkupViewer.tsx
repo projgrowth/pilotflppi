@@ -50,7 +50,14 @@ export function PlanMarkupViewer({
   onRepositionCancel,
   className,
 }: MarkupProps) {
-  const [currentPage, setCurrentPage] = useState(0);
+  const [currentPage, setCurrentPage] = useState(() => {
+    if (typeof window === "undefined") return 0;
+    const sp = new URLSearchParams(window.location.search);
+    const raw = sp.get("page");
+    if (!raw) return 0;
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  });
   const [zoom, setZoom] = useState(1);
   const [showThumbnails, setShowThumbnails] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);

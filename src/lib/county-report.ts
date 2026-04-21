@@ -295,7 +295,15 @@ function summarize(defs: DeficiencyV2Row[]) {
 export function buildCountyReportHtml(input: CountyReportInput): string {
   const generatedAt = input.generatedAt ?? new Date();
   const status = input.status;
-  const stats = summarize(input.deficiencies);
+  // Suppress overturned findings — they failed adversarial verification and
+  // must never reach the contractor / county.
+  const overturnedCount = input.deficiencies.filter(
+    (d) => (d as { verification_status?: string }).verification_status === "overturned",
+  ).length;
+  const visibleDefs = input.deficiencies.filter(
+    (d) => (d as { verification_status?: string }).verification_status !== "overturned",
+  );
+  const stats = summarize(visibleDefs);
   const expected = input.sheets.filter((s) => s.expected).length;
   const present = input.sheets.filter((s) => s.expected && s.status === "present").length;
   const firm = input.firm;
@@ -460,7 +468,8 @@ ${renderDnaTable(input.dna)}
 <!-- ========== SECTION 4: DEFICIENCIES ========== -->
 <h2>4. Deficiencies</h2>
 <p class="muted">Sorted by priority: Life Safety → Permit Blockers → Liability → Medium → Low.</p>
-${renderDeficiencies(input.deficiencies)}
+${overturnedCount > 0 ? `<p class="muted" style="font-style: italic;">AI-verified findings only · ${overturnedCount} item${overturnedCount === 1 ? "" : "s"} overturned during internal verification.</p>` : ""}
+${renderDeficiencies(visibleDefs)}
 
 <!-- ========== SECTION 5: DEFERRED SCOPE ITEMS ========== -->
 <h2>5. Deferred Scope Items</h2>

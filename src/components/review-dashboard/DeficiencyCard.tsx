@@ -1,6 +1,18 @@
-import { useState } from "react";
-import { Check, X, Pencil, Info } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import {
+  Check,
+  X,
+  Pencil,
+  Info,
+  ChevronDown,
+  ExternalLink,
+  ShieldCheck,
+  ShieldX,
+  ShieldAlert,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -14,13 +26,20 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import {
   type DeficiencyV2Row,
   updateDeficiencyDisposition,
+  useSheetCoverage,
 } from "@/hooks/useReviewDashboard";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Props {
   planReviewId: string;
@@ -32,11 +51,43 @@ export default function DeficiencyCard({ planReviewId, def, showHumanReviewConte
   const qc = useQueryClient();
   const [notes, setNotes] = useState(def.reviewer_notes ?? "");
   const [saving, setSaving] = useState<string | null>(null);
+  const { data: coverage = [] } = useSheetCoverage(planReviewId);
+
+  // Map first cited sheet → page index for the "Open in PDF" deep link.
+  const pageJump = useMemo(() => {
+    const firstSheet = (def.sheet_refs ?? [])[0]?.toUpperCase();
+    if (!firstSheet) return null;
+    const hit = coverage.find(
+      (c) => c.sheet_ref.toUpperCase() === firstSheet && c.page_index !== null,
+    );
+    return hit
+      ? { sheet: firstSheet, page: hit.page_index! }
+      : { sheet: firstSheet, page: null };
+  }, [coverage, def.sheet_refs]);
+
+  // Default open evidence panel for low-confidence findings.
+  const defaultEvidenceOpen =
+    typeof def.confidence_score === "number" && def.confidence_score < 0.7;
+  const [evidenceOpen, setEvidenceOpen] = useState(defaultEvidenceOpen);
 
   async function setDisposition(d: "confirm" | "reject" | "modify") {
     setSaving(d);
     try {
       await updateDeficiencyDisposition(def.id, { reviewer_disposition: d });
+
+      // When the reviewer rejects, log a 'reject' to review_feedback so the
+      // learning loop can pick it up.
+      if (d === "reject") {
+        const { data: auth } = await supabase.auth.getUser();
+        await supabase.from("review_feedback").insert({
+          plan_review_id: planReviewId,
+          deficiency_id: def.id,
+          feedback_type: "reject_false_positive",
+          notes: notes || null,
+          reviewer_id: auth?.user?.id ?? null,
+        });
+      }
+
       qc.invalidateQueries({ queryKey: ["deficiencies_v2", planReviewId] });
       toast.success(`Marked ${d}`);
     } catch {
@@ -71,12 +122,18 @@ export default function DeficiencyCard({ planReviewId, def, showHumanReviewConte
         .join(" ")
     : null;
 
+  const evidence = (def.evidence ?? []).filter(Boolean);
+  const isOverturned = def.verification_status === "overturned";
+  const isModified = def.verification_status === "modified";
+  const isVerified = def.verification_status === "verified";
+
   return (
     <div
       className={cn(
         "rounded-lg border bg-card p-4 shadow-sm",
         def.life_safety_flag && "border-destructive/40",
-        def.requires_human_review && "ring-1 ring-accent/40",
+        def.requires_human_review && "border-l-4 border-l-amber-500",
+        isOverturned && "opacity-60",
       )}
     >
       {/* Header */}
@@ -89,17 +146,18 @@ export default function DeficiencyCard({ planReviewId, def, showHumanReviewConte
         >
           {def.def_number}
         </span>
-        {def.sheet_refs.length > 0 && (
-          <span className="text-muted-foreground">
-            Sheet{def.sheet_refs.length > 1 ? "s" : ""}: {def.sheet_refs.join(", ")}
+        <span className="text-muted-foreground">{def.discipline}</span>
+        {typeof def.confidence_score === "number" && (
+          <span className="font-mono text-muted-foreground">
+            · conf {def.confidence_score.toFixed(2)}
           </span>
         )}
-        <span className="text-muted-foreground">· {def.discipline}</span>
-        <div className="ml-auto flex flex-wrap gap-1">
+        <div className="ml-auto flex flex-wrap items-center gap-1">
+          <VerificationBadge status={def.verification_status} notes={def.verification_notes} />
           {def.life_safety_flag && <Tag tone="critical">LIFE SAFETY</Tag>}
           {def.permit_blocker && <Tag tone="warn">PERMIT BLOCKER</Tag>}
           {def.liability_flag && <Tag tone="caution">LIABILITY</Tag>}
-          {def.requires_human_review && <Tag tone="accent">HUMAN REVIEW</Tag>}
+          {def.requires_human_review && <Tag tone="accent">NEEDS HUMAN EYES</Tag>}
         </div>
       </div>
 
@@ -121,8 +179,43 @@ export default function DeficiencyCard({ planReviewId, def, showHumanReviewConte
           <div className="text-sm">{def.required_action}</div>
         </div>
 
+        {/* Sheet chips + open-in-PDF */}
+        {def.sheet_refs.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            <span className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">
+              Sheets:
+            </span>
+            {def.sheet_refs.map((s) => (
+              <Badge key={s} variant="secondary" className="font-mono text-2xs">
+                {s}
+              </Badge>
+            ))}
+            {pageJump && (
+              <Button
+                asChild
+                size="sm"
+                variant="outline"
+                className="ml-1 h-6 gap-1 px-2 text-2xs"
+              >
+                <Link
+                  to={
+                    pageJump.page !== null
+                      ? `/plan-review/${planReviewId}?page=${pageJump.page}`
+                      : `/plan-review/${planReviewId}`
+                  }
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Open {pageJump.sheet}
+                </Link>
+              </Button>
+            )}
+          </div>
+        )}
+
         {showHumanReviewContext && def.requires_human_review && (
-          <div className="rounded-md border border-accent/30 bg-accent/5 p-3 text-xs space-y-1">
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs space-y-1">
             {def.human_review_reason && (
               <div>
                 <span className="font-medium">Why: </span>
@@ -144,25 +237,65 @@ export default function DeficiencyCard({ planReviewId, def, showHumanReviewConte
           </div>
         )}
 
-        {typeof def.confidence_score === "number" && (
-          <div className="flex items-center gap-2 text-2xs text-muted-foreground">
-            <span>Confidence: {Math.round(def.confidence_score * 100)}%</span>
-            {def.confidence_basis && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex items-center text-muted-foreground hover:text-foreground"
-                  >
-                    <Info className="h-3 w-3" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs text-xs">
-                  {def.confidence_basis}
-                </TooltipContent>
-              </Tooltip>
-            )}
-          </div>
+        {/* Evidence-first collapsible — what the AI actually saw */}
+        {(evidence.length > 0 || def.confidence_basis) && (
+          <Collapsible open={evidenceOpen} onOpenChange={setEvidenceOpen}>
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-2 rounded-md border border-dashed border-border px-3 py-2 text-2xs hover:bg-muted/40"
+              >
+                <span className="flex items-center gap-1.5 font-medium uppercase tracking-wide text-muted-foreground">
+                  <Info className="h-3 w-3" />
+                  Why the AI flagged this
+                  {evidence.length > 0 && (
+                    <span className="font-mono">
+                      · {evidence.length} snippet{evidence.length === 1 ? "" : "s"}
+                    </span>
+                  )}
+                </span>
+                <ChevronDown
+                  className={cn(
+                    "h-3.5 w-3.5 text-muted-foreground transition-transform",
+                    evidenceOpen && "rotate-180",
+                  )}
+                />
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-2 pt-2">
+              {evidence.length > 0 && (
+                <ul className="space-y-1 border-l-2 border-primary/40 pl-3">
+                  {evidence.map((e, i) => (
+                    <li
+                      key={i}
+                      className="font-mono text-xs leading-relaxed text-muted-foreground"
+                    >
+                      "{e}"
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {def.confidence_basis && (
+                <div className="rounded-md bg-muted/40 p-2 text-xs">
+                  <span className="font-medium text-foreground">Confidence basis: </span>
+                  <span className="text-muted-foreground">{def.confidence_basis}</span>
+                </div>
+              )}
+              {(isOverturned || isModified || isVerified) && def.verification_notes && (
+                <div
+                  className={cn(
+                    "rounded-md p-2 text-xs",
+                    isOverturned && "bg-destructive/5 text-destructive",
+                    isModified && "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+                    isVerified && "bg-emerald-500/5 text-emerald-700 dark:text-emerald-300",
+                  )}
+                >
+                  <span className="font-medium">Verification: </span>
+                  {def.verification_notes}
+                </div>
+              )}
+            </CollapsibleContent>
+          </Collapsible>
         )}
       </div>
 
@@ -215,6 +348,52 @@ export default function DeficiencyCard({ planReviewId, def, showHumanReviewConte
         />
       </div>
     </div>
+  );
+}
+
+function VerificationBadge({
+  status,
+  notes,
+}: {
+  status: DeficiencyV2Row["verification_status"];
+  notes: string | null;
+}) {
+  if (status === "unverified") return null;
+  const cfg =
+    status === "verified"
+      ? {
+          icon: <ShieldCheck className="h-3 w-3" />,
+          label: "VERIFIED",
+          cls: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30 dark:text-emerald-400",
+        }
+      : status === "overturned"
+        ? {
+            icon: <ShieldX className="h-3 w-3" />,
+            label: "OVERTURNED",
+            cls: "bg-destructive/10 text-destructive border-destructive/30",
+          }
+        : {
+            icon: <ShieldAlert className="h-3 w-3" />,
+            label: "MODIFIED",
+            cls: "bg-amber-500/10 text-amber-700 border-amber-500/30 dark:text-amber-400",
+          };
+  const badge = (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+        cfg.cls,
+      )}
+    >
+      {cfg.icon}
+      {cfg.label}
+    </span>
+  );
+  if (!notes) return badge;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{badge}</TooltipTrigger>
+      <TooltipContent className="max-w-xs text-xs">{notes}</TooltipContent>
+    </Tooltip>
   );
 }
 
