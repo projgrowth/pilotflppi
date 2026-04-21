@@ -105,6 +105,44 @@ export type Database = {
           },
         ]
       }
+      applied_corrections: {
+        Row: {
+          applied_at: string
+          discipline: string
+          firm_id: string | null
+          id: string
+          pattern_id: string
+          pattern_summary: string
+          plan_review_id: string
+        }
+        Insert: {
+          applied_at?: string
+          discipline: string
+          firm_id?: string | null
+          id?: string
+          pattern_id: string
+          pattern_summary: string
+          plan_review_id: string
+        }
+        Update: {
+          applied_at?: string
+          discipline?: string
+          firm_id?: string | null
+          id?: string
+          pattern_id?: string
+          pattern_summary?: string
+          plan_review_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "applied_corrections_pattern_id_fkey"
+            columns: ["pattern_id"]
+            isOneToOne: false
+            referencedRelation: "correction_patterns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contractors: {
         Row: {
           created_at: string
@@ -141,6 +179,78 @@ export type Database = {
           portal_access?: boolean
           updated_at?: string
           user_id?: string | null
+        }
+        Relationships: []
+      }
+      correction_patterns: {
+        Row: {
+          code_reference: Json | null
+          confirm_count: number
+          construction_type: string | null
+          county: string | null
+          created_at: string
+          discipline: string
+          fbc_edition: string | null
+          firm_id: string | null
+          id: string
+          is_active: boolean
+          last_seen_at: string
+          occupancy_classification: string | null
+          original_finding: string
+          original_required_action: string
+          pattern_summary: string
+          reason_notes: string
+          rejection_count: number
+          rejection_reason: string
+          source_deficiency_id: string | null
+          source_plan_review_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          code_reference?: Json | null
+          confirm_count?: number
+          construction_type?: string | null
+          county?: string | null
+          created_at?: string
+          discipline: string
+          fbc_edition?: string | null
+          firm_id?: string | null
+          id?: string
+          is_active?: boolean
+          last_seen_at?: string
+          occupancy_classification?: string | null
+          original_finding: string
+          original_required_action?: string
+          pattern_summary: string
+          reason_notes?: string
+          rejection_count?: number
+          rejection_reason: string
+          source_deficiency_id?: string | null
+          source_plan_review_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          code_reference?: Json | null
+          confirm_count?: number
+          construction_type?: string | null
+          county?: string | null
+          created_at?: string
+          discipline?: string
+          fbc_edition?: string | null
+          firm_id?: string | null
+          id?: string
+          is_active?: boolean
+          last_seen_at?: string
+          occupancy_classification?: string | null
+          original_finding?: string
+          original_required_action?: string
+          pattern_summary?: string
+          reason_notes?: string
+          rejection_count?: number
+          rejection_reason?: string
+          source_deficiency_id?: string | null
+          source_plan_review_id?: string | null
+          updated_at?: string
         }
         Relationships: []
       }
