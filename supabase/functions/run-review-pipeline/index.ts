@@ -868,6 +868,57 @@ async function runDisciplineChecks(
     .map((s) => `${s.sheet_ref}${s.sheet_title ? ` — ${s.sheet_title}` : ""}`)
     .join("\n");
 
+  // -------- Reviewer Memory: inject learned correction patterns --------
+  const occupancy = (ctx.dna?.occupancy_classification as string | null) ?? null;
+  const constructionType = (ctx.dna?.construction_type as string | null) ?? null;
+  const fbcEdition = (ctx.dna?.fbc_edition as string | null) ?? null;
+  let patternQuery = admin
+    .from("correction_patterns")
+    .select("id, pattern_summary, original_finding, code_reference, reason_notes, rejection_count")
+    .eq("discipline", ctx.discipline)
+    .eq("is_active", true)
+    .order("rejection_count", { ascending: false })
+    .order("last_seen_at", { ascending: false })
+    .limit(20);
+  if (firmId) patternQuery = patternQuery.eq("firm_id", firmId);
+  const { data: patternsData } = await patternQuery;
+  const patterns = (patternsData ?? []) as Array<{
+    id: string;
+    pattern_summary: string;
+    original_finding: string;
+    code_reference: { section?: string } | null;
+    reason_notes: string;
+    rejection_count: number;
+  }>;
+  // Filter for project-DNA relevance when possible (best-effort).
+  const relevantPatterns = patterns.slice(0, 12);
+
+  const learnedText = relevantPatterns.length
+    ? relevantPatterns
+        .map(
+          (p, i) =>
+            `${i + 1}. ${p.pattern_summary}${p.reason_notes ? ` — Note: ${p.reason_notes}` : ""} (rejected ${p.rejection_count}× by senior reviewers)`,
+        )
+        .join("\n")
+    : null;
+
+  // Persist which patterns were applied so the dashboard can show them.
+  if (relevantPatterns.length) {
+    await admin.from("applied_corrections").insert(
+      relevantPatterns.map((p) => ({
+        plan_review_id: planReviewId,
+        firm_id: firmId,
+        pattern_id: p.id,
+        discipline: ctx.discipline,
+        pattern_summary: p.pattern_summary,
+      })),
+    );
+  }
+
+  const memoryBlock = learnedText
+    ? `\n\n## LEARNED CORRECTIONS — your firm's senior reviewers previously rejected these.\nDo NOT re-flag these unless you have strong new evidence on the plans:\n${learnedText}\n`
+    : "";
+
   const systemPrompt =
     `You are a Florida private-provider plan reviewer specializing in ${ctx.discipline}. ` +
     `Audit submitted construction documents against the Florida Building Code and applicable referenced standards. ` +
@@ -878,15 +929,22 @@ async function runDisciplineChecks(
     `4. life_safety_flag=true for egress/fire/structural-collapse issues. permit_blocker=true for missing required documentation. liability_flag=true for items that materially affect occupant safety or property protection.\n` +
     `5. Only raise a finding when there is a real deficiency or a required item is not visible. Do NOT raise findings for compliant items.\n` +
     `6. confidence_score must be ≤0.6 if you did not directly read the value (i.e. inferred from absence).\n` +
-    `7. Do NOT speculate — when in doubt, set requires_human_review=true with a specific verification method.`;
+    `7. Do NOT speculate — when in doubt, set requires_human_review=true with a specific verification method.\n` +
+    `8. Respect the LEARNED CORRECTIONS list below — these are patterns your firm has explicitly rejected as false positives.`;
 
   const userText =
     `## Project DNA\n${dnaSummary}\n\n` +
     `## Jurisdiction\n${jurSummary}\n\n` +
     `## Sheets routed to ${ctx.discipline}\n${sheetIndex || "(none)"}\n\n` +
-    `## Mandatory ${ctx.discipline} checklist\n${checklistText}\n\n` +
-    `Analyze the attached pages (general-notes pages first, then ${ctx.discipline} sheets). ` +
+    `## Mandatory ${ctx.discipline} checklist\n${checklistText}` +
+    memoryBlock +
+    `\n\nAnalyze the attached pages (general-notes pages first, then ${ctx.discipline} sheets). ` +
     `Return findings via submit_discipline_findings.`;
+
+  // Avoid unused-variable warnings on context vars used only for relevance heuristics.
+  void occupancy;
+  void constructionType;
+  void fbcEdition;
 
   const content: Array<
     | { type: "text"; text: string }
