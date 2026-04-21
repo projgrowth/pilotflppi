@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 // New tables (correction_patterns, applied_corrections) aren't in the
 // generated types.ts yet — cast to a loose client so writes typecheck.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const db = supabase as any;
+const db: any = supabase;
 
 export type RejectionReason =
   | "shown_elsewhere"
@@ -62,13 +62,13 @@ export function useCorrectionPatterns() {
   return useQuery({
     queryKey: ["correction_patterns"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("correction_patterns" as never)
+      const { data, error } = await db
+        .from("correction_patterns")
         .select("*")
         .order("rejection_count", { ascending: false })
         .order("last_seen_at", { ascending: false });
       if (error) throw error;
-      return (data ?? []) as unknown as CorrectionPatternRow[];
+      return (data ?? []) as CorrectionPatternRow[];
     },
   });
 }
@@ -79,13 +79,13 @@ export function useAppliedCorrections(planReviewId?: string) {
     queryKey: ["applied_corrections", planReviewId],
     enabled: !!planReviewId,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("applied_corrections" as never)
+      const { data, error } = await db
+        .from("applied_corrections")
         .select("*, pattern:correction_patterns(*)")
         .eq("plan_review_id", planReviewId!)
         .order("applied_at", { ascending: false });
       if (error) throw error;
-      return (data ?? []) as unknown as AppliedCorrectionRow[];
+      return (data ?? []) as AppliedCorrectionRow[];
     },
   });
 }
@@ -120,11 +120,11 @@ export async function recordCorrectionPattern(input: RecordPatternInput) {
 
   const codeSection = deficiency.code_reference?.section ?? null;
 
-  // De-dupe heuristic: same firm, discipline, code section, and reason.
+  // De-dupe heuristic: same discipline, code section, and reason within firm scope (RLS).
   let existing: { id: string; rejection_count: number } | null = null;
   if (codeSection) {
-    const { data } = await supabase
-      .from("correction_patterns" as never)
+    const { data } = await db
+      .from("correction_patterns")
       .select("id, rejection_count")
       .eq("discipline", deficiency.discipline)
       .eq("rejection_reason", reason)
@@ -134,8 +134,8 @@ export async function recordCorrectionPattern(input: RecordPatternInput) {
   }
 
   if (existing) {
-    const { error } = await supabase
-      .from("correction_patterns" as never)
+    const { error } = await db
+      .from("correction_patterns")
       .update({
         rejection_count: existing.rejection_count + 1,
         last_seen_at: new Date().toISOString(),
@@ -155,8 +155,8 @@ export async function recordCorrectionPattern(input: RecordPatternInput) {
     reason,
   });
 
-  const { data: inserted, error } = await supabase
-    .from("correction_patterns" as never)
+  const { data: inserted, error } = await db
+    .from("correction_patterns")
     .insert({
       discipline: deficiency.discipline,
       pattern_summary: summary,
@@ -179,18 +179,15 @@ export async function recordCorrectionPattern(input: RecordPatternInput) {
 }
 
 export async function setPatternActive(patternId: string, active: boolean) {
-  const { error } = await supabase
-    .from("correction_patterns" as never)
+  const { error } = await db
+    .from("correction_patterns")
     .update({ is_active: active })
     .eq("id", patternId);
   if (error) throw error;
 }
 
 export async function deletePattern(patternId: string) {
-  const { error } = await supabase
-    .from("correction_patterns" as never)
-    .delete()
-    .eq("id", patternId);
+  const { error } = await db.from("correction_patterns").delete().eq("id", patternId);
   if (error) throw error;
 }
 
