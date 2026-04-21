@@ -2101,6 +2101,7 @@ Deno.serve(async (req) => {
       dna_extract: () => stageDnaExtract(admin, plan_review_id, firmId),
       discipline_review: () => stageDisciplineReview(admin, plan_review_id, firmId),
       verify: () => stageVerify(admin, plan_review_id),
+      dedupe: () => stageDedupe(admin, plan_review_id),
       cross_check: () => stageCrossCheck(admin, plan_review_id),
       deferred_scope: () => stageDeferredScope(admin, plan_review_id, firmId),
       prioritize: () => stagePrioritize(admin, plan_review_id),
