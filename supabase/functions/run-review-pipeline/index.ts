@@ -387,6 +387,8 @@ const SHEET_MAP_SCHEMA = {
                 "Accessibility",
                 "Civil",
                 "Landscape",
+                "Life Safety",
+                "Fire Protection",
                 "Other",
               ],
             },
