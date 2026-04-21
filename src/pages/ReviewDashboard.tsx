@@ -182,6 +182,11 @@ export default function ReviewDashboard() {
         />
       )}
 
+      <LetterQualityGate
+        planReviewId={id}
+        onJumpToFinding={() => setActiveTab("deficiencies")}
+      />
+
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList>
           <TabsTrigger value="deficiencies">Deficiencies</TabsTrigger>
@@ -225,9 +230,3 @@ export default function ReviewDashboard() {
     </div>
   );
 }
-
-      <LetterQualityGate
-        planReviewId={id}
-        onJumpToFinding={() => setActiveTab("deficiencies")}
-      />
-
