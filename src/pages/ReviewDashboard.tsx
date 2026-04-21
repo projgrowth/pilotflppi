@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Play, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { PageHeader } from "@/components/PageHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -29,6 +30,29 @@ interface ReviewWithProject {
 
 export default function ReviewDashboard() {
   const { id } = useParams<{ id: string }>();
+  const qc = useQueryClient();
+  const [running, setRunning] = useState(false);
+
+  const runPipeline = async () => {
+    if (!id) return;
+    setRunning(true);
+    try {
+      const { error } = await supabase.functions.invoke("run-review-pipeline", {
+        body: { plan_review_id: id },
+      });
+      if (error) throw error;
+      toast.success("Pipeline run complete");
+      qc.invalidateQueries({ queryKey: ["pipeline_status", id] });
+      qc.invalidateQueries({ queryKey: ["deficiencies_v2", id] });
+      qc.invalidateQueries({ queryKey: ["project_dna", id] });
+      qc.invalidateQueries({ queryKey: ["sheet_coverage", id] });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Pipeline failed";
+      toast.error(msg);
+    } finally {
+      setRunning(false);
+    }
+  };
 
   const { data: review } = useQuery({
     queryKey: ["plan_review_dashboard", id],
@@ -71,6 +95,14 @@ export default function ReviewDashboard() {
         />
         <div className="flex items-center gap-2">
           <StatusPill status={status} />
+          <Button size="sm" onClick={runPipeline} disabled={running}>
+            {running ? (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="mr-1 h-4 w-4" />
+            )}
+            {running ? "Running…" : "Run Pipeline"}
+          </Button>
           <Button asChild variant="outline" size="sm">
             <Link to={`/plan-review/${id}`}>
               <ArrowLeft className="mr-1 h-4 w-4" /> Back to workspace
