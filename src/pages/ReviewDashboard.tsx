@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Play, Loader2 } from "lucide-react";
+import { ArrowLeft, Play, Loader2, FileDown } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { PageHeader } from "@/components/PageHeader";
@@ -14,7 +14,9 @@ import DeficiencyList from "@/components/review-dashboard/DeficiencyList";
 import HumanReviewQueue from "@/components/review-dashboard/HumanReviewQueue";
 import ProjectDNAViewer from "@/components/review-dashboard/ProjectDNAViewer";
 import SheetCoverageMap from "@/components/review-dashboard/SheetCoverageMap";
-import { useDeficienciesV2, useProjectDna } from "@/hooks/useReviewDashboard";
+import { useDeficienciesV2, useProjectDna, useSheetCoverage } from "@/hooks/useReviewDashboard";
+import { useFirmSettings } from "@/hooks/useFirmSettings";
+import { generateCountyReport } from "@/lib/county-report";
 
 interface ReviewWithProject {
   id: string;
@@ -73,6 +75,8 @@ export default function ReviewDashboard() {
 
   const { data: dna } = useProjectDna(id);
   const { data: defs = [] } = useDeficienciesV2(id);
+  const { data: sheets = [] } = useSheetCoverage(id);
+  const { firmSettings } = useFirmSettings();
 
   const status = useMemo(() => determineStatus(defs), [defs]);
   const jurisdictionMismatch =
@@ -80,6 +84,32 @@ export default function ReviewDashboard() {
     !!review?.project?.county &&
     !!dna.county &&
     dna.county.toLowerCase() !== review.project.county.toLowerCase();
+
+  const handleGenerateReport = () => {
+    if (!review?.project) {
+      toast.error("Project not loaded yet");
+      return;
+    }
+    try {
+      generateCountyReport({
+        status,
+        round: review.round,
+        project: {
+          name: review.project.name,
+          address: review.project.address,
+          jurisdiction: review.project.jurisdiction || review.project.county,
+          county: review.project.county,
+        },
+        dna: dna ?? null,
+        sheets,
+        deficiencies: defs,
+        firm: firmSettings ?? null,
+      });
+      toast.success("Report ready — choose Save as PDF in the print dialog");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to generate report");
+    }
+  };
 
   if (!id) return null;
 
