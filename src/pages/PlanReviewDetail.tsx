@@ -1017,8 +1017,10 @@ export default function PlanReviewDetail() {
  const tag = (e.target as HTMLElement)?.tagName;
  if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
  if (e.metaKey || e.ctrlKey || e.altKey) return;
- const findingsList = (review?.ai_findings as Finding[] | undefined) || [];
- if (findingsList.length === 0) return;
+  const findingsList = review?.pipeline_version === "v2"
+   ? (v2Findings ?? [])
+   : ((review?.ai_findings as Finding[] | undefined) || []);
+  if (findingsList.length === 0) return;
 
  const cur = activeFindingIndex;
  const last = findingsList.length - 1;
@@ -1097,7 +1099,10 @@ export default function PlanReviewDetail() {
  );
  }
 
- const findings = (review.ai_findings as Finding[]) || [];
+ // Source-of-truth selector: V2 reviews read adapted deficiencies_v2 rows;
+ // legacy reviews keep reading ai_findings. v2Findings is undefined while loading,
+ // which gracefully shows an empty findings list (skeleton-equivalent) until ready.
+ const findings = isV2Pipeline ? (v2Findings ?? []) : ((review.ai_findings as Finding[]) || []);
  const previousFindings = (review.previous_findings as Finding[]) || [];
  const groupedFindings = groupFindingsByDiscipline(findings);
  const county = review.project?.county || "";
