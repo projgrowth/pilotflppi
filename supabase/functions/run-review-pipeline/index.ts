@@ -969,13 +969,154 @@ async function runDisciplineChecks(
   return rows.length;
 }
 
+interface DuplicateGroup {
+  key: string;
+  fbc_section: string;
+  sheet_ref: string;
+  deficiency_ids: string[];
+  def_numbers: string[];
+}
+
+interface Contradiction {
+  deficiency_id: string;
+  def_number: string;
+  finding: string;
+  prior_round: number;
+  prior_status: string;
+  prior_finding: string;
+  reason: string;
+}
+
 async function stageCrossCheck(
-  _admin: ReturnType<typeof createClient>,
-  _planReviewId: string,
+  admin: ReturnType<typeof createClient>,
+  planReviewId: string,
 ) {
-  // Placeholder: future logic will scan deficiencies_v2 for duplicate
-  // (FBC section + sheet) and contradiction (resolved-in-prior-round) flags.
-  return { duplicates_found: 0 };
+  // Load all open deficiencies for this review.
+  const { data: defs, error: defsErr } = await admin
+    .from("deficiencies_v2")
+    .select("id, def_number, finding, sheet_refs, code_reference, status")
+    .eq("plan_review_id", planReviewId)
+    .neq("status", "resolved")
+    .neq("status", "waived");
+  if (defsErr) throw defsErr;
+
+  const rows = (defs ?? []) as Array<{
+    id: string;
+    def_number: string;
+    finding: string;
+    sheet_refs: string[] | null;
+    code_reference: { section?: string } | null;
+    status: string;
+  }>;
+
+  // ---------- duplicate detection ----------
+  // Key: <fbc_section>|<sheet_ref>. A finding cited on N sheets fans out into
+  // N keys, so duplicates across sheets are caught.
+  const groupMap = new Map<string, DuplicateGroup>();
+  for (const d of rows) {
+    const section = (d.code_reference?.section ?? "").trim().toLowerCase();
+    if (!section) continue; // can't dedupe without a code anchor
+    const sheets = (d.sheet_refs ?? []).map((s) => s.trim().toUpperCase()).filter(Boolean);
+    if (sheets.length === 0) continue;
+    for (const sheet of sheets) {
+      const key = `${section}|${sheet}`;
+      const existing = groupMap.get(key);
+      if (existing) {
+        if (!existing.deficiency_ids.includes(d.id)) {
+          existing.deficiency_ids.push(d.id);
+          existing.def_numbers.push(d.def_number);
+        }
+      } else {
+        groupMap.set(key, {
+          key,
+          fbc_section: section,
+          sheet_ref: sheet,
+          deficiency_ids: [d.id],
+          def_numbers: [d.def_number],
+        });
+      }
+    }
+  }
+  const duplicate_groups = Array.from(groupMap.values()).filter(
+    (g) => g.deficiency_ids.length > 1,
+  );
+
+  // ---------- contradiction detection ----------
+  // A finding "contradicts" prior rounds if a previous round closed the same
+  // (fbc_section + sheet) issue as resolved/waived but this round reopened it.
+  const { data: prevRows } = await admin
+    .from("plan_reviews")
+    .select("round, previous_findings")
+    .eq("id", planReviewId)
+    .maybeSingle();
+  const prev = prevRows as
+    | { round: number; previous_findings: unknown }
+    | null;
+
+  type PriorFinding = {
+    fbc_section?: string;
+    code_section?: string;
+    code_reference?: { section?: string };
+    sheet_refs?: string[];
+    sheet_ref?: string;
+    status?: string;
+    finding?: string;
+    round?: number;
+  };
+
+  const priorList: PriorFinding[] = Array.isArray(prev?.previous_findings)
+    ? (prev!.previous_findings as PriorFinding[])
+    : [];
+
+  const priorIndex = new Map<string, PriorFinding>();
+  for (const p of priorList) {
+    const sec = (
+      p.fbc_section ??
+      p.code_section ??
+      p.code_reference?.section ??
+      ""
+    )
+      .trim()
+      .toLowerCase();
+    if (!sec) continue;
+    const sheets = (p.sheet_refs ?? (p.sheet_ref ? [p.sheet_ref] : []))
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean);
+    const wasClosed = p.status === "resolved" || p.status === "waived";
+    if (!wasClosed) continue;
+    for (const sheet of sheets) {
+      priorIndex.set(`${sec}|${sheet}`, p);
+    }
+  }
+
+  const contradictions: Contradiction[] = [];
+  for (const d of rows) {
+    const sec = (d.code_reference?.section ?? "").trim().toLowerCase();
+    if (!sec) continue;
+    const sheets = (d.sheet_refs ?? []).map((s) => s.trim().toUpperCase()).filter(Boolean);
+    for (const sheet of sheets) {
+      const hit = priorIndex.get(`${sec}|${sheet}`);
+      if (hit) {
+        contradictions.push({
+          deficiency_id: d.id,
+          def_number: d.def_number,
+          finding: d.finding,
+          prior_round: hit.round ?? (prev?.round ?? 1) - 1,
+          prior_status: hit.status ?? "resolved",
+          prior_finding: hit.finding ?? "(prior finding)",
+          reason: `FBC ${sec} on ${sheet} was previously ${hit.status} in round ${hit.round ?? "prior"}.`,
+        });
+        break; // one record per deficiency
+      }
+    }
+  }
+
+  return {
+    duplicate_groups,
+    duplicates_found: duplicate_groups.length,
+    contradictions,
+    contradictions_found: contradictions.length,
+  };
 }
 
 async function stageDeferredScope(
