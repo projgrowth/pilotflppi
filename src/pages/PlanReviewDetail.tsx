@@ -47,6 +47,7 @@ import {
  getDisciplineLabel, DISCIPLINE_ORDER, SCANNING_STEPS,
 } from "@/lib/county-utils";
 import type { PlanReviewRow } from "@/types";
+import { adaptV2ToFindings, type DeficiencyV2Lite } from "@/lib/deficiency-adapter";
 
 type RightPanelMode = "findings" | "checklist" | "completeness" | "letter" | "county";
 
@@ -126,6 +127,29 @@ export default function PlanReviewDetail() {
  enabled: !!review?.project_id,
  });
 
+ // ── V2 source-of-truth: when pipeline_version === 'v2', findings live in the
+ // deficiencies_v2 table (verified, dedup'd, with human-review flags) instead of
+ // the legacy ai_findings JSONB. We adapt them down to the legacy Finding shape
+ // so the existing PDF viewer, comment letter, lint, and SitePlanChecklist all
+ // render V2 data without bespoke V2 components. Write paths that would mutate
+ // ai_findings (run AI, new round, reposition pin) are disabled below.
+ const isV2Pipeline = review?.pipeline_version === "v2";
+ const { data: v2Findings } = useQuery({
+  queryKey: ["v2-findings-for-viewer", review?.id],
+  enabled: !!review?.id && isV2Pipeline,
+  queryFn: async () => {
+   const { data, error } = await supabase
+    .from("deficiencies_v2")
+    .select(
+     "id, def_number, discipline, finding, required_action, sheet_refs, code_reference, evidence, confidence_score, confidence_basis, priority, life_safety_flag, permit_blocker, liability_flag, requires_human_review, human_review_reason, verification_status, status, model_version",
+    )
+    .eq("plan_review_id", review!.id)
+    .order("def_number", { ascending: true });
+   if (error) throw error;
+   return adaptV2ToFindings((data ?? []) as DeficiencyV2Lite[]);
+  },
+ });
+
  const [aiRunning, setAiRunning] = useState(false);
  const [scanStep, setScanStep] = useState(0);
  const [commentLetter, setCommentLetter] = useState("");
@@ -199,6 +223,14 @@ export default function PlanReviewDetail() {
 
  const handleRepositionConfirm = useCallback(async (idx: number, newMarkup: { page_index: number; x: number; y: number; width: number; height: number }) => {
  if (!review) return;
+ // V2 source of truth doesn't store per-finding pin coordinates yet — repositioning
+ // would write to ai_findings (ignored on reload) and silently fail. Until V2 markup
+ // lands, route the reviewer to do this on the V1 round if needed.
+ if (review.pipeline_version === "v2") {
+  toast.error("Pin repositioning isn't available for V2 reviews yet — V2 findings reference sheets, not pixel coordinates.");
+  setRepositioningIndex(null);
+  return;
+ }
  const current = (review.ai_findings as Finding[]) || [];
  // A human-placed pin is always high confidence and must never be downgraded on reload.
  const updated = current.map((f, i) => i === idx ? {
@@ -239,6 +271,8 @@ export default function PlanReviewDetail() {
 
  // Auto-trigger AI check for newly created pending reviews — but only if no
  // other tab is mid-run on this review. The resume effect below detects that.
+ // V2 reviews own their own pipeline (via "Run Pipeline" on the dashboard), so
+ // we never auto-trigger the legacy v1 runner against them.
  const hasAutoTriggered = useRef(false);
  useEffect(() => {
  if (
@@ -247,7 +281,8 @@ export default function PlanReviewDetail() {
  review.file_urls?.length > 0 &&
  !aiRunning &&
  !hasAutoTriggered.current &&
- !resumingFromOtherTab
+ !resumingFromOtherTab &&
+ review.pipeline_version !== "v2"
  ) {
  hasAutoTriggered.current = true;
  runAICheck(review);
@@ -483,6 +518,13 @@ export default function PlanReviewDetail() {
  };
 
  const runAICheck = async (r: PlanReviewRow) => {
+ // V2 reviews must run via the V2 pipeline (Run Pipeline on the dashboard).
+ // Allowing the legacy v1 check here would overwrite ai_findings and create
+ // a second source of truth that disagrees with deficiencies_v2.
+ if (r.pipeline_version === "v2") {
+  toast.error("This review uses the V2 pipeline. Use 'Run Pipeline' on the V2 dashboard.");
+  return;
+ }
  setAiRunning(true);
  setRightPanel("findings");
  setActiveFindingIndex(null);
@@ -893,6 +935,10 @@ export default function PlanReviewDetail() {
 
  const createNewRound = async () => {
  if (!review || !allRounds) return;
+ if (review.pipeline_version === "v2") {
+  toast.error("New rounds for V2 reviews must be created from the V2 dashboard so deficiencies_v2 carries forward correctly.");
+  return;
+ }
  try {
  const maxRound = allRounds.reduce((max, r) => Math.max(max, r.round), 0);
  const { data: newReview, error } = await supabase
@@ -936,7 +982,9 @@ export default function PlanReviewDetail() {
  trade_type: r.project?.trade_type,
  county: r.project?.county,
  jurisdiction: r.project?.jurisdiction,
- findings: r.ai_findings,
+  // V2 reviews: ai_findings is empty; send the adapted V2 findings instead so
+  // the generated letter reflects the verified, dedup'd source-of-truth set.
+  findings: r.pipeline_version === "v2" ? (v2Findings ?? []) : r.ai_findings,
  round: r.round,
  },
  onDelta: (chunk) => setCommentLetter((prev) => prev + chunk),
@@ -993,8 +1041,10 @@ export default function PlanReviewDetail() {
  const tag = (e.target as HTMLElement)?.tagName;
  if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
  if (e.metaKey || e.ctrlKey || e.altKey) return;
- const findingsList = (review?.ai_findings as Finding[] | undefined) || [];
- if (findingsList.length === 0) return;
+  const findingsList = review?.pipeline_version === "v2"
+   ? (v2Findings ?? [])
+   : ((review?.ai_findings as Finding[] | undefined) || []);
+  if (findingsList.length === 0) return;
 
  const cur = activeFindingIndex;
  const last = findingsList.length - 1;
@@ -1044,7 +1094,7 @@ export default function PlanReviewDetail() {
  };
  window.addEventListener("keydown", handler);
  return () => window.removeEventListener("keydown", handler);
- }, [activeFindingIndex, review, updateFindingStatus]);
+ }, [activeFindingIndex, review, v2Findings, updateFindingStatus]);
 
  if (isLoading) {
  return (
@@ -1073,7 +1123,10 @@ export default function PlanReviewDetail() {
  );
  }
 
- const findings = (review.ai_findings as Finding[]) || [];
+ // Source-of-truth selector: V2 reviews read adapted deficiencies_v2 rows;
+ // legacy reviews keep reading ai_findings. v2Findings is undefined while loading,
+ // which gracefully shows an empty findings list (skeleton-equivalent) until ready.
+ const findings = isV2Pipeline ? (v2Findings ?? []) : ((review.ai_findings as Finding[]) || []);
  const previousFindings = (review.previous_findings as Finding[]) || [];
  const groupedFindings = groupFindingsByDiscipline(findings);
  const county = review.project?.county || "";
@@ -1193,21 +1246,25 @@ export default function PlanReviewDetail() {
   onNewRound={createNewRound}
  />
 
- {/* ── V2 pipeline banner: source-of-truth lives in deficiencies_v2 ── */}
- {(review as { pipeline_version?: string }).pipeline_version === "v2" && (
-  <div className="shrink-0 border-b border-primary/20 bg-primary/5 px-4 py-2 flex items-center justify-between gap-3">
-   <div className="flex items-center gap-2 min-w-0">
-    <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" />
-    <span className="text-2xs font-semibold uppercase tracking-wide text-primary">V2 Pipeline</span>
-    <span className="text-xs text-muted-foreground truncate">
-     Findings live in the V2 dashboard (verification, cross-check, deferred scope, human-review queue).
-    </span>
+  {/* ── V2 pipeline banner: viewer renders adapted V2 findings; mutating actions
+       (Run AI Check, New Round, pin reposition) are gated and routed to the
+       V2 dashboard so we never split the source of truth. ── */}
+  {isV2Pipeline && (
+   <div className="shrink-0 border-b border-primary/20 bg-primary/5 px-4 py-2 flex items-center justify-between gap-3">
+    <div className="flex items-center gap-2 min-w-0">
+     <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" />
+     <span className="text-2xs font-semibold uppercase tracking-wide text-primary">V2 Pipeline</span>
+     <span className="text-xs text-muted-foreground truncate">
+      {v2Findings === undefined
+       ? "Loading verified findings from the V2 pipeline…"
+       : `${v2Findings.length} verified finding${v2Findings.length === 1 ? "" : "s"} loaded. Run pipeline, dispositions, and deferred scope live on the dashboard.`}
+     </span>
+    </div>
+    <Button size="sm" variant="default" onClick={() => navigate(`/plan-review/${review.id}/dashboard`)} className="shrink-0 h-7 text-xs">
+     Open V2 Dashboard
+    </Button>
    </div>
-   <Button size="sm" variant="default" onClick={() => navigate(`/plan-review/${review.id}/dashboard`)} className="shrink-0 h-7 text-xs">
-    Open V2 Dashboard
-   </Button>
-  </div>
- )}
+  )}
 
  {/* ── Resume banner: another tab is mid-run on this review ── */}
  {resumingFromOtherTab && !aiRunning && (
