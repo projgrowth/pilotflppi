@@ -436,6 +436,10 @@ export type Database = {
       }
       deficiencies_v2: {
         Row: {
+          citation_canonical_text: string | null
+          citation_grounded_at: string | null
+          citation_match_score: number | null
+          citation_status: string
           code_reference: Json | null
           confidence_basis: string | null
           confidence_score: number | null
@@ -467,6 +471,10 @@ export type Database = {
           verification_status: string
         }
         Insert: {
+          citation_canonical_text?: string | null
+          citation_grounded_at?: string | null
+          citation_match_score?: number | null
+          citation_status?: string
           code_reference?: Json | null
           confidence_basis?: string | null
           confidence_score?: number | null
@@ -498,6 +506,10 @@ export type Database = {
           verification_status?: string
         }
         Update: {
+          citation_canonical_text?: string | null
+          citation_grounded_at?: string | null
+          citation_match_score?: number | null
+          citation_status?: string
           code_reference?: Json | null
           confidence_basis?: string | null
           confidence_score?: number | null
@@ -580,6 +592,45 @@ export type Database = {
           item_key?: string
           sort_order?: number
           trigger_condition?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      fbc_code_sections: {
+        Row: {
+          code: string
+          created_at: string
+          edition: string
+          id: string
+          keywords: string[]
+          requirement_text: string
+          section: string
+          source_url: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          code?: string
+          created_at?: string
+          edition?: string
+          id?: string
+          keywords?: string[]
+          requirement_text: string
+          section: string
+          source_url?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          edition?: string
+          id?: string
+          keywords?: string[]
+          requirement_text?: string
+          section?: string
+          source_url?: string | null
+          title?: string
           updated_at?: string
         }
         Relationships: []
