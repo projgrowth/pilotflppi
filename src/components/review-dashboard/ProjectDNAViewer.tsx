@@ -150,7 +150,7 @@ export default function ProjectDNAViewer({
           project_id: projectId,
           actor_id: userData?.user?.id ?? null,
           actor_type: "user",
-          metadata: { plan_review_id: planReviewId, fields: patch },
+          metadata: { plan_review_id: planReviewId, fields: patch as Record<string, string | number | boolean | null> },
         },
       ]);
 
