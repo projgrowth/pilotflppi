@@ -114,6 +114,8 @@ export default function ReviewDashboard() {
 
       <ReviewStatusBar planReviewId={id} />
 
+      <CrossCheckBanner planReviewId={id} />
+
       {review?.project && (
         <ReviewSummaryHeader
           planReviewId={id}
