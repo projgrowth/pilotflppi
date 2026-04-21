@@ -15,6 +15,7 @@ import DnaHealthBanner from "@/components/review-dashboard/DnaHealthBanner";
 import SheetCoverageMap from "@/components/review-dashboard/SheetCoverageMap";
 import DeferredScopePanel from "@/components/review-dashboard/DeferredScopePanel";
 import DedupeAuditTrail from "@/components/review-dashboard/DedupeAuditTrail";
+import LetterQualityGate from "@/components/review-dashboard/LetterQualityGate";
 import { useDeficienciesV2, useDeferredScope, useProjectDna, useSheetCoverage, usePipelineStatus } from "@/hooks/useReviewDashboard";
 import { useFirmSettings } from "@/hooks/useFirmSettings";
 import { generateCountyReport } from "@/lib/county-report";
@@ -181,6 +182,11 @@ export default function ReviewDashboard() {
         />
       )}
 
+      <LetterQualityGate
+        planReviewId={id}
+        onJumpToFinding={() => setActiveTab("deficiencies")}
+      />
+
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList>
           <TabsTrigger value="deficiencies">Deficiencies</TabsTrigger>
@@ -224,4 +230,3 @@ export default function ReviewDashboard() {
     </div>
   );
 }
-

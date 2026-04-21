@@ -94,6 +94,7 @@ export interface DeficiencyV2Row {
   status: "open" | "resolved" | "waived" | "needs_info";
   verification_status: "unverified" | "verified" | "overturned" | "modified" | "superseded" | "needs_human";
   verification_notes: string;
+  model_version?: string | null;
 }
 
 export function usePipelineStatus(planReviewId?: string) {
