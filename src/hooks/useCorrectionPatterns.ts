@@ -1,6 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
+// New tables (correction_patterns, applied_corrections) aren't in the
+// generated types.ts yet — cast to a loose client so writes typecheck.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const db = supabase as any;
+
 export type RejectionReason =
   | "shown_elsewhere"
   | "wrong_code_section"
