@@ -214,6 +214,36 @@ function disciplineForSheet(sheetRef: string): string | null {
   }
 }
 
+/**
+ * @deprecated Prefer `sheet_coverage.discipline` (AI-extracted from the title block).
+ * This prefix heuristic is kept ONLY as a last-resort fallback when sheet_map
+ * fails or returns "General"/"Other" for a sheet that clearly belongs elsewhere.
+ *
+ * Why deprecated: prefix routing miscategorizes Life Safety (LS), Fire Protection
+ * (FP), Civil (C), Landscape (L), and detail sheets like AS-101 (assigned to the
+ * wrong discipline). The AI can read the title block and gets these right.
+ */
+function disciplineForSheetFallback(sheetRef: string): string | null {
+  const p = sheetRef.trim().toUpperCase()[0];
+  switch (p) {
+    case "A":
+      return "Architectural";
+    case "S":
+      return "Structural";
+    case "M":
+    case "P":
+    case "E":
+    case "F":
+      return "MEP";
+    case "C":
+      return "Civil";
+    case "L":
+      return "Landscape";
+    default:
+      return null; // G-, T-, cover sheets → general notes, sent to every call
+  }
+}
+
 /** Sign each plan file (PDFs/images in `documents` bucket) for vision input. */
 async function signedSheetUrls(
   admin: ReturnType<typeof createClient>,
@@ -229,7 +259,7 @@ async function signedSheetUrls(
   for (const f of (files ?? []) as Array<{ file_path: string }>) {
     const { data: signed, error: sErr } = await admin.storage
       .from("documents")
-      .createSignedUrl(f.file_path, 60 * 30);
+      .createSignedUrl(f.file_path, 60 * 60); // 60min — long enough for slowest discipline run
     if (sErr || !signed) continue;
     out.push({ file_path: f.file_path, signed_url: signed.signedUrl });
   }
