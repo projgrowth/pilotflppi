@@ -71,7 +71,7 @@ export default function ProjectDNAViewer({
   useEffect(() => {
     setDrafts({});
     setEditing({});
-  }, [dna?.updated_at]);
+  }, [dna?.id]);
 
   const missingSet = useMemo(
     () => new Set(dna?.missing_fields ?? []),
@@ -141,16 +141,18 @@ export default function ProjectDNAViewer({
       // Provenance: log the manual override.
       const { data: userData } = await supabase.auth.getUser();
       const projectId = await getProjectIdForReview(planReviewId);
-      await supabase.from("activity_log").insert({
-        event_type: "dna_manual_override",
-        description: `Reviewer patched ${dirtyKeys.length} Project DNA field${
-          dirtyKeys.length === 1 ? "" : "s"
-        }: ${dirtyKeys.join(", ")}`,
-        project_id: projectId,
-        actor_id: userData?.user?.id ?? null,
-        actor_type: "user",
-        metadata: { plan_review_id: planReviewId, fields: patch },
-      });
+      await supabase.from("activity_log").insert([
+        {
+          event_type: "dna_manual_override",
+          description: `Reviewer patched ${dirtyKeys.length} Project DNA field${
+            dirtyKeys.length === 1 ? "" : "s"
+          }: ${dirtyKeys.join(", ")}`,
+          project_id: projectId,
+          actor_id: userData?.user?.id ?? null,
+          actor_type: "user",
+          metadata: { plan_review_id: planReviewId, fields: patch },
+        },
+      ]);
 
       toast.success("DNA patched — re-running pipeline from verification…");
       qc.invalidateQueries({ queryKey: ["project_dna", planReviewId] });
