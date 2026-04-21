@@ -68,6 +68,32 @@ export default function FindingProvenancePopover({ def }: Props) {
               <span className="font-mono">{codeRefStr}</span>
             </Row>
           )}
+          <Row label="Citation">
+            <span
+              className={
+                def.citation_status === "verified"
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : def.citation_status === "mismatch"
+                    ? "text-amber-600 dark:text-amber-400"
+                    : def.citation_status === "hallucinated"
+                      ? "text-destructive"
+                      : "text-muted-foreground"
+              }
+            >
+              {def.citation_status ?? "unverified"}
+              {typeof def.citation_match_score === "number" && (
+                <span className="ml-1 font-mono opacity-70">
+                  ({Math.round(def.citation_match_score * 100)}%)
+                </span>
+              )}
+            </span>
+          </Row>
+          {def.citation_canonical_text && (
+            <div className="rounded-md border-l-2 border-emerald-500/40 bg-muted/40 p-2 text-2xs italic text-muted-foreground">
+              "{def.citation_canonical_text.slice(0, 200)}
+              {def.citation_canonical_text.length > 200 ? "…" : ""}"
+            </div>
+          )}
           <Row label="Verification">
             <span
               className={

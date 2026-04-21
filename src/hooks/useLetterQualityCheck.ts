@@ -91,6 +91,32 @@ export function useLetterQualityCheck({
           findingId: d.id,
         });
       }
+      // Citation grounding: only block confirmed findings — rejected ones
+      // won't ship in the letter regardless.
+      if (d.reviewer_disposition === "confirm") {
+        if (d.citation_status === "hallucinated") {
+          issues.push({
+            severity: "error",
+            code: `citation_hallucinated:${d.id}`,
+            message: `${d.def_number} — citation appears hallucinated (no parseable section)`,
+            findingId: d.id,
+          });
+        } else if (d.citation_status === "mismatch") {
+          issues.push({
+            severity: "warning",
+            code: `citation_mismatch:${d.id}`,
+            message: `${d.def_number} — cited section text doesn't match canonical FBC wording`,
+            findingId: d.id,
+          });
+        } else if (d.citation_status === "not_found") {
+          issues.push({
+            severity: "warning",
+            code: `citation_not_found:${d.id}`,
+            message: `${d.def_number} — cited section isn't in the FBC database (verify it exists)`,
+            findingId: d.id,
+          });
+        }
+      }
     }
 
     if (typeof letterDraft === "string" && letterDraft.trim().length > 0) {

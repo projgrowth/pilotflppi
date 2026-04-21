@@ -5,6 +5,7 @@ import DeficiencyHeader from "./deficiency/DeficiencyHeader";
 import DeficiencyEvidence from "./deficiency/DeficiencyEvidence";
 import DeficiencyActions from "./deficiency/DeficiencyActions";
 import FindingProvenancePopover from "./FindingProvenancePopover";
+import CitationBadge from "./CitationBadge";
 
 interface Props {
   planReviewId: string;
@@ -60,6 +61,11 @@ export default function DeficiencyCard({
               <DeficiencyHeader planReviewId={planReviewId} def={def} />
             </div>
             <div className="flex shrink-0 items-center gap-1">
+              <CitationBadge
+                status={def.citation_status}
+                matchScore={def.citation_match_score}
+                canonicalText={def.citation_canonical_text}
+              />
               {reviewed && (
                 <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
                   {def.reviewer_disposition}
