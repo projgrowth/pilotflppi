@@ -51,10 +51,11 @@ export default function DedupeAuditTrail({ planReviewId, onJump }: Props) {
 
   const merges = meta.merges ?? [];
 
-  const handleJump = (id: string) => {
+  const handleJump = (id: string, isLoser: boolean) => {
+    if (isLoser) requestShowSuperseded();
     onJump(id);
     // Small delay so the tab content mounts before we look for the element.
-    scrollToFinding(id, { delayMs: 120 });
+    scrollToFinding(id, { delayMs: 160 });
   };
 
   if (merges.length === 0) {
