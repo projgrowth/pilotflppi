@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Check, X, Loader2, FileWarning } from "lucide-react";
+import { Check, X, Loader2, FileWarning, ChevronDown, FileText } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   DEFERRED_SCOPE_LABELS,
   useDeferredScope,
@@ -105,9 +110,18 @@ export default function DeferredScopePanel({ planReviewId }: Props) {
                     {item.status}
                   </Badge>
                   {item.sheet_refs.length > 0 && (
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {item.sheet_refs.join(", ")}
-                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {item.sheet_refs.map((ref, i) => (
+                        <Badge
+                          key={`${ref}-${i}`}
+                          variant="outline"
+                          className="font-mono text-[10px] px-1.5 py-0 gap-1 border-primary/30 bg-primary/5 text-primary"
+                        >
+                          <FileText className="h-2.5 w-2.5" />
+                          {ref}
+                        </Badge>
+                      ))}
+                    </div>
                   )}
                 </div>
                 <p className="text-sm text-foreground">{item.description}</p>
@@ -131,16 +145,27 @@ export default function DeferredScopePanel({ planReviewId }: Props) {
             )}
 
             {item.evidence.length > 0 && (
-              <div className="rounded-md bg-muted/40 p-3">
-                <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Evidence from plans
-                </div>
-                <ul className="list-disc pl-5 space-y-0.5 text-xs text-foreground">
-                  {item.evidence.map((e, i) => (
-                    <li key={i}>{e}</li>
-                  ))}
-                </ul>
-              </div>
+              <Collapsible>
+                <CollapsibleTrigger className="group flex w-full items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-left transition-colors hover:bg-muted/60">
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Evidence from plans · {item.evidence.length} snippet
+                    {item.evidence.length === 1 ? "" : "s"}
+                  </span>
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down">
+                  <ul className="mt-2 space-y-1.5 rounded-md border border-border/40 bg-muted/20 p-3 text-xs">
+                    {item.evidence.map((e, i) => (
+                      <li
+                        key={i}
+                        className="border-l-2 border-primary/40 pl-2 font-mono leading-relaxed text-foreground"
+                      >
+                        "{e}"
+                      </li>
+                    ))}
+                  </ul>
+                </CollapsibleContent>
+              </Collapsible>
             )}
 
             <Textarea
