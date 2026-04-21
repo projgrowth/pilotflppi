@@ -134,6 +134,15 @@ export default function ReviewDashboard() {
             )}
             {running ? "Running…" : "Run Pipeline"}
           </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={handleGenerateReport}
+            disabled={!review?.project}
+          >
+            <FileDown className="mr-1 h-4 w-4" />
+            Generate Report
+          </Button>
           <Button asChild variant="outline" size="sm">
             <Link to={`/plan-review/${id}`}>
               <ArrowLeft className="mr-1 h-4 w-4" /> Back to workspace
