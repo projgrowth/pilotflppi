@@ -2027,11 +2027,18 @@ async function stageDedupe(
     examined: rows.length,
     groups_merged: merges.length,
     findings_superseded: supersededCount,
-    merges: merges.map((m) => ({
-      winner: m.winner,
-      loser_count: m.losers.length,
-      reason: m.reason,
-    })),
+    merges: merges.map((m) => {
+      const winnerRow = rows.find((r) => r.id === m.winner);
+      return {
+        winner: m.winner,
+        winner_def_number: winnerRow?.def_number ?? null,
+        winner_discipline: winnerRow?.discipline ?? null,
+        winner_confidence: winnerRow?.confidence_score ?? null,
+        loser_ids: m.losers,
+        loser_count: m.losers.length,
+        reason: m.reason,
+      };
+    }),
   };
 }
 
