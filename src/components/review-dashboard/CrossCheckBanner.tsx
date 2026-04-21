@@ -377,6 +377,64 @@ export default function CrossCheckBanner({ planReviewId }: Props) {
               ))}
             </div>
           )}
+
+          {consistencyMismatches.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Cross-sheet mismatches
+              </div>
+              {consistencyMismatches.map((m, idx) => {
+                const key = `consistency:${m.deficiency_id ?? `${m.sheet_a}|${m.sheet_b}|${idx}`}`;
+                return (
+                  <div
+                    key={key}
+                    className="rounded-md border border-border bg-background/60 px-3 py-2"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 text-sm">
+                          <GitCompareArrows className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                          <span className="font-medium">
+                            {m.def_number ?? "Mismatch"}
+                          </span>
+                          <span className="text-2xs uppercase tracking-wide text-muted-foreground">
+                            {m.category.replace(/_/g, " ")}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {m.description}
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-2xs">
+                          <span className="rounded bg-muted px-1.5 py-0.5 font-mono">
+                            {m.sheet_a}
+                          </span>
+                          <span className="text-muted-foreground">"{m.value_a}"</span>
+                          <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                          <span className="rounded bg-muted px-1.5 py-0.5 font-mono">
+                            {m.sheet_b}
+                          </span>
+                          <span className="text-muted-foreground">"{m.value_b}"</span>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => dismissConsistency(m, idx)}
+                        disabled={busyId === key}
+                      >
+                        {busyId === key ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <X className="h-3.5 w-3.5" />
+                        )}
+                        Dismiss
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>
