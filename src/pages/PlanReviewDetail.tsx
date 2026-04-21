@@ -127,6 +127,29 @@ export default function PlanReviewDetail() {
  enabled: !!review?.project_id,
  });
 
+ // ── V2 source-of-truth: when pipeline_version === 'v2', findings live in the
+ // deficiencies_v2 table (verified, dedup'd, with human-review flags) instead of
+ // the legacy ai_findings JSONB. We adapt them down to the legacy Finding shape
+ // so the existing PDF viewer, comment letter, lint, and SitePlanChecklist all
+ // render V2 data without bespoke V2 components. Write paths that would mutate
+ // ai_findings (run AI, new round, reposition pin) are disabled below.
+ const isV2Pipeline = review?.pipeline_version === "v2";
+ const { data: v2Findings } = useQuery({
+  queryKey: ["v2-findings-for-viewer", review?.id],
+  enabled: !!review?.id && isV2Pipeline,
+  queryFn: async () => {
+   const { data, error } = await supabase
+    .from("deficiencies_v2")
+    .select(
+     "id, def_number, discipline, finding, required_action, sheet_refs, code_reference, evidence, confidence_score, confidence_basis, priority, life_safety_flag, permit_blocker, liability_flag, requires_human_review, human_review_reason, verification_status, status, model_version",
+    )
+    .eq("plan_review_id", review!.id)
+    .order("def_number", { ascending: true });
+   if (error) throw error;
+   return adaptV2ToFindings((data ?? []) as DeficiencyV2Lite[]);
+  },
+ });
+
  const [aiRunning, setAiRunning] = useState(false);
  const [scanStep, setScanStep] = useState(0);
  const [commentLetter, setCommentLetter] = useState("");
