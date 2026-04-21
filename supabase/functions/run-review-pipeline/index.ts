@@ -20,6 +20,7 @@ type Stage =
   | "discipline_review"
   | "verify"
   | "dedupe"
+  | "ground_citations"
   | "cross_check"
   | "deferred_scope"
   | "prioritize"
@@ -32,6 +33,7 @@ const STAGES: Stage[] = [
   "discipline_review",
   "verify",
   "dedupe",
+  "ground_citations",
   "cross_check",
   "deferred_scope",
   "prioritize",
@@ -2128,6 +2130,170 @@ async function stageDedupe(
   };
 }
 
+// ---------- citation grounding ----------
+
+/**
+ * Normalize a code-section identifier for canonical lookup.
+ * "1006.2.1 " → "1006.2.1", "Sec. 1010.1.9" → "1010.1.9", "R602.10" → "R602.10"
+ */
+function normalizeCitationSection(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const m = raw
+    .replace(/sec(?:tion)?\.?/i, "")
+    .replace(/[§¶]/g, "")
+    .trim()
+    .match(/[A-Z]?\d+(?:\.\d+)*[a-z]?/i);
+  return m ? m[0].toUpperCase() : null;
+}
+
+/** Cheap token overlap (Jaccard) for "does the AI's text resemble the canonical requirement?". */
+function citationOverlapScore(aiText: string, canonical: string): number {
+  const tok = (s: string) =>
+    new Set(
+      s
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length > 3),
+    );
+  const a = tok(aiText);
+  const b = tok(canonical);
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const w of a) if (b.has(w)) inter++;
+  const union = new Set([...a, ...b]).size;
+  return union === 0 ? 0 : inter / union;
+}
+
+type GroundingRow = {
+  id: string;
+  finding: string;
+  required_action: string;
+  code_reference:
+    | { code?: string | null; section?: string | null; edition?: string | null }
+    | null;
+};
+
+async function stageGroundCitations(
+  admin: ReturnType<typeof createClient>,
+  planReviewId: string,
+) {
+  // Pull every active finding (skip already-superseded/resolved/waived).
+  const { data: defsRaw, error } = await admin
+    .from("deficiencies_v2")
+    .select("id, finding, required_action, code_reference")
+    .eq("plan_review_id", planReviewId)
+    .neq("status", "resolved")
+    .neq("status", "waived")
+    .neq("verification_status", "superseded");
+  if (error) throw error;
+
+  const defs = (defsRaw ?? []) as GroundingRow[];
+  if (defs.length === 0) {
+    return { examined: 0, verified: 0, mismatch: 0, not_found: 0, hallucinated: 0 };
+  }
+
+  // Collect distinct (code, section, edition) tuples and resolve all at once.
+  type Key = { code: string; section: string; edition: string | null };
+  const keyOf = (r: GroundingRow): Key | null => {
+    const section = normalizeCitationSection(r.code_reference?.section);
+    if (!section) return null;
+    const code = (r.code_reference?.code || "FBC").toUpperCase();
+    const edition = r.code_reference?.edition?.trim() || null;
+    return { code, section, edition };
+  };
+
+  const distinctSections = Array.from(
+    new Set(
+      defs
+        .map((d) => keyOf(d))
+        .filter((k): k is Key => !!k)
+        .map((k) => k.section),
+    ),
+  );
+
+  // Single bulk lookup; we filter in-memory to keep round-trips cheap.
+  const { data: canonRaw, error: canonErr } =
+    distinctSections.length > 0
+      ? await admin
+          .from("fbc_code_sections")
+          .select("code, section, edition, title, requirement_text")
+          .in("section", distinctSections)
+      : { data: [], error: null };
+  if (canonErr) throw canonErr;
+
+  type Canon = {
+    code: string;
+    section: string;
+    edition: string;
+    title: string;
+    requirement_text: string;
+  };
+  const canon = (canonRaw ?? []) as Canon[];
+
+  function lookup(k: Key): Canon | null {
+    // Exact (code, section, edition) → exact (code, section) → section-only.
+    let hit =
+      (k.edition &&
+        canon.find(
+          (c) =>
+            c.code === k.code && c.section === k.section && c.edition === k.edition,
+        )) ||
+      null;
+    if (!hit) hit = canon.find((c) => c.code === k.code && c.section === k.section) ?? null;
+    if (!hit) hit = canon.find((c) => c.section === k.section) ?? null;
+    return hit;
+  }
+
+  const counts = { verified: 0, mismatch: 0, not_found: 0, hallucinated: 0 };
+  const now = new Date().toISOString();
+
+  for (const def of defs) {
+    const key = keyOf(def);
+    let status: "verified" | "mismatch" | "not_found" | "hallucinated";
+    let score: number | null = null;
+    let canonText: string | null = null;
+
+    if (!key) {
+      // No parseable section at all = hallucinated/missing citation.
+      status = "hallucinated";
+    } else {
+      const hit = lookup(key);
+      if (!hit) {
+        status = "not_found";
+      } else {
+        canonText = `${hit.code} ${hit.section} (${hit.edition}) — ${hit.title}: ${hit.requirement_text}`.slice(
+          0,
+          1500,
+        );
+        const aiBlob = `${def.finding} ${def.required_action}`;
+        score = citationOverlapScore(aiBlob, hit.requirement_text);
+        status = score >= 0.18 ? "verified" : "mismatch";
+      }
+    }
+    counts[status]++;
+
+    const { error: updErr } = await admin
+      .from("deficiencies_v2")
+      .update({
+        citation_status: status,
+        citation_match_score: score,
+        citation_canonical_text: canonText,
+        citation_grounded_at: now,
+      })
+      .eq("id", def.id);
+    if (updErr) console.error("[ground_citations] update failed", def.id, updErr);
+  }
+
+  return {
+    examined: defs.length,
+    verified: counts.verified,
+    mismatch: counts.mismatch,
+    not_found: counts.not_found,
+    hallucinated: counts.hallucinated,
+  };
+}
+
 // ---------- main handler ----------
 
 Deno.serve(async (req) => {
@@ -2210,6 +2376,7 @@ Deno.serve(async (req) => {
       discipline_review: () => stageDisciplineReview(admin, plan_review_id, firmId),
       verify: () => stageVerify(admin, plan_review_id),
       dedupe: () => stageDedupe(admin, plan_review_id),
+      ground_citations: () => stageGroundCitations(admin, plan_review_id),
       cross_check: () => stageCrossCheck(admin, plan_review_id),
       deferred_scope: () => stageDeferredScope(admin, plan_review_id, firmId),
       prioritize: () => stagePrioritize(admin, plan_review_id),

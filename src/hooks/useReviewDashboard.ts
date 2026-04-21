@@ -9,6 +9,7 @@ export type PipelineStage =
   | "discipline_review"
   | "verify"
   | "dedupe"
+  | "ground_citations"
   | "cross_check"
   | "deferred_scope"
   | "prioritize"
@@ -21,6 +22,7 @@ export const PIPELINE_STAGES: { key: PipelineStage; label: string }[] = [
   { key: "discipline_review", label: "Discipline Review" },
   { key: "verify", label: "Verify" },
   { key: "dedupe", label: "Dedupe" },
+  { key: "ground_citations", label: "Ground Citations" },
   { key: "cross_check", label: "Cross-Check" },
   { key: "deferred_scope", label: "Deferred Scope" },
   { key: "prioritize", label: "Prioritize" },
@@ -95,6 +97,10 @@ export interface DeficiencyV2Row {
   verification_status: "unverified" | "verified" | "overturned" | "modified" | "superseded" | "needs_human";
   verification_notes: string;
   model_version?: string | null;
+  citation_status?: "unverified" | "verified" | "mismatch" | "not_found" | "hallucinated";
+  citation_match_score?: number | null;
+  citation_canonical_text?: string | null;
+  citation_grounded_at?: string | null;
 }
 
 export function usePipelineStatus(planReviewId?: string) {
