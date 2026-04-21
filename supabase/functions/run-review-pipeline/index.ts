@@ -721,11 +721,97 @@ async function stageDnaExtract(
 
   const { error } = await admin.from("project_dna").insert(row);
   if (error) throw error;
+
+  const health = evaluateDnaHealth(row, project?.projects?.county ?? null);
   return {
     extracted: true,
     pages_read: imageUrls.length,
     missing: row.missing_fields.length,
+    ...health,
   };
+}
+
+// Critical fields used to compute completeness. Wrong/missing here = wrong findings downstream.
+const CRITICAL_DNA_FIELDS = [
+  "occupancy_classification",
+  "construction_type",
+  "county",
+  "stories",
+  "total_sq_ft",
+  "fbc_edition",
+] as const;
+
+interface DnaHealth {
+  completeness: number;
+  critical_missing: string[];
+  jurisdiction_mismatch: boolean;
+  blocking: boolean;
+  block_reason: string | null;
+}
+
+function evaluateDnaHealth(
+  dna: Record<string, unknown>,
+  projectCounty: string | null,
+): DnaHealth {
+  const criticalMissing: string[] = [];
+  for (const f of CRITICAL_DNA_FIELDS) {
+    const v = dna[f];
+    if (v === null || v === undefined || v === "") criticalMissing.push(f);
+  }
+  const completeness =
+    (CRITICAL_DNA_FIELDS.length - criticalMissing.length) /
+    CRITICAL_DNA_FIELDS.length;
+
+  // Hard mismatch: extracted county doesn't match project county
+  // (wrong county => wrong code edition + HVHZ rules => every finding suspect).
+  const dnaCounty = (dna.county as string | null)?.toLowerCase().trim() || null;
+  const projCounty = projectCounty?.toLowerCase().trim() || null;
+  const jurisdictionMismatch =
+    !!dnaCounty && !!projCounty && dnaCounty !== projCounty;
+
+  let blocking = false;
+  let block_reason: string | null = null;
+  if (criticalMissing.includes("county")) {
+    blocking = true;
+    block_reason = "County missing from extracted DNA — cannot apply jurisdiction-specific code.";
+  } else if (jurisdictionMismatch) {
+    blocking = true;
+    block_reason = `Extracted county (${dna.county}) does not match project county (${projectCounty}) — wrong code edition would be applied.`;
+  } else if (completeness < 0.5) {
+    blocking = true;
+    block_reason = `Only ${Math.round(completeness * 100)}% of critical DNA fields populated — findings would be unreliable.`;
+  }
+
+  return {
+    completeness,
+    critical_missing: criticalMissing,
+    jurisdiction_mismatch: jurisdictionMismatch,
+    blocking,
+    block_reason,
+  };
+}
+
+/**
+ * Re-evaluate DNA health from the current row in project_dna (used after a
+ * reviewer manually patches missing fields and re-runs the pipeline from
+ * `verify` onwards). No vision call — pure DB read + score.
+ */
+async function stageDnaReevaluate(
+  admin: ReturnType<typeof createClient>,
+  planReviewId: string,
+) {
+  const { data: dna, error } = await admin
+    .from("project_dna")
+    .select("*, plan_reviews!inner(projects(county))")
+    .eq("plan_review_id", planReviewId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!dna) throw new Error("No project_dna row to re-evaluate");
+  const projectCounty =
+    ((dna as unknown as { plan_reviews?: { projects?: { county?: string } } })
+      .plan_reviews?.projects?.county) ?? null;
+  const health = evaluateDnaHealth(dna as Record<string, unknown>, projectCounty);
+  return { reevaluated: true, ...health };
 }
 
 async function stageDisciplineReview(
@@ -2071,7 +2157,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { plan_review_id } = await req.json().catch(() => ({}));
+    const body = await req.json().catch(() => ({}));
+    const plan_review_id = body?.plan_review_id;
+    const startFrom: Stage | undefined = body?.start_from;
     if (!plan_review_id || typeof plan_review_id !== "string") {
       return new Response(JSON.stringify({ error: "plan_review_id required" }), {
         status: 400,
@@ -2097,9 +2185,22 @@ Deno.serve(async (req) => {
 
     const firmId = (pr as { firm_id: string | null }).firm_id;
 
+    // Determine which stages to run. When `start_from` is supplied (e.g. after
+    // a manual DNA patch), we skip earlier stages but still substitute a cheap
+    // `dna_extract` re-evaluation so the gate runs on the patched values.
+    const startIdx = startFrom ? STAGES.indexOf(startFrom) : 0;
+    const effectiveStart = startIdx < 0 ? 0 : startIdx;
+    const stagesToRun = STAGES.slice(effectiveStart);
+
     // Mark all stages pending up-front so the stepper renders immediately.
-    for (const s of STAGES) {
-      await setStage(admin, plan_review_id, firmId, s, { status: "pending" });
+    if (effectiveStart === 0) {
+      for (const s of STAGES) {
+        await setStage(admin, plan_review_id, firmId, s, { status: "pending" });
+      }
+    } else {
+      for (const s of stagesToRun) {
+        await setStage(admin, plan_review_id, firmId, s, { status: "pending" });
+      }
     }
 
     const stageImpls: Record<Stage, () => Promise<Record<string, unknown>>> = {
@@ -2117,23 +2218,45 @@ Deno.serve(async (req) => {
 
     const results: Record<string, unknown> = {};
     let halted = false;
+    let haltReason: string | null = null;
 
-    for (const stage of STAGES) {
+    for (const stage of stagesToRun) {
       if (halted) {
         await setStage(admin, plan_review_id, firmId, stage, {
           status: "error",
-          error_message: "Skipped — earlier stage failed",
+          error_message: haltReason ?? "Skipped — earlier stage failed",
         });
         continue;
       }
       await setStage(admin, plan_review_id, firmId, stage, { status: "running" });
       try {
-        const meta = await withRetry(() => stageImpls[stage](), `stage:${stage}`);
+        // When re-running from a later stage, substitute a cheap re-evaluation
+        // for the expensive vision-based extract so the gate still runs.
+        const impl =
+          stage === "dna_extract" && effectiveStart > 0
+            ? () => stageDnaReevaluate(admin, plan_review_id)
+            : stageImpls[stage];
+        const meta = await withRetry(() => impl(), `stage:${stage}`);
         results[stage] = meta;
         await setStage(admin, plan_review_id, firmId, stage, {
           status: "complete",
           metadata: meta,
         });
+
+        // DNA gate: block downstream stages if extraction is unreliable.
+        if (stage === "dna_extract") {
+          const m = meta as Partial<DnaHealth>;
+          if (m.blocking) {
+            halted = true;
+            haltReason = `DNA gate: ${m.block_reason ?? "extraction blocked"}`;
+            // Re-mark the dna_extract row with the block reason so the UI can surface it.
+            await setStage(admin, plan_review_id, firmId, stage, {
+              status: "error",
+              error_message: haltReason,
+              metadata: meta as Record<string, unknown>,
+            });
+          }
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         results[stage] = { error: message };
@@ -2142,11 +2265,14 @@ Deno.serve(async (req) => {
           error_message: message,
         });
         // 'upload' and 'dna_extract' are hard prerequisites — halt if they fail.
-        if (stage === "upload" || stage === "dna_extract") halted = true;
+        if (stage === "upload" || stage === "dna_extract") {
+          halted = true;
+          haltReason = `${stage} failed: ${message}`;
+        }
       }
     }
 
-    return new Response(JSON.stringify({ ok: !halted, results }), {
+    return new Response(JSON.stringify({ ok: !halted, halt_reason: haltReason, results }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200,
     });

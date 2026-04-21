@@ -11,6 +11,7 @@ import ReviewHealthStrip from "@/components/review-dashboard/ReviewHealthStrip";
 import DeficiencyList from "@/components/review-dashboard/DeficiencyList";
 import HumanReviewQueue from "@/components/review-dashboard/HumanReviewQueue";
 import ProjectDNAViewer from "@/components/review-dashboard/ProjectDNAViewer";
+import DnaHealthBanner from "@/components/review-dashboard/DnaHealthBanner";
 import SheetCoverageMap from "@/components/review-dashboard/SheetCoverageMap";
 import DeferredScopePanel from "@/components/review-dashboard/DeferredScopePanel";
 import DedupeAuditTrail from "@/components/review-dashboard/DedupeAuditTrail";
@@ -163,6 +164,14 @@ export default function ReviewDashboard() {
       </div>
 
       {review?.project && (
+        <DnaHealthBanner
+          planReviewId={id}
+          projectCounty={review.project.county}
+          onJumpToDna={() => setActiveTab("dna")}
+        />
+      )}
+
+      {review?.project && (
         <ReviewHealthStrip
           planReviewId={id}
           status={status}
@@ -202,7 +211,11 @@ export default function ReviewDashboard() {
           />
         </TabsContent>
         <TabsContent value="dna" className="mt-4">
-          <ProjectDNAViewer planReviewId={id} jurisdictionMismatch={jurisdictionMismatch} />
+          <ProjectDNAViewer
+            planReviewId={id}
+            jurisdictionMismatch={jurisdictionMismatch}
+            onAfterRerun={() => setActiveTab("deficiencies")}
+          />
         </TabsContent>
         <TabsContent value="coverage" className="mt-4">
           <SheetCoverageMap planReviewId={id} />
