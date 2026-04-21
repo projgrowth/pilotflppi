@@ -174,6 +174,31 @@ export default function CrossCheckBanner({ planReviewId }: Props) {
     }
   };
 
+  const dismissConsistency = async (m: ConsistencyMismatch, idx: number) => {
+    const key = `consistency:${m.deficiency_id ?? `${m.sheet_a}|${m.sheet_b}|${idx}`}`;
+    setBusyId(key);
+    try {
+      await dismissKeys([key]);
+      // If we created a deficiency, also resolve it so it disappears from the list.
+      if (m.deficiency_id) {
+        await supabase
+          .from("deficiencies_v2")
+          .update({
+            status: "resolved",
+            reviewer_disposition: "reject",
+            reviewer_notes: "Cross-sheet mismatch dismissed from banner.",
+          })
+          .eq("id", m.deficiency_id);
+      }
+      toast.success("Mismatch dismissed");
+      refreshAll();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Dismiss failed");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const dismissKeys = async (keys: string[]) => {
     const row = rows.find((r) => r.stage === "cross_check");
     const existing =
@@ -187,6 +212,12 @@ export default function CrossCheckBanner({ planReviewId }: Props) {
     const filteredContradictions = (existing.contradictions ?? []).filter(
       (c) => !dismissed.has(`contradiction:${c.deficiency_id}`),
     );
+    const filteredConsistency = (existing.consistency_mismatches ?? []).filter(
+      (m, idx) =>
+        !dismissed.has(
+          `consistency:${m.deficiency_id ?? `${m.sheet_a}|${m.sheet_b}|${idx}`}`,
+        ),
+    );
 
     const nextMetadata = {
       ...existing,
@@ -194,6 +225,8 @@ export default function CrossCheckBanner({ planReviewId }: Props) {
       duplicates_found: filteredDuplicates.length,
       contradictions: filteredContradictions,
       contradictions_found: filteredContradictions.length,
+      consistency_mismatches: filteredConsistency,
+      consistency_mismatches_found: filteredConsistency.length,
       dismissed: Array.from(dismissed),
     } as unknown as Record<string, never>;
 
