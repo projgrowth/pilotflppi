@@ -35,11 +35,27 @@ interface Contradiction {
   reason: string;
 }
 
+interface ConsistencyMismatch {
+  category: string;
+  description: string;
+  sheet_a: string;
+  value_a: string;
+  sheet_b: string;
+  value_b: string;
+  evidence: string[];
+  severity: "high" | "medium" | "low";
+  confidence_score: number;
+  deficiency_id?: string;
+  def_number?: string;
+}
+
 interface CrossCheckMetadata {
   duplicate_groups?: DuplicateGroup[];
   duplicates_found?: number;
   contradictions?: Contradiction[];
   contradictions_found?: number;
+  consistency_mismatches?: ConsistencyMismatch[];
+  consistency_mismatches_found?: number;
 }
 
 interface Props {
