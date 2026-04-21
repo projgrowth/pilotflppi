@@ -1466,7 +1466,11 @@ async function stageComplete(
 ) {
   await admin
     .from("plan_reviews")
-    .update({ ai_check_status: "complete", updated_at: new Date().toISOString() })
+    .update({
+      ai_check_status: "complete",
+      pipeline_version: "v2",
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", planReviewId);
   return { ok: true };
 }
