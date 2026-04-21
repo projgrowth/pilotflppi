@@ -1190,8 +1190,24 @@ export default function PlanReviewDetail() {
  onBack={() => navigate("/plan-review")}
  onRunAICheck={() => runAICheck(review)}
  onNavigateRound={(rid) => navigate(`/plan-review/${rid}`)}
- onNewRound={createNewRound}
+  onNewRound={createNewRound}
  />
+
+ {/* ── V2 pipeline banner: source-of-truth lives in deficiencies_v2 ── */}
+ {(review as { pipeline_version?: string }).pipeline_version === "v2" && (
+  <div className="shrink-0 border-b border-primary/20 bg-primary/5 px-4 py-2 flex items-center justify-between gap-3">
+   <div className="flex items-center gap-2 min-w-0">
+    <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" />
+    <span className="text-2xs font-semibold uppercase tracking-wide text-primary">V2 Pipeline</span>
+    <span className="text-xs text-muted-foreground truncate">
+     Findings live in the V2 dashboard (verification, cross-check, deferred scope, human-review queue).
+    </span>
+   </div>
+   <Button size="sm" variant="default" onClick={() => navigate(`/plan-review/${review.id}/dashboard`)} className="shrink-0 h-7 text-xs">
+    Open V2 Dashboard
+   </Button>
+  </div>
+ )}
 
  {/* ── Resume banner: another tab is mid-run on this review ── */}
  {resumingFromOtherTab && !aiRunning && (
