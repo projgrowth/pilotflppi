@@ -40,6 +40,11 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import RejectionReasonDialog from "./RejectionReasonDialog";
+import {
+  recordCorrectionPattern,
+  type RejectionReason,
+} from "@/hooks/useCorrectionPatterns";
 
 interface Props {
   planReviewId: string;
@@ -51,6 +56,7 @@ export default function DeficiencyCard({ planReviewId, def, showHumanReviewConte
   const qc = useQueryClient();
   const [notes, setNotes] = useState(def.reviewer_notes ?? "");
   const [saving, setSaving] = useState<string | null>(null);
+  const [rejectOpen, setRejectOpen] = useState(false);
   const { data: coverage = [] } = useSheetCoverage(planReviewId);
 
   // Map first cited sheet → page index for the "Open in PDF" deep link.
@@ -71,27 +77,60 @@ export default function DeficiencyCard({ planReviewId, def, showHumanReviewConte
   const [evidenceOpen, setEvidenceOpen] = useState(defaultEvidenceOpen);
 
   async function setDisposition(d: "confirm" | "reject" | "modify") {
+    // Reject opens the structured-reason dialog; the actual write happens in handleRejectConfirm.
+    if (d === "reject") {
+      setRejectOpen(true);
+      return;
+    }
     setSaving(d);
     try {
       await updateDeficiencyDisposition(def.id, { reviewer_disposition: d });
-
-      // When the reviewer rejects, log a 'reject' to review_feedback so the
-      // learning loop can pick it up.
-      if (d === "reject") {
-        const { data: auth } = await supabase.auth.getUser();
-        await supabase.from("review_feedback").insert({
-          plan_review_id: planReviewId,
-          deficiency_id: def.id,
-          feedback_type: "reject_false_positive",
-          notes: notes || null,
-          reviewer_id: auth?.user?.id ?? null,
-        });
-      }
-
       qc.invalidateQueries({ queryKey: ["deficiencies_v2", planReviewId] });
       toast.success(`Marked ${d}`);
     } catch {
       toast.error("Could not save");
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  async function handleRejectConfirm(reason: RejectionReason, reasonNotes: string) {
+    setSaving("reject");
+    try {
+      await updateDeficiencyDisposition(def.id, {
+        reviewer_disposition: "reject",
+        status: "waived",
+      });
+
+      const { data: auth } = await supabase.auth.getUser();
+      await supabase.from("review_feedback").insert({
+        plan_review_id: planReviewId,
+        deficiency_id: def.id,
+        feedback_type: `reject_${reason}`,
+        notes: reasonNotes || null,
+        reviewer_id: auth?.user?.id ?? null,
+      });
+
+      // Convert the rejection into a learned pattern.
+      await recordCorrectionPattern({
+        planReviewId,
+        deficiency: {
+          id: def.id,
+          discipline: def.discipline,
+          finding: def.finding,
+          required_action: def.required_action,
+          code_reference: def.code_reference,
+        },
+        reason,
+        notes: reasonNotes,
+      });
+
+      qc.invalidateQueries({ queryKey: ["deficiencies_v2", planReviewId] });
+      qc.invalidateQueries({ queryKey: ["correction_patterns"] });
+      setRejectOpen(false);
+      toast.success("Rejected — pattern saved for future reviews");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save rejection");
     } finally {
       setSaving(null);
     }

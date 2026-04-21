@@ -11,6 +11,7 @@ import ReviewStatusBar from "@/components/review-dashboard/ReviewStatusBar";
 import ReviewSummaryHeader from "@/components/review-dashboard/ReviewSummaryHeader";
 import CrossCheckBanner from "@/components/review-dashboard/CrossCheckBanner";
 import VerificationBanner from "@/components/review-dashboard/VerificationBanner";
+import ReviewerMemoryCard from "@/components/review-dashboard/ReviewerMemoryCard";
 import DeficiencyList from "@/components/review-dashboard/DeficiencyList";
 import HumanReviewQueue from "@/components/review-dashboard/HumanReviewQueue";
 import ProjectDNAViewer from "@/components/review-dashboard/ProjectDNAViewer";
@@ -158,6 +159,8 @@ export default function ReviewDashboard() {
       <ReviewStatusBar planReviewId={id} />
 
       <VerificationBanner planReviewId={id} />
+
+      <ReviewerMemoryCard planReviewId={id} />
 
       <CrossCheckBanner planReviewId={id} />
 
