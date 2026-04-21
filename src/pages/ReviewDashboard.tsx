@@ -36,6 +36,7 @@ export default function ReviewDashboard() {
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
   const [running, setRunning] = useState(false);
+  const [activeTab, setActiveTab] = useState("deficiencies");
 
   const runPipeline = async () => {
     if (!id) return;
