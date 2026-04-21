@@ -192,6 +192,56 @@ export async function updateDeficiencyDisposition(
   if (error) throw error;
 }
 
+/**
+ * Patch project_dna fields after a manual reviewer override. Caller is
+ * expected to invoke the pipeline with start_from='verify' afterwards so the
+ * gate re-runs against the patched values.
+ */
+export async function updateProjectDna(
+  planReviewId: string,
+  patch: Partial<ProjectDnaRow>,
+) {
+  const { id: _id, plan_review_id: _pr, missing_fields, ambiguous_fields, ...editable } =
+    patch as Partial<ProjectDnaRow>;
+  void _id;
+  void _pr;
+
+  // Recompute missing_fields/ambiguous_fields against the patched values so
+  // the banner clears immediately without waiting on the pipeline re-run.
+  const { data: existing } = await supabase
+    .from("project_dna")
+    .select("*")
+    .eq("plan_review_id", planReviewId)
+    .maybeSingle();
+  const merged = { ...(existing ?? {}), ...editable } as Record<string, unknown>;
+  const CRITICAL = [
+    "occupancy_classification",
+    "construction_type",
+    "county",
+    "stories",
+    "total_sq_ft",
+    "fbc_edition",
+  ];
+  const newMissing = CRITICAL.filter((f) => {
+    const v = merged[f];
+    return v === null || v === undefined || v === "";
+  });
+  const editedKeys = Object.keys(editable);
+  const newAmbiguous = ((existing?.ambiguous_fields as string[] | null) ?? [])
+    .filter((k) => !editedKeys.includes(k));
+
+  const { error } = await supabase
+    .from("project_dna")
+    .update({
+      ...editable,
+      missing_fields: missing_fields ?? newMissing,
+      ambiguous_fields: ambiguous_fields ?? newAmbiguous,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("plan_review_id", planReviewId);
+  if (error) throw error;
+}
+
 export type DeferredScopeCategory =
   | "fire_sprinkler"
   | "fire_alarm"
