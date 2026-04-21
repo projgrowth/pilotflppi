@@ -92,7 +92,7 @@ export interface DeficiencyV2Row {
   reviewer_disposition: "confirm" | "reject" | "modify" | null;
   reviewer_notes: string;
   status: "open" | "resolved" | "waived" | "needs_info";
-  verification_status: "unverified" | "verified" | "overturned" | "modified";
+  verification_status: "unverified" | "verified" | "overturned" | "modified" | "superseded" | "needs_human";
   verification_notes: string;
 }
 
