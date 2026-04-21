@@ -1,6 +1,16 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, GitMerge, X, ChevronDown, ChevronUp, History, Loader2 } from "lucide-react";
+import {
+  AlertTriangle,
+  GitMerge,
+  X,
+  ChevronDown,
+  ChevronUp,
+  History,
+  Loader2,
+  GitCompareArrows,
+  ArrowRight,
+} from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -25,11 +35,27 @@ interface Contradiction {
   reason: string;
 }
 
+interface ConsistencyMismatch {
+  category: string;
+  description: string;
+  sheet_a: string;
+  value_a: string;
+  sheet_b: string;
+  value_b: string;
+  evidence: string[];
+  severity: "high" | "medium" | "low";
+  confidence_score: number;
+  deficiency_id?: string;
+  def_number?: string;
+}
+
 interface CrossCheckMetadata {
   duplicate_groups?: DuplicateGroup[];
   duplicates_found?: number;
   contradictions?: Contradiction[];
   contradictions_found?: number;
+  consistency_mismatches?: ConsistencyMismatch[];
+  consistency_mismatches_found?: number;
 }
 
 interface Props {
@@ -50,7 +76,8 @@ export default function CrossCheckBanner({ planReviewId }: Props) {
 
   const duplicates = meta.duplicate_groups ?? [];
   const contradictions = meta.contradictions ?? [];
-  const total = duplicates.length + contradictions.length;
+  const consistencyMismatches = meta.consistency_mismatches ?? [];
+  const total = duplicates.length + contradictions.length + consistencyMismatches.length;
 
   if (total === 0) return null;
 
@@ -147,6 +174,31 @@ export default function CrossCheckBanner({ planReviewId }: Props) {
     }
   };
 
+  const dismissConsistency = async (m: ConsistencyMismatch, idx: number) => {
+    const key = `consistency:${m.deficiency_id ?? `${m.sheet_a}|${m.sheet_b}|${idx}`}`;
+    setBusyId(key);
+    try {
+      await dismissKeys([key]);
+      // If we created a deficiency, also resolve it so it disappears from the list.
+      if (m.deficiency_id) {
+        await supabase
+          .from("deficiencies_v2")
+          .update({
+            status: "resolved",
+            reviewer_disposition: "reject",
+            reviewer_notes: "Cross-sheet mismatch dismissed from banner.",
+          })
+          .eq("id", m.deficiency_id);
+      }
+      toast.success("Mismatch dismissed");
+      refreshAll();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Dismiss failed");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const dismissKeys = async (keys: string[]) => {
     const row = rows.find((r) => r.stage === "cross_check");
     const existing =
@@ -160,6 +212,12 @@ export default function CrossCheckBanner({ planReviewId }: Props) {
     const filteredContradictions = (existing.contradictions ?? []).filter(
       (c) => !dismissed.has(`contradiction:${c.deficiency_id}`),
     );
+    const filteredConsistency = (existing.consistency_mismatches ?? []).filter(
+      (m, idx) =>
+        !dismissed.has(
+          `consistency:${m.deficiency_id ?? `${m.sheet_a}|${m.sheet_b}|${idx}`}`,
+        ),
+    );
 
     const nextMetadata = {
       ...existing,
@@ -167,6 +225,8 @@ export default function CrossCheckBanner({ planReviewId }: Props) {
       duplicates_found: filteredDuplicates.length,
       contradictions: filteredContradictions,
       contradictions_found: filteredContradictions.length,
+      consistency_mismatches: filteredConsistency,
+      consistency_mismatches_found: filteredConsistency.length,
       dismissed: Array.from(dismissed),
     } as unknown as Record<string, never>;
 
@@ -196,10 +256,19 @@ export default function CrossCheckBanner({ planReviewId }: Props) {
             Cross-check found {total} issue{total === 1 ? "" : "s"}
           </span>
           <span className="text-xs text-muted-foreground">
-            {duplicates.length > 0 && `${duplicates.length} duplicate${duplicates.length === 1 ? "" : "s"}`}
-            {duplicates.length > 0 && contradictions.length > 0 && " · "}
-            {contradictions.length > 0 &&
-              `${contradictions.length} contradiction${contradictions.length === 1 ? "" : "s"}`}
+            {[
+              duplicates.length > 0
+                ? `${duplicates.length} duplicate${duplicates.length === 1 ? "" : "s"}`
+                : null,
+              contradictions.length > 0
+                ? `${contradictions.length} contradiction${contradictions.length === 1 ? "" : "s"}`
+                : null,
+              consistencyMismatches.length > 0
+                ? `${consistencyMismatches.length} cross-sheet mismatch${consistencyMismatches.length === 1 ? "" : "es"}`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </span>
         </div>
         {open ? (
@@ -306,6 +375,64 @@ export default function CrossCheckBanner({ planReviewId }: Props) {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {consistencyMismatches.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Cross-sheet mismatches
+              </div>
+              {consistencyMismatches.map((m, idx) => {
+                const key = `consistency:${m.deficiency_id ?? `${m.sheet_a}|${m.sheet_b}|${idx}`}`;
+                return (
+                  <div
+                    key={key}
+                    className="rounded-md border border-border bg-background/60 px-3 py-2"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 text-sm">
+                          <GitCompareArrows className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                          <span className="font-medium">
+                            {m.def_number ?? "Mismatch"}
+                          </span>
+                          <span className="text-2xs uppercase tracking-wide text-muted-foreground">
+                            {m.category.replace(/_/g, " ")}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {m.description}
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-2xs">
+                          <span className="rounded bg-muted px-1.5 py-0.5 font-mono">
+                            {m.sheet_a}
+                          </span>
+                          <span className="text-muted-foreground">"{m.value_a}"</span>
+                          <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                          <span className="rounded bg-muted px-1.5 py-0.5 font-mono">
+                            {m.sheet_b}
+                          </span>
+                          <span className="text-muted-foreground">"{m.value_b}"</span>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => dismissConsistency(m, idx)}
+                        disabled={busyId === key}
+                      >
+                        {busyId === key ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <X className="h-3.5 w-3.5" />
+                        )}
+                        Dismiss
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
