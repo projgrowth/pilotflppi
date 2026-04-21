@@ -1202,9 +1202,275 @@ interface Contradiction {
   reason: string;
 }
 
+interface ConsistencyMismatch {
+  category:
+    | "door_schedule_vs_plan"
+    | "occupant_load_sum"
+    | "panel_schedule_vs_riser"
+    | "structural_callout_missing"
+    | "room_finish_vs_schedule"
+    | "fixture_count_vs_plumbing"
+    | "egress_width_vs_capacity"
+    | "other";
+  description: string;
+  sheet_a: string;
+  value_a: string;
+  sheet_b: string;
+  value_b: string;
+  evidence: string[];
+  severity: "high" | "medium" | "low";
+  confidence_score: number;
+  deficiency_id?: string;
+  def_number?: string;
+}
+
+const CROSS_SHEET_SCHEMA = {
+  name: "submit_cross_sheet_mismatches",
+  description:
+    "Identify CROSS-SHEET inconsistencies — numeric or callout mismatches where two sheets in the same submittal disagree. Examples: door schedule says 36\" but the floor plan shows 32\"; occupant load on the life-safety sheet doesn't equal the sum of room loads on architectural; electrical panel schedule kVA disagrees with the riser diagram; a structural beam callout is missing from the framing plan; plumbing fixture counts on the plumbing plan don't match the fixture schedule. Return ONLY mismatches you can prove with verbatim text from BOTH sheets. If you cannot quote both sides, do not return it.",
+  parameters: {
+    type: "object",
+    properties: {
+      mismatches: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            category: {
+              type: "string",
+              enum: [
+                "door_schedule_vs_plan",
+                "occupant_load_sum",
+                "panel_schedule_vs_riser",
+                "structural_callout_missing",
+                "room_finish_vs_schedule",
+                "fixture_count_vs_plumbing",
+                "egress_width_vs_capacity",
+                "other",
+              ],
+            },
+            description: {
+              type: "string",
+              description:
+                "1–2 sentences explaining the mismatch in plain language.",
+            },
+            sheet_a: { type: "string", description: "First sheet (e.g. A-101)." },
+            value_a: {
+              type: "string",
+              description:
+                "Verbatim value/text from sheet_a (e.g. 'Door 101: 3'-0\" x 7'-0\"').",
+            },
+            sheet_b: { type: "string", description: "Second sheet (e.g. A-601)." },
+            value_b: {
+              type: "string",
+              description:
+                "Verbatim value/text from sheet_b that disagrees (e.g. 'Door 101 schedule: 2'-8\" x 6'-8\"').",
+            },
+            evidence: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Up to 3 short verbatim snippets (≤200 chars) supporting the mismatch.",
+            },
+            severity: { type: "string", enum: ["high", "medium", "low"] },
+            confidence_score: { type: "number", minimum: 0, maximum: 1 },
+          },
+          required: [
+            "category",
+            "description",
+            "sheet_a",
+            "value_a",
+            "sheet_b",
+            "value_b",
+            "severity",
+            "confidence_score",
+          ],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["mismatches"],
+    additionalProperties: false,
+  },
+} as const;
+
+const CROSS_SHEET_SYSTEM_PROMPT = `You are a senior plan reviewer doing a CROSS-SHEET CONSISTENCY pass. The discipline reviewers already ran on individual sheets. Your job is the bug class they cannot catch alone: contradictions BETWEEN sheets in the same submittal.
+
+Hunt for these patterns:
+- Door/window schedule vs floor-plan callouts disagree on size, hardware, fire rating
+- Occupant load on life-safety/code summary sheet ≠ sum of room loads on architectural
+- Plumbing fixture count on plan ≠ fixture schedule ≠ riser diagram
+- Electrical panel schedule kVA / breaker count ≠ riser diagram
+- Structural beam/column callout on plan missing from framing/foundation schedule
+- Room finish on plan ≠ finish schedule
+- Egress capacity (occupant load × in/occupant) ≠ door/stair clear width provided
+- Section/detail callouts on plan reference a detail number that does not exist on the referenced sheet
+- Sheet index lists sheets that are not in the submittal (or vice versa)
+
+Hard rules:
+1. Quote BOTH disagreeing values verbatim. If you cannot quote both sides from the supplied sheets, do not raise it.
+2. Use the EXACT sheet identifier as printed in the title block (e.g. "A-101", not "Architectural floor plan").
+3. Numeric mismatches must be real disagreements, not rounding (3'-0" vs 36" is the same).
+4. Skip anything already obvious from a single sheet — the discipline reviewers handle those.
+5. Prefer high-impact disagreements: life-safety, egress, structural, panel sizing.
+6. Return an empty array if you find nothing concrete. Do not invent.`;
+
+async function runCrossSheetConsistency(
+  admin: ReturnType<typeof createClient>,
+  planReviewId: string,
+): Promise<ConsistencyMismatch[]> {
+  // Pull sheet roster + signed URLs in parallel.
+  const [sheetsRes, signedUrls] = await Promise.all([
+    admin
+      .from("sheet_coverage")
+      .select("sheet_ref, sheet_title, page_index")
+      .eq("plan_review_id", planReviewId)
+      .order("page_index", { ascending: true }),
+    signedSheetUrls(admin, planReviewId),
+  ]);
+
+  const allSheets = (sheetsRes.data ?? []) as Array<{
+    sheet_ref: string;
+    sheet_title: string | null;
+    page_index: number | null;
+  }>;
+  if (allSheets.length < 2 || signedUrls.length < 2) return [];
+
+  // Cap at 12 sheets to keep the call within model limits / cost. Prefer sheets
+  // that are most likely to have cross-sheet relationships.
+  const PRIORITY_PREFIXES = ["A", "S", "M", "P", "E", "F", "L", "G"];
+  const ranked = [...allSheets].sort((a, b) => {
+    const ai = PRIORITY_PREFIXES.indexOf(a.sheet_ref.trim().toUpperCase()[0] ?? "Z");
+    const bi = PRIORITY_PREFIXES.indexOf(b.sheet_ref.trim().toUpperCase()[0] ?? "Z");
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+  });
+  const selected = ranked.slice(0, 12);
+  const imageUrls = selected
+    .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
+    .filter(Boolean) as string[];
+  if (imageUrls.length < 2) return [];
+
+  const userText =
+    `Sheets supplied (${selected.length}):\n` +
+    selected
+      .map(
+        (s) =>
+          `- ${s.sheet_ref}${s.sheet_title ? ` — ${s.sheet_title}` : ""}`,
+      )
+      .join("\n") +
+    `\n\nFind cross-sheet mismatches per the system rules. Return JSON via the tool call.`;
+
+  const content: Array<
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string } }
+  > = [
+    { type: "text", text: userText },
+    ...imageUrls.map((u) => ({
+      type: "image_url" as const,
+      image_url: { url: u },
+    })),
+  ];
+
+  let result: { mismatches?: Array<Omit<ConsistencyMismatch, "deficiency_id" | "def_number">> };
+  try {
+    result = (await callAI(
+      [
+        { role: "system", content: CROSS_SHEET_SYSTEM_PROMPT },
+        { role: "user", content },
+      ],
+      CROSS_SHEET_SCHEMA as unknown as Record<string, unknown>,
+    )) as typeof result;
+  } catch (err) {
+    console.error("[cross_sheet_consistency] AI call failed:", err);
+    return [];
+  }
+
+  const raw = (result?.mismatches ?? []).filter(
+    (m) =>
+      m &&
+      m.sheet_a &&
+      m.sheet_b &&
+      m.sheet_a.trim().toUpperCase() !== m.sheet_b.trim().toUpperCase() &&
+      (m.value_a ?? "").trim() &&
+      (m.value_b ?? "").trim(),
+  );
+
+  return raw.map((m) => ({
+    category: m.category,
+    description: m.description,
+    sheet_a: m.sheet_a.trim().toUpperCase(),
+    value_a: m.value_a.slice(0, 240),
+    sheet_b: m.sheet_b.trim().toUpperCase(),
+    value_b: m.value_b.slice(0, 240),
+    evidence: (m.evidence ?? []).slice(0, 3).map((s) => s.slice(0, 200)),
+    severity: m.severity,
+    confidence_score: Math.max(0, Math.min(1, m.confidence_score ?? 0.5)),
+  }));
+}
+
+async function persistConsistencyMismatches(
+  admin: ReturnType<typeof createClient>,
+  planReviewId: string,
+  firmId: string | null,
+  mismatches: ConsistencyMismatch[],
+): Promise<ConsistencyMismatch[]> {
+  if (mismatches.length === 0) return [];
+
+  const { count: existingCount } = await admin
+    .from("deficiencies_v2")
+    .select("id", { count: "exact", head: true })
+    .eq("plan_review_id", planReviewId)
+    .like("def_number", "DEF-XS%");
+  const baseIdx = (existingCount ?? 0) + 1;
+
+  const rows = mismatches.map((m, i) => ({
+    plan_review_id: planReviewId,
+    firm_id: firmId,
+    def_number: `DEF-XS${String(baseIdx + i).padStart(3, "0")}`,
+    discipline: "Cross-Sheet",
+    sheet_refs: [m.sheet_a, m.sheet_b],
+    code_reference: {},
+    finding: `Cross-sheet mismatch: ${m.description} (${m.sheet_a}: "${m.value_a}" vs ${m.sheet_b}: "${m.value_b}")`,
+    required_action:
+      "Reconcile the two sheets. Update the design so both references agree, then resubmit the affected sheets.",
+    evidence: m.evidence,
+    priority: m.severity,
+    life_safety_flag:
+      m.category === "occupant_load_sum" || m.category === "egress_width_vs_capacity",
+    permit_blocker: m.severity === "high",
+    liability_flag: false,
+    requires_human_review: true,
+    human_review_reason:
+      "Cross-sheet consistency check — verify both quoted values exist on the cited sheets before issuing.",
+    human_review_method:
+      `Open ${m.sheet_a} and ${m.sheet_b}, locate the quoted values, confirm the disagreement is real (not rounding/scale).`,
+    confidence_score: m.confidence_score,
+    confidence_basis: "Cross-sheet vision pass",
+    model_version: "google/gemini-2.5-pro",
+    status: "open",
+    citation_status: "unverified",
+  }));
+
+  const { data: inserted, error } = await admin
+    .from("deficiencies_v2")
+    .insert(rows)
+    .select("id, def_number");
+  if (error) {
+    console.error("[cross_sheet_consistency] insert failed:", error);
+    return mismatches; // surface them in metadata anyway
+  }
+
+  return mismatches.map((m, i) => ({
+    ...m,
+    deficiency_id: (inserted?.[i] as { id: string } | undefined)?.id,
+    def_number: (inserted?.[i] as { def_number: string } | undefined)?.def_number,
+  }));
+}
+
 async function stageCrossCheck(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
+  firmId: string | null,
 ) {
   // Load all open deficiencies for this review.
   const { data: defs, error: defsErr } = await admin
