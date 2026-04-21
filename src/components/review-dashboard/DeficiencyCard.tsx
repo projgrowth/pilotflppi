@@ -386,6 +386,15 @@ export default function DeficiencyCard({ planReviewId, def, showHumanReviewConte
           className="min-h-[60px] text-xs"
         />
       </div>
+
+      <RejectionReasonDialog
+        open={rejectOpen}
+        onOpenChange={setRejectOpen}
+        defNumber={def.def_number}
+        finding={def.finding}
+        saving={saving === "reject"}
+        onConfirm={handleRejectConfirm}
+      />
     </div>
   );
 }
