@@ -60,7 +60,7 @@ serve(async (req) => {
     }
 
     // Use Lovable AI to generate a normalized keyword summary for matching
-    const aiResp = await fetch("https://ai.lovable.dev/api/generate", {
+    const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

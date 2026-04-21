@@ -31,7 +31,7 @@ serve(async (req) => {
     let queryKeywords = query_text.toLowerCase();
 
     if (lovableApiKey) {
-      const aiResp = await fetch("https://ai.lovable.dev/api/generate", {
+      const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
