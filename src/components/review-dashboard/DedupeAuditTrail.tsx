@@ -147,7 +147,7 @@ export default function DedupeAuditTrail({ planReviewId, onJump }: Props) {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleJump(m.winner)}
+                    onClick={() => handleJump(m.winner, false)}
                     disabled={!winner}
                   >
                     Jump to <ArrowRight className="ml-1 h-3 w-3" />
@@ -195,7 +195,7 @@ export default function DedupeAuditTrail({ planReviewId, onJump }: Props) {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => handleJump(lid)}
+                          onClick={() => handleJump(lid, true)}
                           disabled={!loser}
                           className="shrink-0"
                         >
