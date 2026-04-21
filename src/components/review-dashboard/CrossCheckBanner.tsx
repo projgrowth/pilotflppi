@@ -161,18 +161,18 @@ export default function CrossCheckBanner({ planReviewId }: Props) {
       (c) => !dismissed.has(`contradiction:${c.deficiency_id}`),
     );
 
+    const nextMetadata = {
+      ...existing,
+      duplicate_groups: filteredDuplicates,
+      duplicates_found: filteredDuplicates.length,
+      contradictions: filteredContradictions,
+      contradictions_found: filteredContradictions.length,
+      dismissed: Array.from(dismissed),
+    } as unknown as Record<string, never>;
+
     const { error } = await supabase
       .from("review_pipeline_status")
-      .update({
-        metadata: {
-          ...existing,
-          duplicate_groups: filteredDuplicates,
-          duplicates_found: filteredDuplicates.length,
-          contradictions: filteredContradictions,
-          contradictions_found: filteredContradictions.length,
-          dismissed: Array.from(dismissed),
-        },
-      })
+      .update({ metadata: nextMetadata })
       .eq("plan_review_id", planReviewId)
       .eq("stage", "cross_check");
     if (error) throw error;
