@@ -5,6 +5,7 @@ import {
   ShieldCheck,
   AlertTriangle,
   ChevronDown,
+  Layers,
 } from "lucide-react";
 import {
   Popover,
@@ -45,6 +46,13 @@ interface VerifyMetadata {
 interface CrossCheckMetadata {
   duplicate_groups?: unknown[];
   contradictions?: unknown[];
+}
+
+interface DedupeMetadata {
+  examined?: number;
+  groups_merged?: number;
+  findings_superseded?: number;
+  merges?: Array<{ winner: string; loser_count: number; reason: string }>;
 }
 
 export default function ReviewHealthStrip({
@@ -89,6 +97,12 @@ export default function ReviewHealthStrip({
       {}) as CrossCheckMetadata;
   }, [pipeRows]);
 
+  const dedupeMeta = useMemo(() => {
+    const row = pipeRows.find((r) => r.stage === "dedupe");
+    return ((row as unknown as { metadata?: DedupeMetadata } | undefined)?.metadata ??
+      {}) as DedupeMetadata;
+  }, [pipeRows]);
+
   const overturned = verifyMeta.overturned ?? 0;
   const upheld = verifyMeta.upheld ?? 0;
   const modified = verifyMeta.modified ?? 0;
@@ -97,9 +111,15 @@ export default function ReviewHealthStrip({
   const conflictCount =
     (crossMeta.duplicate_groups?.length ?? 0) +
     (crossMeta.contradictions?.length ?? 0);
+  const mergedGroups = dedupeMeta.groups_merged ?? 0;
+  const supersededCount = dedupeMeta.findings_superseded ?? 0;
 
-  // Live deficiency totals
-  const liveDefs = defs.filter((d) => d.verification_status !== "overturned");
+  // Live deficiency totals (exclude overturned + superseded duplicates)
+  const liveDefs = defs.filter(
+    (d) =>
+      d.verification_status !== "overturned" &&
+      d.verification_status !== "superseded",
+  );
   const humanReview = liveDefs.filter(
     (d) => d.requires_human_review && d.status === "open",
   ).length;
@@ -156,6 +176,18 @@ export default function ReviewHealthStrip({
             popoverWidthClass="w-[480px]"
           >
             <VerificationBanner planReviewId={planReviewId} />
+          </Chip>
+        )}
+
+        {mergedGroups > 0 && (
+          <Chip
+            icon={<Layers className="h-3 w-3" />}
+            label="Dedupe"
+            value={`${mergedGroups} group${mergedGroups === 1 ? "" : "s"} · ${supersededCount} merged`}
+            tone="muted"
+            popoverWidthClass="w-[480px]"
+          >
+            <DedupeSummary meta={dedupeMeta} />
           </Chip>
         )}
 
@@ -266,5 +298,48 @@ function Chip({
         {children}
       </PopoverContent>
     </Popover>
+  );
+}
+
+function DedupeSummary({ meta }: { meta: DedupeMetadata }) {
+  const merges = meta.merges ?? [];
+  return (
+    <div className="space-y-2 p-2">
+      <div className="flex items-center justify-between border-b pb-1.5">
+        <div className="text-xs font-semibold">Cross-discipline dedupe</div>
+        <div className="font-mono text-2xs text-muted-foreground">
+          {meta.examined ?? 0} examined · {meta.findings_superseded ?? 0} merged
+        </div>
+      </div>
+      <p className="text-2xs text-muted-foreground">
+        Same code section flagged by multiple disciplines on overlapping sheets — losers were
+        marked superseded and waived. Open a finding and flip status back to "open" if a
+        merge looks wrong.
+      </p>
+      {merges.length === 0 ? (
+        <div className="py-3 text-center text-2xs text-muted-foreground">
+          No duplicates detected.
+        </div>
+      ) : (
+        <ul className="space-y-1.5">
+          {merges.slice(0, 8).map((m, i) => (
+            <li
+              key={i}
+              className="rounded border border-border/60 bg-muted/30 p-1.5 text-2xs"
+            >
+              <div className="font-mono text-muted-foreground">
+                +{m.loser_count} merged
+              </div>
+              <div className="mt-0.5 leading-snug">{m.reason}</div>
+            </li>
+          ))}
+          {merges.length > 8 && (
+            <li className="text-center text-2xs text-muted-foreground">
+              +{merges.length - 8} more
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
   );
 }

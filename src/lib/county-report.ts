@@ -293,14 +293,15 @@ function summarize(defs: DeficiencyV2Row[]) {
 export function buildCountyReportHtml(input: CountyReportInput): string {
   const generatedAt = input.generatedAt ?? new Date();
   const status = input.status;
-  // Suppress overturned findings — they failed adversarial verification and
-  // must never reach the contractor / county.
+  // Suppress overturned + superseded findings — they failed adversarial verification
+  // or were merged as duplicates and must never reach the contractor / county.
   const overturnedCount = input.deficiencies.filter(
     (d) => (d as { verification_status?: string }).verification_status === "overturned",
   ).length;
-  const visibleDefs = input.deficiencies.filter(
-    (d) => (d as { verification_status?: string }).verification_status !== "overturned",
-  );
+  const visibleDefs = input.deficiencies.filter((d) => {
+    const v = (d as { verification_status?: string }).verification_status;
+    return v !== "overturned" && v !== "superseded";
+  });
   const stats = summarize(visibleDefs);
   const expected = input.sheets.filter((s) => s.expected).length;
   const present = input.sheets.filter((s) => s.expected && s.status === "present").length;

@@ -8,6 +8,7 @@ export type PipelineStage =
   | "dna_extract"
   | "discipline_review"
   | "verify"
+  | "dedupe"
   | "cross_check"
   | "deferred_scope"
   | "prioritize"
@@ -19,6 +20,7 @@ export const PIPELINE_STAGES: { key: PipelineStage; label: string }[] = [
   { key: "dna_extract", label: "DNA Extract" },
   { key: "discipline_review", label: "Discipline Review" },
   { key: "verify", label: "Verify" },
+  { key: "dedupe", label: "Dedupe" },
   { key: "cross_check", label: "Cross-Check" },
   { key: "deferred_scope", label: "Deferred Scope" },
   { key: "prioritize", label: "Prioritize" },
@@ -90,7 +92,7 @@ export interface DeficiencyV2Row {
   reviewer_disposition: "confirm" | "reject" | "modify" | null;
   reviewer_notes: string;
   status: "open" | "resolved" | "waived" | "needs_info";
-  verification_status: "unverified" | "verified" | "overturned" | "modified";
+  verification_status: "unverified" | "verified" | "overturned" | "modified" | "superseded" | "needs_human";
   verification_notes: string;
 }
 

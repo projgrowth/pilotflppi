@@ -22,8 +22,12 @@ interface DefForStatus {
  * Used by both the dashboard StatusPill and the generated county PDF.
  */
 export function determineReviewStatus(defs: DefForStatus[]): ReviewStatus {
-  // Overturned items don't count — they failed adversarial verification.
-  const live = defs.filter((d) => d.verification_status !== "overturned");
+  // Overturned/superseded items don't count — they failed adversarial verification or were merged as duplicates.
+  const live = defs.filter(
+    (d) =>
+      d.verification_status !== "overturned" &&
+      d.verification_status !== "superseded",
+  );
 
   const unresolvedHumanReview = live.some(
     (d) => d.requires_human_review && d.status === "open",
