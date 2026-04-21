@@ -6,6 +6,7 @@
 // continues to the next stage where possible.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.74.0";
+import { composeDisciplineSystemPrompt } from "./discipline-experts.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1082,18 +1083,9 @@ async function runDisciplineChecks(
     ? `\n\n## LEARNED CORRECTIONS — your firm's senior reviewers previously rejected these.\nDo NOT re-flag these unless you have strong new evidence on the plans:\n${learnedText}\n`
     : "";
 
-  const systemPrompt =
-    `You are a Florida private-provider plan reviewer specializing in ${ctx.discipline}. ` +
-    `Audit submitted construction documents against the Florida Building Code and applicable referenced standards. ` +
-    `Rules:\n` +
-    `1. Cite verbatim text from the sheets in "evidence". If you cannot read a value, say so and set requires_human_review=true.\n` +
-    `2. Every finding must reference at least one sheet_ref shown to you.\n` +
-    `3. Use the project DNA and jurisdiction context — flag HVHZ items in HVHZ counties, flood items in flood zones.\n` +
-    `4. life_safety_flag=true for egress/fire/structural-collapse issues. permit_blocker=true for missing required documentation. liability_flag=true for items that materially affect occupant safety or property protection.\n` +
-    `5. Only raise a finding when there is a real deficiency or a required item is not visible. Do NOT raise findings for compliant items.\n` +
-    `6. confidence_score must be ≤0.6 if you did not directly read the value (i.e. inferred from absence).\n` +
-    `7. Do NOT speculate — when in doubt, set requires_human_review=true with a specific verification method.\n` +
-    `8. Respect the LEARNED CORRECTIONS list below — these are patterns your firm has explicitly rejected as false positives.`;
+  // Hand-tuned discipline expert prompt: persona + must-check domains +
+  // common failure modes + wording/evidence guidance + shared review rules.
+  const systemPrompt = composeDisciplineSystemPrompt(ctx.discipline);
 
   const userText =
     `## Project DNA\n${dnaSummary}\n\n` +
