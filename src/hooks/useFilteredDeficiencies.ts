@@ -59,7 +59,11 @@ export function useFilteredDeficiencies(
     const all = defs;
     let visible = all;
     if (hideOverturned) {
-      visible = visible.filter((d) => d.verification_status !== "overturned");
+      visible = visible.filter(
+        (d) =>
+          d.verification_status !== "overturned" &&
+          d.verification_status !== "superseded",
+      );
     }
     if (onlyHumanReview) {
       visible = visible.filter((d) => d.requires_human_review);
