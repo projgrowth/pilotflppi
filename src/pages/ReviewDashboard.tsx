@@ -26,6 +26,7 @@ interface ReviewWithProject {
   project_id: string;
   round: number;
   qc_status: string;
+  comment_letter_draft: string | null;
   project: {
     name: string;
     address: string;
@@ -68,7 +69,7 @@ export default function ReviewDashboard() {
       const { data, error } = await supabase
         .from("plan_reviews")
         .select(
-          "id, project_id, round, qc_status, project:projects(name, address, jurisdiction, county)",
+          "id, project_id, round, qc_status, comment_letter_draft, project:projects(name, address, jurisdiction, county)",
         )
         .eq("id", id!)
         .maybeSingle();
@@ -184,6 +185,7 @@ export default function ReviewDashboard() {
 
       <LetterQualityGate
         planReviewId={id}
+        letterDraft={review?.comment_letter_draft ?? null}
         onJumpToFinding={() => setActiveTab("deficiencies")}
       />
 
