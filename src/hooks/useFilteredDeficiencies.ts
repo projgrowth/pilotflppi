@@ -28,6 +28,7 @@ export function compareDefs(a: DeficiencyV2Row, b: DeficiencyV2Row): number {
 
 export interface FilterOptions {
   hideOverturned?: boolean;
+  showSuperseded?: boolean;
   onlyHumanReview?: boolean;
   groupBy?: "discipline" | "none";
 }
@@ -52,18 +53,22 @@ export function useFilteredDeficiencies(
   planReviewId: string | undefined,
   opts: FilterOptions = {},
 ): FilteredDeficiencies {
-  const { hideOverturned = true, onlyHumanReview = false, groupBy = "discipline" } = opts;
+  const {
+    hideOverturned = true,
+    showSuperseded = false,
+    onlyHumanReview = false,
+    groupBy = "discipline",
+  } = opts;
   const { data: defs = [], isLoading } = useDeficienciesV2(planReviewId);
 
   return useMemo(() => {
     const all = defs;
     let visible = all;
     if (hideOverturned) {
-      visible = visible.filter(
-        (d) =>
-          d.verification_status !== "overturned" &&
-          d.verification_status !== "superseded",
-      );
+      visible = visible.filter((d) => d.verification_status !== "overturned");
+    }
+    if (!showSuperseded) {
+      visible = visible.filter((d) => d.verification_status !== "superseded");
     }
     if (onlyHumanReview) {
       visible = visible.filter((d) => d.requires_human_review);
@@ -94,5 +99,5 @@ export function useFilteredDeficiencies(
         humanReview: all.filter((d) => d.requires_human_review).length,
       },
     };
-  }, [defs, hideOverturned, onlyHumanReview, groupBy, isLoading]);
+  }, [defs, hideOverturned, showSuperseded, onlyHumanReview, groupBy, isLoading]);
 }

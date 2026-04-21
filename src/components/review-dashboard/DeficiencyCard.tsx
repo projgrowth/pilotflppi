@@ -19,11 +19,14 @@ export default function DeficiencyCard({
 
   return (
     <div
+      id={`finding-${def.id}`}
+      data-finding-id={def.id}
       className={cn(
-        "rounded-lg border bg-card p-4 shadow-sm",
+        "scroll-mt-24 rounded-lg border bg-card p-4 shadow-sm transition-shadow",
         def.life_safety_flag && "border-destructive/40",
         def.requires_human_review && "border-l-4 border-l-amber-500",
         isOverturned && "opacity-60",
+        def.verification_status === "superseded" && "opacity-70 border-dashed",
       )}
     >
       <DeficiencyHeader planReviewId={planReviewId} def={def} />
