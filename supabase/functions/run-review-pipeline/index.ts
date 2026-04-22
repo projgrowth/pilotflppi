@@ -138,6 +138,9 @@ async function withRetry<T>(
       return await fn();
     } catch (err) {
       lastErr = err;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      // Never retry billing errors — they will not resolve on their own.
+      if (errMsg === 'payment_required') throw err;
       console.error(`[${label}] attempt ${attempt} failed:`, err);
       if (attempt === maxAttempts) break;
       const backoff = Math.min(8000, 500 * Math.pow(2, attempt - 1));
