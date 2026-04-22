@@ -334,6 +334,20 @@ export default function PlanReviewDetail() {
     return () => window.removeEventListener("keydown", handler);
   }, [activeFindingIndex, findings, updateFindingStatus, showShortcuts]);
 
+  // ── Filters & round-diff (must run unconditionally — hook order rule) ──
+  // We compute these BEFORE any early-return guards so React always sees the
+  // same hook count between renders. They're cheap and tolerate a missing
+  // review (filtered/grouped become empty).
+  const filterState = {
+    status: statusFilter,
+    confidence: confidenceFilter,
+    discipline: disciplineFilter,
+    sheet: sheetFilter,
+  };
+  const f = useFindingFilters(findings, findingStatuses, filterState);
+  const previousFindings = (review?.previous_findings as Finding[] | undefined) || [];
+  const diff = useRoundDiff(findings, previousFindings, review?.round ?? 1);
+
   if (isLoading) {
     return (
       <div className="flex flex-col h-[calc(100vh-0px)]">
@@ -362,20 +376,10 @@ export default function PlanReviewDetail() {
   }
 
   // ── Derived ────────────────────────────────────────────────────────────
-  const previousFindings = (review.previous_findings as Finding[]) || [];
   const county = review.project?.county || "";
   const hvhz = isHVHZ(county);
   const fileUrls = review.file_urls || [];
   const contractor = review.project?.contractor || null;
-
-  const filterState = {
-    status: statusFilter,
-    confidence: confidenceFilter,
-    discipline: disciplineFilter,
-    sheet: sheetFilter,
-  };
-  const f = useFindingFilters(findings, findingStatuses, filterState);
-  const diff = useRoundDiff(findings, previousFindings, review.round);
 
   const handleMarkVisibleResolved = () => {
     if (f.visibleIndices.length === 0) return;
@@ -385,7 +389,21 @@ export default function PlanReviewDetail() {
     toast.success(`Marked ${f.visibleIndices.length} finding${f.visibleIndices.length === 1 ? "" : "s"} resolved`);
   };
 
-  const daysLeft = getDaysRemaining(review.created_at);
+  // F.S. 553.791 statutory deadline (30 business days, holiday-aware) —
+  // replaces the old 21-calendar-day hardcode. Falls back to 30 when the
+  // project hasn't been hydrated yet.
+  const statutory = review.project
+    ? getStatutoryStatus({
+        status: (review.project as { status?: string }).status ?? "plan_review",
+        review_clock_started_at:
+          (review.project as { review_clock_started_at?: string | null }).review_clock_started_at ?? review.created_at,
+        review_clock_paused_at:
+          (review.project as { review_clock_paused_at?: string | null }).review_clock_paused_at ?? null,
+        statutory_review_days:
+          (review.project as { statutory_review_days?: number | null }).statutory_review_days ?? 30,
+      })
+    : null;
+  const daysLeft = statutory ? statutory.reviewDaysRemaining : 30;
   const projectRounds = rounds.map((r) => ({
     id: r.id,
     round: r.round,
