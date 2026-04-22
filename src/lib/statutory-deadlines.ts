@@ -90,10 +90,10 @@ export function isBusinessDay(date: Date): boolean {
   return !holidays.has(formatDateKey(date));
 }
 
-export function getBusinessDaysElapsed(startDate: string | null): number {
+export function getBusinessDaysElapsed(startDate: string | null, asOf?: Date): number {
   if (!startDate) return 0;
   const start = new Date(startDate);
-  const now = new Date();
+  const now = asOf ?? new Date();
   let count = 0;
   const current = new Date(start);
   current.setDate(current.getDate() + 1); // Start counting from next day
