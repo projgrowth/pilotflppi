@@ -59,7 +59,7 @@ export function PlanViewerPanel(props: Props) {
           <p className="text-sm font-medium text-foreground">
             {props.uploading ? "Uploading..." : "Drop plan documents here"}
           </p>
-          <p className="text-xs text-muted-foreground mt-1">PDF files up to 20MB</p>
+          <p className="text-xs text-muted-foreground mt-1">PDF files up to 50MB</p>
           <input
             ref={props.fileInputRef}
             type="file"
