@@ -242,22 +242,12 @@ export function useDeficienciesV2(planReviewId?: string) {
   // dashboard immediately. Mirrors the pipeline-stepper subscription above.
   useEffect(() => {
     if (!planReviewId) return;
-    const ch = supabase
-      .channel(`deficiencies-${planReviewId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "deficiencies_v2",
-          filter: `plan_review_id=eq.${planReviewId}`,
-        },
-        () => qc.invalidateQueries({ queryKey: ["deficiencies_v2", planReviewId] }),
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(ch);
-    };
+    return subscribeShared(
+      `deficiencies-${planReviewId}`,
+      "deficiencies_v2",
+      `plan_review_id=eq.${planReviewId}`,
+      () => qc.invalidateQueries({ queryKey: ["deficiencies_v2", planReviewId] }),
+    );
   }, [planReviewId, qc]);
 
   return query;
