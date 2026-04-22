@@ -479,6 +479,7 @@ async function stageSheetMap(
           discipline: string;
         }>;
       };
+      const returnedIndices = new Set((result?.sheets ?? []).map((s) => s.page_index));
       for (const s of result?.sheets ?? []) {
         present.push({
           page_index: s.page_index,
@@ -486,6 +487,13 @@ async function stageSheetMap(
           sheet_title: s.sheet_title?.slice(0, 200) ?? null,
           discipline: s.discipline ?? "General",
         });
+      }
+      // Backfill any pages the model skipped (e.g. blank sheets) so downstream
+      // signedUrls[page_index] lookups never silently return undefined.
+      for (let i = start; i < start + slice.length; i++) {
+        if (!returnedIndices.has(i)) {
+          present.push({ page_index: i, sheet_ref: `X-${i}`, sheet_title: null, discipline: "General" });
+        }
       }
     } catch (err) {
       console.error(`[sheet_map] batch ${start} failed:`, err);
