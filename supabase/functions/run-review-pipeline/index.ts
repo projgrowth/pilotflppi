@@ -19,10 +19,10 @@ type Stage =
   | "sheet_map"
   | "dna_extract"
   | "discipline_review"
-  | "cross_check"
   | "verify"
-  | "ground_citations"
   | "dedupe"
+  | "ground_citations"
+  | "cross_check"
   | "deferred_scope"
   | "prioritize"
   | "complete";
@@ -32,10 +32,10 @@ const STAGES: Stage[] = [
   "sheet_map",
   "dna_extract",
   "discipline_review",
-  "cross_check",
   "verify",
-  "ground_citations",
   "dedupe",
+  "ground_citations",
+  "cross_check",
   "deferred_scope",
   "prioritize",
   "complete",
@@ -2631,10 +2631,10 @@ Deno.serve(async (req) => {
       sheet_map: () => stageSheetMap(admin, plan_review_id, firmId),
       dna_extract: () => stageDnaExtract(admin, plan_review_id, firmId),
       discipline_review: () => stageDisciplineReview(admin, plan_review_id, firmId),
-      cross_check: () => stageCrossCheck(admin, plan_review_id, firmId),
       verify: () => stageVerify(admin, plan_review_id),
-      ground_citations: () => stageGroundCitations(admin, plan_review_id),
       dedupe: () => stageDedupe(admin, plan_review_id),
+      ground_citations: () => stageGroundCitations(admin, plan_review_id),
+      cross_check: () => stageCrossCheck(admin, plan_review_id, firmId),
       deferred_scope: () => stageDeferredScope(admin, plan_review_id, firmId),
       prioritize: () => stagePrioritize(admin, plan_review_id),
       complete: () => stageComplete(admin, plan_review_id),
