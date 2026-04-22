@@ -32,21 +32,25 @@ export function useFindingHistory(planReviewId: string | undefined) {
 
 export async function logFindingStatusChange(
   planReviewId: string,
-  findingIndex: number,
+  findingId: string,
   oldStatus: string,
   newStatus: string,
   userId: string,
   note?: string
 ) {
+  // Legacy schema requires integer finding_index. UUIDs are stashed in `note`
+  // as `finding_id=<uuid>` so callers can correlate history rows back to v2
+  // findings without a schema migration.
+  const noteWithId = `finding_id=${findingId}${note ? ` | ${note}` : ""}`;
   const { error } = await supabase
     .from("finding_status_history")
     .insert({
       plan_review_id: planReviewId,
-      finding_index: findingIndex,
+      finding_index: -1,
       old_status: oldStatus,
       new_status: newStatus,
       changed_by: userId,
-      note: note || "",
+      note: noteWithId,
     });
   if (error) { /* finding history log failed silently */ }
 }
