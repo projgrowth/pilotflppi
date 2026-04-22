@@ -38,7 +38,7 @@ import { FindingsListPanel } from "@/components/plan-review/FindingsListPanel";
 import { PlanViewerPanel } from "@/components/plan-review/PlanViewerPanel";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useLetterAutosave } from "@/hooks/useLetterAutosave";
-import { lintCommentLetter, type LintIssue } from "@/lib/letter-linter";
+import { lintCommentLetter, hasBlockingIssues, type LintIssue } from "@/lib/letter-linter";
 import { cn } from "@/lib/utils";
 import { type Finding } from "@/components/FindingCard";
 import { SeverityDonut } from "@/components/SeverityDonut";
