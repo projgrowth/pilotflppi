@@ -1,64 +1,49 @@
 
 
-## Why "Proper Pizza & Pasta" Pipeline Says No Findings
+## Comment letter (and all AI streaming) failing — fix the edge function gateway config
 
 ### Root cause
 
-The pipeline isn't failing at the findings stage — it's failing at **stage 1 (`upload`)** before any AI ever runs. Edge function logs show three retries all returning:
+The `ai` edge function exists and looks correct in code, but **zero requests are reaching it**. Both `supabase--edge_function_logs` for `ai` and the analytics query for `/ai` requests return empty — meaning the Supabase gateway is rejecting every call before it ever runs.
 
-> `Error: No files uploaded for this plan review`
-
-The frontend toast says "Pipeline run complete" because of how the success callback is wired, but every stage afterward is skipped.
-
-### Why the upload stage thinks there are no files
-
-Two tables track uploaded PDFs and they're out of sync for this review:
-
-| Table | What's there for `eb8df5a0-…` |
-|---|---|
-| `plan_reviews.file_urls` | `["plan-reviews/eb8df5a0-…/Document2.pdf"]` ✅ |
-| `plan_review_files` (rows) | **0 rows** ❌ |
-
-`run-review-pipeline/index.ts → stageUpload()` queries `plan_review_files` (line 347). With zero rows it throws.
-
-The bug is in `src/components/NewPlanReviewWizard.tsx`: when a plan review is created from the wizard, file paths get written to `plan_reviews.file_urls` (line 333) but **no matching rows are ever inserted into `plan_review_files`**. By contrast `src/pages/PlanReviewDetail.tsx` (line 174) does insert into `plan_review_files` when files are added later — that's why older reviews work.
-
-### Fix (3 small changes)
-
-**1. `src/components/NewPlanReviewWizard.tsx`** — after uploading PDFs and updating `file_urls`, also insert one row per file into `plan_review_files`:
-
-```ts
-await supabase.from("plan_review_files").insert(
-  fileUrls.map((fp) => ({
-    plan_review_id: review.id,
-    file_path: fp,
-    round: 1,
-    uploaded_by: userId,    // already known in this scope
-    firm_id: firmId,        // already known in this scope
-  }))
-);
+`supabase/config.toml` currently contains only:
+```toml
+project_id = "iisgxjneamwbehipgcmg"
 ```
 
-**2. Backfill the orphaned record** — one-line migration to repair Proper Pizza & Pasta (and any other reviews stuck in the same state) by inserting `plan_review_files` rows from `plan_reviews.file_urls` where they're missing:
+There is **no `[functions.ai]` block**, so the function deploys with the default `verify_jwt = true`. With Supabase's signing-keys auth system that this project uses, the gateway's built-in JWT check rejects the user access tokens that `streamAI` sends as `Bearer`, returning a 401 before the function executes. That's why "Send/Generate" silently fails with no logs and no network traces.
 
-```sql
-INSERT INTO plan_review_files (plan_review_id, file_path, round, firm_id)
-SELECT pr.id, unnest(pr.file_urls), pr.round, pr.firm_id
-FROM plan_reviews pr
-WHERE pr.file_urls IS NOT NULL
-  AND array_length(pr.file_urls, 1) > 0
-  AND NOT EXISTS (
-    SELECT 1 FROM plan_review_files prf WHERE prf.plan_review_id = pr.id
-  );
+The function already validates JWTs in code (`supabaseAuth.auth.getClaims(token)` at line 431), so disabling gateway-side verification is the correct, secure fix — exactly the pattern the Lovable docs prescribe for streaming functions in this auth model.
+
+### What changes (1 file)
+
+**`supabase/config.toml`** — add a function-specific config block telling the gateway to skip its own JWT check (the function still does it):
+
+```toml
+project_id = "iisgxjneamwbehipgcmg"
+
+[functions.ai]
+verify_jwt = false
 ```
 
-**3. `src/pages/ReviewDashboard.tsx`** — the "Run Pipeline" success toast fires even when the pipeline returns errors per-stage. Change `runPipeline()` to inspect the response payload and show `toast.error` if any stage status is `error`, so failures stop being silently labeled "complete."
+That's the entire fix. No other files need to change.
 
-### After the fix
-Re-run the pipeline on Proper Pizza & Pasta. Stages should advance past `upload` and the dashboard will populate with deficiencies.
+### Why nothing else needs touching
+
+- `src/lib/ai.ts` `streamAI` is correctly:
+  - using the user's session access token (not the anon key)
+  - guarding against string payloads with `typeof payload === "object" ? payload : { text: payload }`
+  - aborting on 60s inactivity
+- The `ai/index.ts` function correctly validates the JWT in code, returns CORS headers on every response (success + error), and streams `text/event-stream` properly.
+- `run-review-pipeline` already works (we have logs for it) — that function presumably has the right config inherited from prior deploys, or its `invoke()` path goes through a different code branch. Either way, only `ai` is broken right now.
+
+### Verification after deploy
+
+1. Open a project → Plan Review → click **Generate Letter**. Stream should start within ~2s.
+2. Open `supabase--edge_function_logs("ai")` — you should now see entries per call.
+3. The FBC County chatbot and AI Drawer Quick Q&A (which use the same `streamAI` path) will also start working.
 
 ### Files touched
-- Edit: `src/components/NewPlanReviewWizard.tsx` (insert into `plan_review_files`)
-- Edit: `src/pages/ReviewDashboard.tsx` (honest pipeline result toast)
-- New: `supabase/migrations/<ts>_backfill_plan_review_files.sql`
+
+- Edit: `supabase/config.toml` (add `[functions.ai]` block with `verify_jwt = false`)
 
