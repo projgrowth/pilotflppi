@@ -1066,8 +1066,12 @@ async function runDisciplineChecks(
     reason_notes: string;
     rejection_count: number;
   }>;
-  // Filter for project-DNA relevance when possible (best-effort).
-  const relevantPatterns = patterns.slice(0, 12);
+  // Filter for project-DNA relevance: prefer patterns matching this project's
+  // occupancy and construction type. Patterns with no DNA context are always included.
+  const relevantPatterns = patterns.filter((p) =>
+    (!p.occupancy_classification || p.occupancy_classification === occupancy) &&
+    (!p.construction_type || p.construction_type === constructionType)
+  ).slice(0, 12);
 
   const learnedText = relevantPatterns.length
     ? relevantPatterns
