@@ -20,7 +20,7 @@ interface LetterPanelProps {
   qcStatus: string;
   hasFindings: boolean;
   findings: Finding[];
-  findingStatuses: Record<number, FindingStatus>;
+  findingStatuses: Record<string, FindingStatus>;
   firmSettings: FirmSettings | null | undefined;
   commentLetter: string;
   generatingLetter: boolean;
@@ -103,7 +103,7 @@ export function LetterPanel({
               tradeType={tradeType}
               round={round}
               findings={findings}
-              findingStatuses={Object.fromEntries(Object.entries(findingStatuses).map(([k, v]) => [Number(k), v]))}
+              findingStatuses={findingStatuses}
               firmInfo={firmSettings}
               onDocumentGenerated={onDocumentGenerated}
             />
