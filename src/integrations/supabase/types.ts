@@ -447,6 +447,8 @@ export type Database = {
           def_number: string
           discipline: string
           evidence: string[] | null
+          evidence_crop_meta: Json
+          evidence_crop_url: string | null
           finding: string
           firm_id: string | null
           human_review_method: string | null
@@ -482,6 +484,8 @@ export type Database = {
           def_number: string
           discipline: string
           evidence?: string[] | null
+          evidence_crop_meta?: Json
+          evidence_crop_url?: string | null
           finding: string
           firm_id?: string | null
           human_review_method?: string | null
@@ -517,6 +521,8 @@ export type Database = {
           def_number?: string
           discipline?: string
           evidence?: string[] | null
+          evidence_crop_meta?: Json
+          evidence_crop_url?: string | null
           finding?: string
           firm_id?: string | null
           human_review_method?: string | null
