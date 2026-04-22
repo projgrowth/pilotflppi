@@ -94,6 +94,9 @@ export function useLetterQualityCheck({
       // Citation grounding: only block confirmed findings — rejected ones
       // won't ship in the letter regardless.
       if (d.reviewer_disposition === "confirm") {
+        // citation_status="not_found" fires on every finding when fbc_code_sections
+        // is unseeded. Suppress it — a separate banner in the UI handles the
+        // "database not populated" state so reviewers aren't buried in noise.
         if (d.citation_status === "hallucinated") {
           issues.push({
             severity: "error",
@@ -108,14 +111,8 @@ export function useLetterQualityCheck({
             message: `${d.def_number} — cited section text doesn't match canonical FBC wording`,
             findingId: d.id,
           });
-        } else if (d.citation_status === "not_found") {
-          issues.push({
-            severity: "warning",
-            code: `citation_not_found:${d.id}`,
-            message: `${d.def_number} — cited section isn't in the FBC database (verify it exists)`,
-            findingId: d.id,
-          });
         }
+        // not_found is intentionally omitted until fbc_code_sections is seeded.
       }
     }
 
