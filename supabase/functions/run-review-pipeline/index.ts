@@ -468,7 +468,18 @@ async function stageUpload(
   if (!data || data.length === 0) {
     throw new Error("No files uploaded for this plan review");
   }
-  return { file_count: data.length };
+
+  // Eagerly rasterize PDFs into per-page PNGs. Vision stages later in the
+  // pipeline cannot consume raw PDF URLs (Gemini returns "Unsupported image
+  // format"), so we materialize PNGs once here and cache them in storage.
+  const pages = await signedSheetUrls(admin, planReviewId);
+  if (pages.length === 0) {
+    throw new Error(
+      "Failed to rasterize uploaded PDFs into page images. Check the file is a valid PDF.",
+    );
+  }
+
+  return { file_count: data.length, page_count: pages.length };
 }
 
 const SHEET_MAP_SCHEMA = {
