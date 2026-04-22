@@ -671,7 +671,7 @@ export default function PlanReviewDetail() {
       ) : (
         <ResizablePanelGroup direction="horizontal" className="flex-1 overflow-hidden">
           {/* LEFT — Document viewer */}
-          <ResizablePanel defaultSize={rightPanelCollapsed ? 100 : 65} minSize={35}>
+          <ResizablePanel defaultSize={rightPanelCollapsed ? 100 : 60} minSize={35}>
             <div className="h-full flex flex-col min-w-0">
               <PlanViewerPanel
                 hasDocuments={hasDocuments}
@@ -719,7 +719,7 @@ export default function PlanReviewDetail() {
           )}
 
           {!rightPanelCollapsed && (
-            <ResizablePanel defaultSize={35} minSize={20} maxSize={55}>
+            <ResizablePanel defaultSize={40} minSize={25} maxSize={55}>
               <div className="h-full flex flex-col overflow-hidden bg-card">
                 <div className="shrink-0 px-3 py-2 border-b flex items-center gap-1">
                   <Button

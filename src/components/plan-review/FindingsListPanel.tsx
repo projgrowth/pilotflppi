@@ -131,6 +131,10 @@ export function FindingsListPanel(props: Props) {
 
   return (
     <>
+      <ConfidenceMeter
+        score={averageConfidence(props.findings)}
+        sampleLabel={`across ${props.findings.length} finding${props.findings.length === 1 ? "" : "s"}`}
+      />
       <BulkTriageFilters
         statusCounts={{
           all: props.findings.length,
