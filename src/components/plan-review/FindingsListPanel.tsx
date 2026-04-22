@@ -33,11 +33,12 @@ interface Props {
   filteredFindings: Finding[];
   filteredGrouped: Record<string, Finding[]>;
   globalIndexMap: Map<Finding, number>;
-  findingStatuses: Record<number, FindingStatus>;
+  /** Keyed by finding UUID (deficiencies_v2.id), not array index. */
+  findingStatuses: Record<string, FindingStatus>;
   activeFindingIndex: number | null;
   onLocate: (globalIndex: number) => void;
   onReposition: (globalIndex: number) => void;
-  onStatusChange: (globalIndex: number, status: FindingStatus) => void;
+  onStatusChange: (findingId: string, status: FindingStatus) => void;
   findingRefs: React.MutableRefObject<Map<number, HTMLDivElement>>;
   findingHistory: FindingHistoryEntry[] | undefined;
 
@@ -176,9 +177,10 @@ export function FindingsListPanel(props: Props) {
               <AccordionContent className="px-3 pb-3 space-y-1.5">
                 {group.map((finding, i) => {
                   const gi = props.globalIndexMap.get(finding)!;
+                  const fid = finding.finding_id;
                   const diffStatus = props.diffMap.get(gi);
                   return (
-                    <div key={i} className="relative">
+                    <div key={fid ?? i} className="relative">
                       {props.hasRoundDiff && diffStatus && (
                         <div
                           className={cn(
@@ -198,9 +200,11 @@ export function FindingsListPanel(props: Props) {
                         onLocateClick={() => props.onLocate(gi)}
                         onRepositionClick={() => props.onReposition(gi)}
                         animationDelay={i * 40}
-                        status={props.findingStatuses[gi] || "open"}
-                        onStatusChange={(status) => props.onStatusChange(gi, status)}
-                        history={(props.findingHistory || []).filter((h) => h.finding_index === gi)}
+                        status={(fid && props.findingStatuses[fid]) || "open"}
+                        onStatusChange={(status) => fid && props.onStatusChange(fid, status)}
+                        history={(props.findingHistory || []).filter(
+                          (h) => fid && (h.note || "").includes(`finding_id=${fid}`),
+                        )}
                       />
                     </div>
                   );

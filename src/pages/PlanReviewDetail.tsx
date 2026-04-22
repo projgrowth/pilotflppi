@@ -297,22 +297,31 @@ export default function PlanReviewDetail() {
         }
         case "s": {
           if (cur !== null) {
-            e.preventDefault();
-            updateFindingStatus(cur, "resolved");
+            const fid = findings[cur]?.finding_id;
+            if (fid) {
+              e.preventDefault();
+              updateFindingStatus(fid, "resolved");
+            }
           }
           break;
         }
         case "x": {
           if (cur !== null) {
-            e.preventDefault();
-            updateFindingStatus(cur, "deferred");
+            const fid = findings[cur]?.finding_id;
+            if (fid) {
+              e.preventDefault();
+              updateFindingStatus(fid, "deferred");
+            }
           }
           break;
         }
         case "o": {
           if (cur !== null) {
-            e.preventDefault();
-            updateFindingStatus(cur, "open");
+            const fid = findings[cur]?.finding_id;
+            if (fid) {
+              e.preventDefault();
+              updateFindingStatus(fid, "open");
+            }
           }
           break;
         }
@@ -384,7 +393,9 @@ export default function PlanReviewDetail() {
   const handleMarkVisibleResolved = () => {
     if (f.visibleIndices.length === 0) return;
     f.visibleIndices.forEach((i) => {
-      if (findingStatuses[i] !== "resolved") updateFindingStatus(i, "resolved");
+      const fid = findings[i]?.finding_id;
+      if (!fid) return;
+      if (findingStatuses[fid] !== "resolved") updateFindingStatus(fid, "resolved");
     });
     toast.success(`Marked ${f.visibleIndices.length} finding${f.visibleIndices.length === 1 ? "" : "s"} resolved`);
   };
