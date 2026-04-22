@@ -6,6 +6,10 @@
 // continues to the next stage where possible.
 
 import { createClient as _createClient } from "https://esm.sh/@supabase/supabase-js@2.74.0";
+// MuPDF.js (WASM) — used to rasterize uploaded PDFs into per-page PNGs so
+// Gemini vision can consume them. Gemini's image_url field rejects raw PDF
+// URLs ("Unsupported image format"), so this conversion is mandatory.
+import * as mupdf from "https://esm.sh/mupdf@1.3.0";
 import { composeDisciplineSystemPrompt } from "./discipline-experts.ts";
 
 // Untyped client wrapper — the edge function does not have access to generated
@@ -241,7 +245,47 @@ function disciplineForSheetFallback(sheetRef: string): string | null {
   }
 }
 
-/** Sign each plan file (PDFs/images in `documents` bucket) for vision input. */
+/**
+ * Rasterize a single PDF (loaded as bytes) into PNG bytes per page.
+ * Uses MuPDF WASM. Resolution is tuned for vision: ~150 DPI = 2.083x scale.
+ * Pages over MAX_PAGES are skipped (vision cost guard for huge sets).
+ */
+const RASTER_SCALE = 2.083; // ~150 DPI
+const MAX_PAGES_PER_PDF = 200;
+
+async function rasterizePdf(pdfBytes: Uint8Array): Promise<Uint8Array[]> {
+  const doc = mupdf.Document.openDocument(pdfBytes, "application/pdf");
+  try {
+    const pageCount = Math.min(doc.countPages(), MAX_PAGES_PER_PDF);
+    const matrix = mupdf.Matrix.scale(RASTER_SCALE, RASTER_SCALE);
+    const pngs: Uint8Array[] = [];
+    for (let i = 0; i < pageCount; i++) {
+      const page = doc.loadPage(i);
+      try {
+        const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false);
+        try {
+          pngs.push(pixmap.asPNG());
+        } finally {
+          pixmap.destroy();
+        }
+      } finally {
+        page.destroy();
+      }
+    }
+    return pngs;
+  } finally {
+    doc.destroy();
+  }
+}
+
+/**
+ * Ensure each plan_review_files row has rasterized PNG pages in storage at
+ * `<dir>/pages/p-NNN.png`, then return one entry per page (in upload order
+ * across all files) suitable for vision input.
+ *
+ * Sheet_coverage.page_index values are GLOBAL across all uploaded files —
+ * matching the order this function returns.
+ */
 async function signedSheetUrls(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
@@ -252,16 +296,89 @@ async function signedSheetUrls(
     .eq("plan_review_id", planReviewId)
     .order("uploaded_at", { ascending: true });
   if (error) throw error;
+
   const out: Array<{ file_path: string; signed_url: string }> = [];
+
   for (const f of (files ?? []) as Array<{ file_path: string }>) {
-    const { data: signed, error: sErr } = await admin.storage
+    const filePath = f.file_path;
+    const isPdf = filePath.toLowerCase().endsWith(".pdf");
+
+    // Non-PDF (PNG/JPG already): pass through as a single page.
+    if (!isPdf) {
+      const { data: signed } = await admin.storage
+        .from("documents")
+        .createSignedUrl(filePath, 60 * 60);
+      if (signed) out.push({ file_path: filePath, signed_url: signed.signedUrl });
+      continue;
+    }
+
+    // Pages live next to the source PDF in a sibling `pages/` folder.
+    const lastSlash = filePath.lastIndexOf("/");
+    const dir = lastSlash >= 0 ? filePath.slice(0, lastSlash) : "";
+    const pagesDir = `${dir}/pages`;
+
+    // Cheap existence check: list the pages folder.
+    const { data: existing } = await admin.storage
       .from("documents")
-      .createSignedUrl(f.file_path, 60 * 60); // 60min — long enough for slowest discipline run
-    if (sErr || !signed) continue;
-    out.push({ file_path: f.file_path, signed_url: signed.signedUrl });
+      .list(pagesDir, { limit: 1000, sortBy: { column: "name", order: "asc" } });
+
+    const existingPagePaths = (existing ?? [])
+      .filter((o: { name: string }) => /^p-\d{3,}\.png$/.test(o.name))
+      .map((o: { name: string }) => `${pagesDir}/${o.name}`)
+      .sort();
+
+    let pagePaths = existingPagePaths;
+
+    if (pagePaths.length === 0) {
+      // Need to rasterize. Download the source PDF.
+      const { data: pdfBlob, error: dlErr } = await admin.storage
+        .from("documents")
+        .download(filePath);
+      if (dlErr || !pdfBlob) {
+        console.error(`[rasterize] download failed for ${filePath}:`, dlErr);
+        continue;
+      }
+      const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer());
+
+      let pngPages: Uint8Array[];
+      try {
+        pngPages = await rasterizePdf(pdfBytes);
+      } catch (err) {
+        console.error(`[rasterize] mupdf failed for ${filePath}:`, err);
+        continue;
+      }
+
+      const uploaded: string[] = [];
+      for (let i = 0; i < pngPages.length; i++) {
+        const pageName = `p-${String(i).padStart(3, "0")}.png`;
+        const fullPath = `${pagesDir}/${pageName}`;
+        const { error: upErr } = await admin.storage
+          .from("documents")
+          .upload(fullPath, pngPages[i], {
+            contentType: "image/png",
+            upsert: true,
+          });
+        if (upErr) {
+          console.error(`[rasterize] upload failed for ${fullPath}:`, upErr);
+          continue;
+        }
+        uploaded.push(fullPath);
+      }
+      pagePaths = uploaded;
+    }
+
+    // Sign each page URL.
+    for (const p of pagePaths) {
+      const { data: signed } = await admin.storage
+        .from("documents")
+        .createSignedUrl(p, 60 * 60);
+      if (signed) out.push({ file_path: p, signed_url: signed.signedUrl });
+    }
   }
+
   return out;
 }
+
 
 const FINDINGS_SCHEMA = {
   name: "submit_discipline_findings",
@@ -351,7 +468,18 @@ async function stageUpload(
   if (!data || data.length === 0) {
     throw new Error("No files uploaded for this plan review");
   }
-  return { file_count: data.length };
+
+  // Eagerly rasterize PDFs into per-page PNGs. Vision stages later in the
+  // pipeline cannot consume raw PDF URLs (Gemini returns "Unsupported image
+  // format"), so we materialize PNGs once here and cache them in storage.
+  const pages = await signedSheetUrls(admin, planReviewId);
+  if (pages.length === 0) {
+    throw new Error(
+      "Failed to rasterize uploaded PDFs into page images. Check the file is a valid PDF.",
+    );
+  }
+
+  return { file_count: data.length, page_count: pages.length };
 }
 
 const SHEET_MAP_SCHEMA = {
@@ -659,19 +787,13 @@ async function stageDnaExtract(
       DNA_SCHEMA as unknown as Record<string, unknown>,
     )) as Record<string, unknown>;
   } catch (err) {
+    // Surface the real error instead of silently inserting an empty DNA row.
+    // Previously this swallowed vision failures and let downstream stages
+    // report a confusing "DNA gate failed: only 33% populated" instead of the
+    // actual root cause (e.g. unsupported image format, rate limit, etc).
+    const msg = err instanceof Error ? err.message : String(err);
     console.error("[dna_extract] vision call failed:", err);
-    extracted = {
-      missing_fields: [
-        "occupancy_classification",
-        "construction_type",
-        "total_sq_ft",
-        "stories",
-        "wind_speed_vult",
-        "exposure_category",
-        "risk_category",
-      ],
-      ambiguous_fields: [],
-    };
+    throw new Error(`DNA extract vision call failed: ${msg}`);
   }
 
   const row = {
