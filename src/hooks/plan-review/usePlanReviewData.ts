@@ -12,6 +12,7 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { subscribeShared } from "@/hooks/useReviewDashboard";
 import { adaptV2ToFindings, type DeficiencyV2Lite } from "@/lib/deficiency-adapter";
 import type { PlanReviewRow } from "@/types";
 import type { Finding } from "@/components/FindingCard";
@@ -90,19 +91,14 @@ export function usePlanReviewData(reviewId: string | undefined) {
   // streams them in (same pattern as the dashboard).
   useEffect(() => {
     if (!review?.id) return;
-    const channel = supabase
-      .channel(`plan-review-detail-defs-${review.id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "deficiencies_v2", filter: `plan_review_id=eq.${review.id}` },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ["v2-findings-for-viewer", review.id] });
-        },
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return subscribeShared(
+      `deficiencies-${review.id}`,
+      "deficiencies_v2",
+      `plan_review_id=eq.${review.id}`,
+      () => {
+        queryClient.invalidateQueries({ queryKey: ["v2-findings-for-viewer", review.id] });
+      },
+    );
   }, [review?.id, queryClient]);
 
   return {
