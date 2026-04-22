@@ -46,11 +46,24 @@ export default function ReviewDashboard() {
     if (!id) return;
     setRunning(true);
     try {
-      const { error } = await supabase.functions.invoke("run-review-pipeline", {
+      const { data, error } = await supabase.functions.invoke("run-review-pipeline", {
         body: { plan_review_id: id },
       });
       if (error) throw error;
-      toast.success("Pipeline run complete");
+
+      // Inspect per-stage results so silent stage failures aren't reported as success.
+      const stages = (data as { stages?: Array<{ stage: string; status: string; error?: string }> } | null)?.stages;
+      const failed = Array.isArray(stages) ? stages.filter((s) => s.status === "error") : [];
+
+      if (failed.length > 0) {
+        const first = failed[0];
+        toast.error(
+          `Pipeline failed at "${first.stage}"${first.error ? `: ${first.error}` : ""}`,
+        );
+      } else {
+        toast.success("Pipeline run complete");
+      }
+
       qc.invalidateQueries({ queryKey: ["pipeline_status", id] });
       qc.invalidateQueries({ queryKey: ["deficiencies_v2", id] });
       qc.invalidateQueries({ queryKey: ["project_dna", id] });
