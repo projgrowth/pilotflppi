@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { getStatutoryStatus } from "@/lib/statutory-deadlines";
 
 export interface Project {
   id: string;
@@ -65,9 +66,22 @@ export function getDaysElapsed(noticeFiledAt: string | null): number {
   return Math.max(0, Math.floor((now.getTime() - filed.getTime()) / (1000 * 60 * 60 * 24)));
 }
 
-export function getDaysRemaining(deadlineAt: string | null): number {
-  if (!deadlineAt) return 21;
+export function getDaysRemaining(
+  deadlineAt: string | null,
+  project?: { status: string; review_clock_started_at?: string | null; review_clock_paused_at?: string | null; statutory_review_days?: number | null }
+): number {
+  if (project) {
+    const s = getStatutoryStatus({
+      status: project.status,
+      review_clock_started_at: project.review_clock_started_at,
+      review_clock_paused_at: project.review_clock_paused_at,
+      statutory_review_days: project.statutory_review_days,
+    });
+    return s.reviewDaysRemaining;
+  }
+  // Fallback: use statutory deadline date if provided
+  if (!deadlineAt) return 30;
   const deadline = new Date(deadlineAt);
   const now = new Date();
-  return Math.floor((deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  return Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
 }
