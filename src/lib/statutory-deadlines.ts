@@ -171,8 +171,14 @@ export function getStatutoryStatus(project: {
     phase = "review";
   }
 
-  const effectiveStart = isPaused ? project.review_clock_paused_at! : clockStart;
-  const reviewDaysUsed = phase === "review" ? getBusinessDaysElapsed(effectiveStart) : 0;
+  // When paused, freeze the count at the moment of pause (F.S. 553.791 compliance).
+  // Pass paused_at as asOf so we count days from clockStart up to the pause timestamp,
+  // not days since the pause was set.
+  const reviewDaysUsed = phase === "review"
+    ? (isPaused
+        ? getBusinessDaysElapsed(clockStart, new Date(project.review_clock_paused_at!))
+        : getBusinessDaysElapsed(clockStart))
+    : 0;
   const reviewDaysRemaining = Math.max(0, reviewDays - reviewDaysUsed);
 
   // Inspection phase uses dedicated inspection clock
