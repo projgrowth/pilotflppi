@@ -157,14 +157,13 @@ ${firm?.address ? `<p><strong>Address:</strong> ${firm.address}</p>` : ""}
 </body></html>`;
 }
 
-interface PlanReviewRecord { id: string; round: number; qc_status: string; updated_at: string; ai_findings: unknown }
+interface PlanReviewRecord { id: string; round: number; qc_status: string; updated_at: string; findings_count: number }
 function generateApprovedDocumentsLogHtml(project: ProjectInfo, reviews: PlanReviewRecord[]): string {
   const approved = reviews.filter((r) => r.qc_status === "qc_approved");
   const rows = approved.length === 0
     ? `<tr><td colspan="4" class="empty">No approved documents yet.</td></tr>`
     : approved.map((r) => {
-        const findingCount = Array.isArray(r.ai_findings) ? (r.ai_findings as unknown[]).length : 0;
-        return `<tr><td>Round ${r.round}</td><td>${new Date(r.updated_at).toLocaleDateString()}</td><td>${findingCount}</td><td>QC Approved</td></tr>`;
+        return `<tr><td>Round ${r.round}</td><td>${new Date(r.updated_at).toLocaleDateString()}</td><td>${r.findings_count}</td><td>QC Approved</td></tr>`;
       }).join("");
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${docShellCSS}</style></head><body>
@@ -239,11 +238,19 @@ export default function DocumentsPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("plan_reviews")
-        .select("id, round, qc_status, updated_at, ai_findings")
+        .select("id, round, qc_status, updated_at")
         .eq("project_id", selectedProject)
         .order("round");
       if (error) throw error;
-      return (data || []) as PlanReviewRecord[];
+      const ids = (data || []).map((r) => r.id);
+      if (ids.length === 0) return [] as PlanReviewRecord[];
+      const { data: defs } = await supabase
+        .from("deficiencies_v2")
+        .select("plan_review_id")
+        .in("plan_review_id", ids);
+      const counts = new Map<string, number>();
+      (defs || []).forEach((d) => counts.set(d.plan_review_id, (counts.get(d.plan_review_id) || 0) + 1));
+      return (data || []).map((r) => ({ ...r, findings_count: counts.get(r.id) || 0 })) as PlanReviewRecord[];
     },
   });
 

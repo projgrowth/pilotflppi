@@ -101,11 +101,19 @@ export default function PlanReviewDetail() {
  queryFn: async () => {
  const { data, error } = await supabase
  .from("plan_reviews")
- .select("id, round, created_at, ai_check_status, ai_findings")
+ .select("id, round, created_at, ai_check_status")
  .eq("project_id", review!.project_id)
  .order("round");
  if (error) throw error;
- return data;
+ const ids = (data || []).map((r) => r.id);
+ if (ids.length === 0) return (data || []).map((r) => ({ ...r, findings_count: 0 }));
+ const { data: defs } = await supabase
+ .from("deficiencies_v2")
+ .select("plan_review_id")
+ .in("plan_review_id", ids);
+ const counts = new Map<string, number>();
+ (defs || []).forEach((d) => counts.set(d.plan_review_id, (counts.get(d.plan_review_id) || 0) + 1));
+ return (data || []).map((r) => ({ ...r, findings_count: counts.get(r.id) || 0 }));
  },
  enabled: !!review?.project_id,
  });
@@ -621,7 +629,7 @@ export default function PlanReviewDetail() {
  round: r.round,
  created_at: r.created_at,
  ai_check_status: r.ai_check_status,
- findingsCount: Array.isArray(r.ai_findings) ? (r.ai_findings as unknown as Finding[]).length : 0,
+ findingsCount: r.findings_count || 0,
  }));
 
  const hasDocuments = fileUrls.length > 0;
