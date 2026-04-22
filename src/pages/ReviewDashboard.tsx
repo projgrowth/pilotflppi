@@ -12,6 +12,7 @@ import DeficiencyList from "@/components/review-dashboard/DeficiencyList";
 import HumanReviewQueue from "@/components/review-dashboard/HumanReviewQueue";
 import ProjectDNAViewer from "@/components/review-dashboard/ProjectDNAViewer";
 import DnaHealthBanner from "@/components/review-dashboard/DnaHealthBanner";
+import CitationDbBanner from "@/components/review-dashboard/CitationDbBanner";
 import SheetCoverageMap from "@/components/review-dashboard/SheetCoverageMap";
 import DeferredScopePanel from "@/components/review-dashboard/DeferredScopePanel";
 import DedupeAuditTrail from "@/components/review-dashboard/DedupeAuditTrail";
@@ -172,6 +173,8 @@ export default function ReviewDashboard() {
           onJumpToDna={() => setActiveTab("dna")}
         />
       )}
+
+      <CitationDbBanner />
 
       {review?.project && (
         <ReviewHealthStrip
