@@ -25,7 +25,7 @@ const PLACEHOLDER_PATTERNS: RegExp[] = [
   /\[\s*INSERT[^\]]*\]/i,
 ];
 
-export function lintCommentLetter(letter: string, findings: Finding[], findingStatuses: Record<number, FindingStatus>): LintIssue[] {
+export function lintCommentLetter(letter: string, findings: Finding[], findingStatuses: Record<string, FindingStatus>): LintIssue[] {
   const issues: LintIssue[] = [];
   const text = letter.trim();
 
