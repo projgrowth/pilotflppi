@@ -336,9 +336,20 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
 
  queryClient.invalidateQueries({ queryKey: ["plan-reviews"] });
  queryClient.invalidateQueries({ queryKey: ["projects"] });
+
+ // Auto-start the pipeline immediately after upload
+ try {
+   await supabase.functions.invoke("run-review-pipeline", {
+     body: { plan_review_id: review.id },
+   });
+ } catch {
+   // Non-fatal — reviewer can manually run from dashboard
+   toast.warning("Files uploaded. Pipeline will need to be started manually.");
+ }
+
  onComplete(review.id, projectId);
  handleClose();
- toast.success("Review created — ready for AI analysis");
+ toast.success("Review created — AI analysis started");
  } catch (err) {
  toast.error(err instanceof Error ? err.message : "Failed to create review");
  } finally {
