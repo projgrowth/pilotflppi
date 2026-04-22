@@ -1,42 +1,64 @@
 
-## Raise PDF Upload Limit to 50 MB
 
-The 20 MB cap is enforced in three places. All three need to change for 50 MB to actually work end-to-end.
+## Why "Proper Pizza & Pasta" Pipeline Says No Findings
 
-### What changes
+### Root cause
 
-**1. Storage bucket limit (server-side, hard cap)**
-The `documents` bucket in Lovable Cloud currently rejects anything over 20 MB before the file even reaches your code. New migration to raise it:
+The pipeline isn't failing at the findings stage — it's failing at **stage 1 (`upload`)** before any AI ever runs. Edge function logs show three retries all returning:
+
+> `Error: No files uploaded for this plan review`
+
+The frontend toast says "Pipeline run complete" because of how the success callback is wired, but every stage afterward is skipped.
+
+### Why the upload stage thinks there are no files
+
+Two tables track uploaded PDFs and they're out of sync for this review:
+
+| Table | What's there for `eb8df5a0-…` |
+|---|---|
+| `plan_reviews.file_urls` | `["plan-reviews/eb8df5a0-…/Document2.pdf"]` ✅ |
+| `plan_review_files` (rows) | **0 rows** ❌ |
+
+`run-review-pipeline/index.ts → stageUpload()` queries `plan_review_files` (line 347). With zero rows it throws.
+
+The bug is in `src/components/NewPlanReviewWizard.tsx`: when a plan review is created from the wizard, file paths get written to `plan_reviews.file_urls` (line 333) but **no matching rows are ever inserted into `plan_review_files`**. By contrast `src/pages/PlanReviewDetail.tsx` (line 174) does insert into `plan_review_files` when files are added later — that's why older reviews work.
+
+### Fix (3 small changes)
+
+**1. `src/components/NewPlanReviewWizard.tsx`** — after uploading PDFs and updating `file_urls`, also insert one row per file into `plan_review_files`:
+
+```ts
+await supabase.from("plan_review_files").insert(
+  fileUrls.map((fp) => ({
+    plan_review_id: review.id,
+    file_path: fp,
+    round: 1,
+    uploaded_by: userId,    // already known in this scope
+    firm_id: firmId,        // already known in this scope
+  }))
+);
+```
+
+**2. Backfill the orphaned record** — one-line migration to repair Proper Pizza & Pasta (and any other reviews stuck in the same state) by inserting `plan_review_files` rows from `plan_reviews.file_urls` where they're missing:
 
 ```sql
-UPDATE storage.buckets
-SET file_size_limit = 52428800   -- 50 MB in bytes
-WHERE id = 'documents';
+INSERT INTO plan_review_files (plan_review_id, file_path, round, firm_id)
+SELECT pr.id, unnest(pr.file_urls), pr.round, pr.firm_id
+FROM plan_reviews pr
+WHERE pr.file_urls IS NOT NULL
+  AND array_length(pr.file_urls, 1) > 0
+  AND NOT EXISTS (
+    SELECT 1 FROM plan_review_files prf WHERE prf.plan_review_id = pr.id
+  );
 ```
 
-**2. Client-side validation (`src/components/NewPlanReviewWizard.tsx`, line ~169)**
-```ts
-if (file.size > 50 * 1024 * 1024) {
-  toast.error(`${file.name} exceeds 50MB limit`);
-  continue;
-}
-```
-And the helper text on line ~436: `"PDF files up to 50MB each • Header validation enabled"`.
+**3. `src/pages/ReviewDashboard.tsx`** — the "Run Pipeline" success toast fires even when the pipeline returns errors per-stage. Change `runPipeline()` to inspect the response payload and show `toast.error` if any stage status is `error`, so failures stop being silently labeled "complete."
 
-**3. Drop-zone helper text (`src/components/plan-review/PlanViewerPanel.tsx`, line 62)**
-`"PDF files up to 50MB"`.
-
-### Caveats worth knowing before you approve
-
-- **PDF.js render memory** — 50 MB plans (often 100+ pages, large rasters) can spike browser memory hard during page rendering. If you're hitting OOM crashes after this change, the next step is rendering pages on-demand instead of all upfront.
-- **Gemini vision pipeline** — `run-review-pipeline` sends page images to the AI gateway. Larger documents = more pages = longer pipeline runs and higher token costs. No code change needed, just a heads-up.
-- **Edge function payload limit** — Supabase edge functions have a 6 MB request body limit, but you upload directly to Storage (not through a function), so this is fine.
-
-### If you want a different number
-
-Say "make it 100 MB" or "make it 200 MB" and I'll swap the values. The byte math: `MB × 1024 × 1024`. For 100 MB → `104857600`. For 200 MB → `209715200`.
+### After the fix
+Re-run the pipeline on Proper Pizza & Pasta. Stages should advance past `upload` and the dashboard will populate with deficiencies.
 
 ### Files touched
-- New: `supabase/migrations/<timestamp>_raise_documents_bucket_limit.sql`
-- Edit: `src/components/NewPlanReviewWizard.tsx` (2 lines)
-- Edit: `src/components/plan-review/PlanViewerPanel.tsx` (1 line)
+- Edit: `src/components/NewPlanReviewWizard.tsx` (insert into `plan_review_files`)
+- Edit: `src/pages/ReviewDashboard.tsx` (honest pipeline result toast)
+- New: `supabase/migrations/<ts>_backfill_plan_review_files.sql`
+
