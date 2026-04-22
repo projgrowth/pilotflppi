@@ -19,10 +19,10 @@ type Stage =
   | "sheet_map"
   | "dna_extract"
   | "discipline_review"
-  | "verify"
-  | "dedupe"
-  | "ground_citations"
   | "cross_check"
+  | "verify"
+  | "ground_citations"
+  | "dedupe"
   | "deferred_scope"
   | "prioritize"
   | "complete";
@@ -32,10 +32,10 @@ const STAGES: Stage[] = [
   "sheet_map",
   "dna_extract",
   "discipline_review",
-  "verify",
-  "dedupe",
-  "ground_citations",
   "cross_check",
+  "verify",
+  "ground_citations",
+  "dedupe",
   "deferred_scope",
   "prioritize",
   "complete",
