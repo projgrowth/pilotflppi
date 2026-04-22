@@ -826,19 +826,25 @@ export type Database = {
         Row: {
           correction_id: string | null
           created_at: string | null
-          embedding: string | null
+          embedded_at: string | null
+          embedding_keywords: string | null
+          embedding_vector: string | null
           id: string
         }
         Insert: {
           correction_id?: string | null
           created_at?: string | null
-          embedding?: string | null
+          embedded_at?: string | null
+          embedding_keywords?: string | null
+          embedding_vector?: string | null
           id?: string
         }
         Update: {
           correction_id?: string | null
           created_at?: string | null
-          embedding?: string | null
+          embedded_at?: string | null
+          embedding_keywords?: string | null
+          embedding_vector?: string | null
           id?: string
         }
         Relationships: [
@@ -1802,6 +1808,18 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      match_correction_embeddings: {
+        Args: {
+          match_count?: number
+          match_threshold?: number
+          p_firm_id?: string
+          query_vector: string
+        }
+        Returns: {
+          correction_id: string
+          similarity: number
+        }[]
       }
       user_firm_id: { Args: { _user: string }; Returns: string }
     }
