@@ -1114,9 +1114,7 @@ async function runDisciplineChecks(
     `\n\nAnalyze the attached pages (general-notes pages first, then ${ctx.discipline} sheets). ` +
     `Return findings via submit_discipline_findings.`;
 
-  // Avoid unused-variable warnings on context vars used only for relevance heuristics.
-  void occupancy;
-  void constructionType;
+  // fbcEdition is available for future prompt injection if needed.
   void fbcEdition;
 
   const content: Array<
