@@ -7,12 +7,14 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { type DeficiencyV2Row } from "@/hooks/useReviewDashboard";
+import EvidenceSnippet from "./EvidenceSnippet";
 
 interface Props {
+  planReviewId: string;
   def: DeficiencyV2Row;
 }
 
-export default function DeficiencyEvidence({ def }: Props) {
+export default function DeficiencyEvidence({ planReviewId, def }: Props) {
   const evidence = (def.evidence ?? []).filter(Boolean);
   const hasContent = evidence.length > 0 || !!def.confidence_basis;
   // Default open for low-confidence findings — reviewers should see the basis up front.

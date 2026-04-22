@@ -101,6 +101,10 @@ export interface DeficiencyV2Row {
   citation_match_score?: number | null;
   citation_canonical_text?: string | null;
   citation_grounded_at?: string | null;
+  /** Optional URL to a cropped PNG of the source PDF region (rendered client-side, persisted to Storage when "pinned"). */
+  evidence_crop_url?: string | null;
+  /** Metadata describing the crop: { sheet_ref, page_in_file, evidence_text, bbox, generated_at }. */
+  evidence_crop_meta?: Record<string, unknown> | null;
 }
 
 export function usePipelineStatus(planReviewId?: string) {
