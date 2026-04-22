@@ -5,8 +5,13 @@
 // requires_human_review on downstream deficiencies, but the overall pipeline
 // continues to the next stage where possible.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.74.0";
+import { createClient as _createClient } from "https://esm.sh/@supabase/supabase-js@2.74.0";
 import { composeDisciplineSystemPrompt } from "./discipline-experts.ts";
+
+// Untyped client wrapper — the edge function does not have access to generated
+// Database types, and inferring `never` for every table breaks all inserts.
+// deno-lint-ignore no-explicit-any
+const createClient = _createClient as unknown as (...args: any[]) => any;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

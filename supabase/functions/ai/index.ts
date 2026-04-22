@@ -400,7 +400,8 @@ const EXTRACT_ZONING_TOOL = {
 const MULTIMODAL_ACTIONS = new Set(["plan_review_check_visual", "extract_project_info", "extract_zoning_data"]);
 
 // Actions that use tool calling for structured output
-const TOOL_CALL_ACTIONS: Record<string, typeof PLAN_REVIEW_TOOL> = {
+// deno-lint-ignore no-explicit-any
+const TOOL_CALL_ACTIONS: Record<string, any> = {
   plan_review_check: PLAN_REVIEW_TOOL,
   plan_review_check_visual: PLAN_REVIEW_TOOL,
   extract_project_info: EXTRACT_PROJECT_TOOL,
