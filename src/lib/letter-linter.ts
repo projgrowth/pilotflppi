@@ -46,7 +46,7 @@ export function lintCommentLetter(letter: string, findings: Finding[], findingSt
     }
   }
 
-  const openFindings = findings.filter((_, i) => (findingStatuses[i] || "open") === "open");
+  const openFindings = findings.filter((f) => (f.finding_id ? findingStatuses[f.finding_id] || "open" : "open") === "open");
   if (findings.length > 0 && openFindings.length === 0) {
     issues.push({
       severity: "warning",
