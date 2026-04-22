@@ -1050,7 +1050,7 @@ async function runDisciplineChecks(
   const fbcEdition = (ctx.dna?.fbc_edition as string | null) ?? null;
   let patternQuery = admin
     .from("correction_patterns")
-    .select("id, pattern_summary, original_finding, code_reference, reason_notes, rejection_count")
+    .select("id, pattern_summary, original_finding, code_reference, reason_notes, rejection_count, occupancy_classification, construction_type")
     .eq("discipline", ctx.discipline)
     .eq("is_active", true)
     .order("rejection_count", { ascending: false })
@@ -1065,6 +1065,8 @@ async function runDisciplineChecks(
     code_reference: { section?: string } | null;
     reason_notes: string;
     rejection_count: number;
+    occupancy_classification: string | null;
+    construction_type: string | null;
   }>;
   // Filter for project-DNA relevance: prefer patterns matching this project's
   // occupancy and construction type. Patterns with no DNA context are always included.
