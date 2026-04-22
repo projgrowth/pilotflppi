@@ -297,31 +297,22 @@ export default function PlanReviewDetail() {
         }
         case "s": {
           if (cur !== null) {
-            const fid = findings[cur]?.finding_id;
-            if (fid) {
-              e.preventDefault();
-              updateFindingStatus(fid, "resolved");
-            }
+            e.preventDefault();
+            updateFindingStatus(findings[cur]?.finding_id ?? String(cur), "resolved");
           }
           break;
         }
         case "x": {
           if (cur !== null) {
-            const fid = findings[cur]?.finding_id;
-            if (fid) {
-              e.preventDefault();
-              updateFindingStatus(fid, "deferred");
-            }
+            e.preventDefault();
+            updateFindingStatus(findings[cur]?.finding_id ?? String(cur), "deferred");
           }
           break;
         }
         case "o": {
           if (cur !== null) {
-            const fid = findings[cur]?.finding_id;
-            if (fid) {
-              e.preventDefault();
-              updateFindingStatus(fid, "open");
-            }
+            e.preventDefault();
+            updateFindingStatus(findings[cur]?.finding_id ?? String(cur), "open");
           }
           break;
         }
@@ -393,9 +384,7 @@ export default function PlanReviewDetail() {
   const handleMarkVisibleResolved = () => {
     if (f.visibleIndices.length === 0) return;
     f.visibleIndices.forEach((i) => {
-      const fid = findings[i]?.finding_id;
-      if (!fid) return;
-      if (findingStatuses[fid] !== "resolved") updateFindingStatus(fid, "resolved");
+      if (findingStatuses[findings[i]?.finding_id ?? ""] !== "resolved") updateFindingStatus(findings[i]?.finding_id ?? String(i), "resolved");
     });
     toast.success(`Marked ${f.visibleIndices.length} finding${f.visibleIndices.length === 1 ? "" : "s"} resolved`);
   };
@@ -505,7 +494,9 @@ export default function PlanReviewDetail() {
     onCopyLetter: copyLetter,
     onLetterChange: setCommentLetter,
     onSendToContractor: () => {
-      const issues = lintCommentLetter(commentLetter, findings, findingStatuses);
+      const indexedStatuses: Record<number, FindingStatus> = {};
+      findings.forEach((f, i) => { if (f.finding_id && findingStatuses[f.finding_id]) indexedStatuses[i] = findingStatuses[f.finding_id]; });
+      const issues = lintCommentLetter(commentLetter, findings, indexedStatuses);
       setLintIssues(issues);
       setShowLintDialog(true);
     },
