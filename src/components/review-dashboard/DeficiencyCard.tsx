@@ -99,7 +99,7 @@ export default function DeficiencyCard({
           )}
 
           <div className="mt-2">
-            <DeficiencyEvidence def={def} />
+            <DeficiencyEvidence planReviewId={planReviewId} def={def} />
           </div>
 
           <DeficiencyActions planReviewId={planReviewId} def={def} />

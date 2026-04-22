@@ -84,6 +84,19 @@ export default function DeficiencyEvidence({ planReviewId, def }: Props) {
             {def.verification_notes}
           </div>
         )}
+
+        {/* Lazy-render visual snippet only when the panel is open. Picks the first
+            sheet_ref + first evidence quote for context. "Pin to letter" persists
+            the crop for embedding in the exported comment letter. */}
+        {open && (def.sheet_refs?.length ?? 0) > 0 && evidence.length > 0 && (
+          <EvidenceSnippet
+            planReviewId={planReviewId}
+            deficiencyId={def.id}
+            sheetRef={def.sheet_refs?.[0] ?? null}
+            evidenceText={evidence[0] ?? ""}
+            pinnedUrl={def.evidence_crop_url ?? null}
+          />
+        )}
       </CollapsibleContent>
     </Collapsible>
   );
