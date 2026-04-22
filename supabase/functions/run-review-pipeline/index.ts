@@ -166,7 +166,7 @@ type ChatMessage = {
 async function callAI(
   messages: ChatMessage[],
   toolSchema?: Record<string, unknown>,
-  model = "google/gemini-2.5-pro",
+  model = "google/gemini-2.5-flash",
 ) {
   const body: Record<string, unknown> = { model, messages };
   if (toolSchema) {
@@ -1159,7 +1159,7 @@ async function runDisciplineChecks(
     human_review_verify: f.human_review_verify ?? null,
     confidence_score: Math.max(0, Math.min(1, f.confidence_score ?? 0.5)),
     confidence_basis: f.confidence_basis ?? "Vision-extracted",
-    model_version: "google/gemini-2.5-pro",
+    model_version: "google/gemini-2.5-flash",
     status: "open",
   }));
 
