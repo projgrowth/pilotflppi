@@ -762,7 +762,8 @@ export default function PlanReviewDetail() {
         open={showLintDialog}
         onOpenChange={setShowLintDialog}
         issues={lintIssues}
-        onProceed={() => {
+        blocked={hasBlockingIssues(lintIssues)}
+        onConfirmSend={() => {
           setShowLintDialog(false);
           toast.success("Letter ready to send");
         }}
