@@ -404,22 +404,12 @@ export function useDeferredScope(planReviewId?: string) {
   // Live stream — same pattern as deficiencies above.
   useEffect(() => {
     if (!planReviewId) return;
-    const ch = supabase
-      .channel(`deferred-scope-${planReviewId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "deferred_scope_items",
-          filter: `plan_review_id=eq.${planReviewId}`,
-        },
-        () => qc.invalidateQueries({ queryKey: ["deferred_scope", planReviewId] }),
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(ch);
-    };
+    return subscribeShared(
+      `deferred-scope-${planReviewId}`,
+      "deferred_scope_items",
+      `plan_review_id=eq.${planReviewId}`,
+      () => qc.invalidateQueries({ queryKey: ["deferred_scope", planReviewId] }),
+    );
   }, [planReviewId, qc]);
 
   return query;
