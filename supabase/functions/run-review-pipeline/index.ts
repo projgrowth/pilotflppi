@@ -71,7 +71,8 @@ function normalizeAIDiscipline(raw: string | null | undefined): string | null {
   if (k === "general" || k === "other") return null;
   if (k === "architectural" || k === "arch") return "Architectural";
   if (k === "structural" || k === "struct") return "Structural";
-  if (k === "mep" || k === "mechanical" || k === "electrical" || k === "plumbing" || k === "fire protection" || k === "fp") return "MEP";
+  if (k === "mep" || k === "mechanical" || k === "electrical" || k === "plumbing") return "MEP";
+  if (k === "fire protection" || k === "fp") return "Life Safety"; // FBC Ch.9 suppression owned by Life Safety expert
   if (k === "energy") return "Energy";
   if (k === "accessibility" || k === "ada") return "Accessibility";
   if (k === "civil" || k === "site") return "Civil";
