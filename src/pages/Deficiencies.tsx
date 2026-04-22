@@ -45,12 +45,22 @@ export default function Deficiencies() {
   };
 
   const handleAddToReview = async (deficiency: typeof filtered[0], projectId: string) => {
-    const { error } = await supabase.from("review_flags").insert({
-      project_id: projectId,
-      fbc_section: deficiency.fbc_section,
-      description: deficiency.standard_comment_language || deficiency.description,
-      severity: deficiency.severity,
-      status: "active",
+    const { error } = await supabase.from("deficiencies_v2").insert({
+      plan_review_id: projectId,
+      def_number: `DEF-M${Date.now().toString().slice(-4)}`,
+      discipline: deficiency.discipline || "Architectural",
+      finding: deficiency.title,
+      required_action: deficiency.standard_comment_language || deficiency.description || "",
+      code_reference: { code: "FBC", section: deficiency.fbc_section, edition: "8th" },
+      priority: deficiency.severity === "critical" ? "high" : deficiency.severity === "major" ? "medium" : "low",
+      life_safety_flag: false,
+      permit_blocker: false,
+      liability_flag: false,
+      requires_human_review: false,
+      confidence_score: 1.0,
+      confidence_basis: "Manually added from deficiency library",
+      status: "open",
+      model_version: "manual",
     });
     if (error) {
       toast.error("Failed to add flag: " + error.message);
