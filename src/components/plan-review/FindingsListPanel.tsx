@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Sparkles, Upload } from "lucide-react";
 import { FindingCard, type Finding } from "@/components/FindingCard";
 import { BulkTriageFilters, type ConfidenceFilter } from "@/components/BulkTriageFilters";
+import { ConfidenceMeter } from "@/components/shared/ConfidenceMeter";
 import type { FindingStatus } from "@/components/FindingStatusFilter";
 import {
   getDisciplineIcon,
@@ -26,6 +27,29 @@ function getWorstSeverity(findings: Finding[]): string {
   if (findings.some((f) => f.severity === "critical")) return "critical";
   if (findings.some((f) => f.severity === "major")) return "major";
   return "minor";
+}
+
+/**
+ * Map the AI's confidence label to a numeric score for the overall meter.
+ * Findings store a string label ("high"/"medium"/"low"/"verified"/"likely"),
+ * not a probability. These anchors keep the meter aligned with the spec's
+ * thresholds (>85 high / 60–85 medium / <60 low).
+ */
+const CONFIDENCE_TO_SCORE: Record<string, number> = {
+  verified: 0.97,
+  high: 0.92,
+  likely: 0.78,
+  medium: 0.72,
+  low: 0.45,
+};
+
+function averageConfidence(findings: Finding[]): number {
+  if (findings.length === 0) return 0;
+  const sum = findings.reduce((acc, f) => {
+    const key = (f.confidence || "low").toLowerCase();
+    return acc + (CONFIDENCE_TO_SCORE[key] ?? 0.45);
+  }, 0);
+  return sum / findings.length;
 }
 
 interface Props {
