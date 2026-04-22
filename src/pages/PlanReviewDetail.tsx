@@ -127,16 +127,14 @@ export default function PlanReviewDetail() {
  enabled: !!review?.project_id,
  });
 
- // ── V2 source-of-truth: when pipeline_version === 'v2', findings live in the
- // deficiencies_v2 table (verified, dedup'd, with human-review flags) instead of
- // the legacy ai_findings JSONB. We adapt them down to the legacy Finding shape
- // so the existing PDF viewer, comment letter, lint, and SitePlanChecklist all
- // render V2 data without bespoke V2 components. Write paths that would mutate
- // ai_findings (run AI, new round, reposition pin) are disabled below.
- const isV2Pipeline = review?.pipeline_version === "v2";
+ // ── Findings live in deficiencies_v2 (verified, dedup'd, with human-review
+ // flags). We adapt them down to the legacy Finding shape so the existing PDF
+ // viewer, comment letter, lint, and SitePlanChecklist all consume V2 data
+ // without bespoke V2 components. The legacy ai_findings JSONB on plan_reviews
+ // is read-only fallback for very old rows; nothing writes to it anymore.
  const { data: v2Findings } = useQuery({
   queryKey: ["v2-findings-for-viewer", review?.id],
-  enabled: !!review?.id && isV2Pipeline,
+  enabled: !!review?.id,
   queryFn: async () => {
    const { data, error } = await supabase
     .from("deficiencies_v2")
