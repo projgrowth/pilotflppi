@@ -25,7 +25,8 @@ interface CommentLetterExportProps {
   tradeType: string;
   round: number;
   findings: Finding[];
-  findingStatuses: Record<number, string>;
+  /** Keyed by finding UUID (deficiencies_v2.id). */
+  findingStatuses: Record<string, string>;
   firmInfo?: FirmInfo | null;
 }
 
@@ -162,9 +163,10 @@ function buildLetterHTML(props: CommentLetterExportProps): string {
   const date = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
   const grouped = groupByDiscipline(findings);
 
-  const openFindings = findings.filter((_, i) => (findingStatuses[i] || "open") === "open");
-  const resolvedFindings = findings.filter((_, i) => findingStatuses[i] === "resolved");
-  const deferredFindings = findings.filter((_, i) => findingStatuses[i] === "deferred");
+  const statusOf = (f: Finding) => (f.finding_id ? findingStatuses[f.finding_id] || "open" : "open");
+  const openFindings = findings.filter((f) => statusOf(f) === "open");
+  const resolvedFindings = findings.filter((f) => statusOf(f) === "resolved");
+  const deferredFindings = findings.filter((f) => statusOf(f) === "deferred");
 
   let itemNumber = 0;
 
@@ -278,9 +280,9 @@ ${DISCIPLINE_ORDER.filter(d => grouped[d]).map(discipline => {
   const items = grouped[discipline];
   return `
 <div class="discipline-header">${getDisciplineLabel(discipline)}</div>
-${items.map(({ finding, index }) => {
+${items.map(({ finding }) => {
   itemNumber++;
-  const status = findingStatuses[index] || "open";
+  const status = (finding.finding_id && findingStatuses[finding.finding_id]) || "open";
   const countyAmendment = finding.county_specific && config.amendments.length > 0
     ? config.amendments[0]
     : null;
