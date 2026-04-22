@@ -158,7 +158,7 @@ function buildSupplementalSections(config: CountyRequirements): string {
 
 function buildLetterHTML(props: CommentLetterExportProps): string {
   const { projectName, address, county, jurisdiction, tradeType, round, findings, findingStatuses, firmInfo } = props;
-  const firm = firmInfo || { firm_name: "Florida Private Providers, Inc.", license_number: "AR92053", email: "", phone: "", address: "", logo_url: "", closing_language: "" };
+  const firm = firmInfo || { firm_name: "", license_number: "", email: "", phone: "", address: "", logo_url: "", closing_language: "" };
   const config = getCountyRequirements(county);
   const date = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
   const grouped = groupByDiscipline(findings);
@@ -222,9 +222,9 @@ function buildLetterHTML(props: CommentLetterExportProps): string {
 </head><body>
 
 <div class="letterhead">
-  <h1>${firm.firm_name || "Florida Private Providers, Inc."}</h1>
+  <h1>${firm.firm_name || "[Firm Name]"}</h1>
   <p>LICENSED PRIVATE PROVIDER FIRM</p>
-  <p class="license">License # ${firm.license_number || "AR92053"} | F.S. 553.791</p>
+  <p class="license">License # ${firm.license_number || "[License #]"} | F.S. 553.791</p>
   <p>Plan Review &bull; Inspections &bull; Code Compliance</p>
   ${firm.address ? `<p style="font-size:7.5pt;color:#718096;margin-top:2px">${firm.address}</p>` : ""}
   ${firm.phone || firm.email ? `<p style="font-size:7.5pt;color:#718096">${[firm.phone, firm.email].filter(Boolean).join(" | ")}</p>` : ""}
@@ -261,7 +261,7 @@ ${config.submissionNotes.length > 0 ? `
 
 <p class="body-text"><strong>RE: Plan Review Comment Letter — Round ${round}</strong></p>
 
-<p class="body-text">Pursuant to Florida Statute 553.791, Florida Private Providers, Inc. has completed a plan review of the above-referenced project. The following deficiencies and comments have been identified during our review of the submitted construction documents against the Florida Building Code, 8th Edition (2023) and all applicable referenced standards${config.amendments.length > 0 ? `, including ${config.label} County local amendments` : ''}.</p>
+<p class="body-text">Pursuant to Florida Statute 553.791, ${firm.firm_name || "[Firm Name]"} has completed a plan review of the above-referenced project. The following deficiencies and comments have been identified during our review of the submitted construction documents against the Florida Building Code, 8th Edition (2023) and all applicable referenced standards${config.amendments.length > 0 ? `, including ${config.label} County local amendments` : ''}.</p>
 
 <p class="body-text">This review was completed within the statutory 30-business-day review period per F.S. 553.791(4)(b). The applicant is required to address all deficiency items and resubmit corrected plans within <strong>${config.resubmissionDays} calendar days</strong>.</p>
 
@@ -318,13 +318,13 @@ ${buildSupplementalSections(config)}
 <div class="signature-block">
   <div class="signature-line">
     Plan Review Engineer<br>
-    ${firm.firm_name || "Florida Private Providers, Inc."}<br>
-    License # ${firm.license_number || "AR92053"}
+    ${firm.firm_name || "[Firm Name]"}<br>
+    License # ${firm.license_number || "[License #]"}
   </div>
 </div>
 
 <div class="footer">
-  ${firm.firm_name || "Florida Private Providers, Inc."} | Licensed Private Provider under F.S. 553.791 | This document is confidential and intended for the addressee only.
+  ${firm.firm_name || "[Firm Name]"} | Licensed Private Provider under F.S. 553.791 | This document is confidential and intended for the addressee only.
 </div>
 
 </body></html>`;

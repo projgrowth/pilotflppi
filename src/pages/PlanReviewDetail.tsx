@@ -219,6 +219,8 @@ export default function PlanReviewDetail() {
           jurisdiction: r.project?.jurisdiction,
           findings,
           round: r.round,
+          firm_name: firmSettings?.firm_name || undefined,
+          license_number: firmSettings?.license_number || undefined,
         },
         onDelta: (chunk) => setCommentLetter((prev) => prev + chunk),
         onDone: () => setGeneratingLetter(false),

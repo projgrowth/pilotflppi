@@ -59,10 +59,10 @@ export type PipelineStage =
   | "sheet_map"
   | "dna_extract"
   | "discipline_review"
-  | "verify"
-  | "dedupe"
-  | "ground_citations"
   | "cross_check"
+  | "verify"
+  | "ground_citations"
+  | "dedupe"
   | "deferred_scope"
   | "prioritize"
   | "complete";
@@ -72,10 +72,10 @@ export const PIPELINE_STAGES: { key: PipelineStage; label: string }[] = [
   { key: "sheet_map", label: "Sheet Map" },
   { key: "dna_extract", label: "DNA Extract" },
   { key: "discipline_review", label: "Discipline Review" },
-  { key: "verify", label: "Verify" },
-  { key: "dedupe", label: "Dedupe" },
-  { key: "ground_citations", label: "Ground Citations" },
   { key: "cross_check", label: "Cross-Check" },
+  { key: "verify", label: "Verify" },
+  { key: "ground_citations", label: "Ground Citations" },
+  { key: "dedupe", label: "Dedupe" },
   { key: "deferred_scope", label: "Deferred Scope" },
   { key: "prioritize", label: "Prioritize" },
   { key: "complete", label: "Complete" },
