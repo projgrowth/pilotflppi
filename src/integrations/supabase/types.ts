@@ -1219,7 +1219,6 @@ export type Database = {
       plan_reviews: {
         Row: {
           ai_check_status: string
-          ai_findings: Json | null
           ai_run_progress: Json | null
           checklist_state: Json | null
           comment_letter_draft: string
@@ -1241,7 +1240,6 @@ export type Database = {
         }
         Insert: {
           ai_check_status?: string
-          ai_findings?: Json | null
           ai_run_progress?: Json | null
           checklist_state?: Json | null
           comment_letter_draft?: string
@@ -1263,7 +1261,6 @@ export type Database = {
         }
         Update: {
           ai_check_status?: string
-          ai_findings?: Json | null
           ai_run_progress?: Json | null
           checklist_state?: Json | null
           comment_letter_draft?: string
