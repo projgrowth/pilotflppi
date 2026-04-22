@@ -86,7 +86,7 @@ export function ReviewTopBar({
  </DropdownMenuContent>
  </DropdownMenu>
 
- <DeadlineRing daysElapsed={21 - daysLeft} totalDays={21} size={30} />
+ <DeadlineRing daysElapsed={30 - daysLeft} totalDays={30} size={30} />
 
  <Button
  size="sm"
