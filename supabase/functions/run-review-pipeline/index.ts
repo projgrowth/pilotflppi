@@ -787,19 +787,13 @@ async function stageDnaExtract(
       DNA_SCHEMA as unknown as Record<string, unknown>,
     )) as Record<string, unknown>;
   } catch (err) {
+    // Surface the real error instead of silently inserting an empty DNA row.
+    // Previously this swallowed vision failures and let downstream stages
+    // report a confusing "DNA gate failed: only 33% populated" instead of the
+    // actual root cause (e.g. unsupported image format, rate limit, etc).
+    const msg = err instanceof Error ? err.message : String(err);
     console.error("[dna_extract] vision call failed:", err);
-    extracted = {
-      missing_fields: [
-        "occupancy_classification",
-        "construction_type",
-        "total_sq_ft",
-        "stories",
-        "wind_speed_vult",
-        "exposure_category",
-        "risk_category",
-      ],
-      ambiguous_fields: [],
-    };
+    throw new Error(`DNA extract vision call failed: ${msg}`);
   }
 
   const row = {
