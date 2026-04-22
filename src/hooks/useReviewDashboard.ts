@@ -1,6 +1,58 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+
+/**
+ * Module-level shared realtime subscription registry.
+ *
+ * Supabase Realtime requires unique channel topic names per client. Multiple
+ * components calling the same hook (e.g. `useDeficienciesV2`) would each try
+ * to attach `.on("postgres_changes", ...)` to the same topic, throwing
+ * "cannot add postgres_changes callbacks ... after subscribe()". This registry
+ * ref-counts subscribers so we open one WebSocket topic per (key) and fan out
+ * change notifications to every listener.
+ */
+type Sub = { channel: RealtimeChannel; refCount: number; listeners: Set<() => void> };
+const subs = new Map<string, Sub>();
+
+export function subscribeShared(
+  key: string,
+  table: string,
+  filter: string,
+  onChange: () => void,
+): () => void {
+  let entry = subs.get(key);
+  if (!entry) {
+    const created: Sub = {
+      channel: null as unknown as RealtimeChannel,
+      refCount: 0,
+      listeners: new Set(),
+    };
+    created.channel = supabase
+      .channel(key)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table, filter },
+        () => created.listeners.forEach((fn) => fn()),
+      )
+      .subscribe();
+    subs.set(key, created);
+    entry = created;
+  }
+  entry.listeners.add(onChange);
+  entry.refCount += 1;
+  return () => {
+    const e = subs.get(key);
+    if (!e) return;
+    e.listeners.delete(onChange);
+    e.refCount -= 1;
+    if (e.refCount <= 0) {
+      supabase.removeChannel(e.channel);
+      subs.delete(key);
+    }
+  };
+}
 
 export type PipelineStage =
   | "upload"
