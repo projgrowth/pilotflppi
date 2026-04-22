@@ -32,14 +32,17 @@ function groupFindingsByDiscipline(findings: Finding[]): Record<string, Finding[
 
 export function useFindingFilters(
   findings: Finding[],
-  findingStatuses: Record<number, FindingStatus>,
+  findingStatuses: Record<string, FindingStatus>,
   filters: FindingFilterState,
 ) {
   return useMemo(() => {
     const grouped = groupFindingsByDiscipline(findings);
+    // Status lookup keys off finding_id (UUID). Findings without an id are
+    // treated as "open" — they can't have a stored status anyway.
+    const statusOf = (f: Finding) => (f.finding_id ? findingStatuses[f.finding_id] || "open" : "open");
 
-    const filtered = findings.filter((f, i) => {
-      if (filters.status !== "all" && (findingStatuses[i] || "open") !== filters.status) return false;
+    const filtered = findings.filter((f) => {
+      if (filters.status !== "all" && statusOf(f) !== filters.status) return false;
       if (filters.confidence !== "all" && (f.confidence || "low") !== filters.confidence) return false;
       if (filters.discipline !== "all" && (f.discipline || "structural") !== filters.discipline) return false;
       if (filters.sheet !== "all" && (f.page || "Unknown").trim() !== filters.sheet) return false;
@@ -66,14 +69,14 @@ export function useFindingFilters(
       return acc;
     }, []);
     const allVisibleResolved =
-      visibleIndices.length > 0 && visibleIndices.every((i) => findingStatuses[i] === "resolved");
+      visibleIndices.length > 0 && visibleIndices.every((i) => statusOf(findings[i]) === "resolved");
 
     const criticalCount = findings.filter((f) => f.severity === "critical").length;
     const majorCount = findings.filter((f) => f.severity === "major").length;
     const minorCount = findings.filter((f) => f.severity === "minor").length;
-    const openCount = findings.filter((_, i) => !findingStatuses[i] || findingStatuses[i] === "open").length;
-    const resolvedCount = findings.filter((_, i) => findingStatuses[i] === "resolved").length;
-    const deferredCount = findings.filter((_, i) => findingStatuses[i] === "deferred").length;
+    const openCount = findings.filter((f) => statusOf(f) === "open").length;
+    const resolvedCount = findings.filter((f) => statusOf(f) === "resolved").length;
+    const deferredCount = findings.filter((f) => statusOf(f) === "deferred").length;
 
     // Stable global index across grouped accordion sections so keyboard nav
     // and selection always reference one canonical index.
