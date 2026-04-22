@@ -178,22 +178,12 @@ export function usePipelineStatus(planReviewId?: string) {
   // Realtime subscription so the stepper updates live
   useEffect(() => {
     if (!planReviewId) return;
-    const ch = supabase
-      .channel(`pipeline-${planReviewId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "review_pipeline_status",
-          filter: `plan_review_id=eq.${planReviewId}`,
-        },
-        () => qc.invalidateQueries({ queryKey: ["pipeline_status", planReviewId] }),
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(ch);
-    };
+    return subscribeShared(
+      `pipeline-${planReviewId}`,
+      "review_pipeline_status",
+      `plan_review_id=eq.${planReviewId}`,
+      () => qc.invalidateQueries({ queryKey: ["pipeline_status", planReviewId] }),
+    );
   }, [planReviewId, qc]);
 
   return query;
