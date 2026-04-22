@@ -15,6 +15,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   type DeficiencyV2Row,
   updateDeficiencyDisposition,
+  useOptimisticDisposition,
 } from "@/hooks/useReviewDashboard";
 import RejectionReasonDialog from "../RejectionReasonDialog";
 import {
@@ -29,6 +30,7 @@ interface Props {
 
 export default function DeficiencyActions({ planReviewId, def }: Props) {
   const qc = useQueryClient();
+  const optimisticUpdate = useOptimisticDisposition(planReviewId);
   const [notes, setNotes] = useState(def.reviewer_notes ?? "");
   const [saving, setSaving] = useState<string | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -40,8 +42,8 @@ export default function DeficiencyActions({ planReviewId, def }: Props) {
     }
     setSaving(d);
     try {
-      await updateDeficiencyDisposition(def.id, { reviewer_disposition: d });
-      qc.invalidateQueries({ queryKey: ["deficiencies_v2", planReviewId] });
+      // Optimistic — cache patches immediately, realtime echo reconciles.
+      await optimisticUpdate(def.id, { reviewer_disposition: d });
       toast.success(`Marked ${d}`);
     } catch {
       toast.error("Could not save");
@@ -93,8 +95,7 @@ export default function DeficiencyActions({ planReviewId, def }: Props) {
 
   async function setStatus(s: DeficiencyV2Row["status"]) {
     try {
-      await updateDeficiencyDisposition(def.id, { status: s });
-      qc.invalidateQueries({ queryKey: ["deficiencies_v2", planReviewId] });
+      await optimisticUpdate(def.id, { status: s });
     } catch {
       toast.error("Could not update status");
     }

@@ -180,7 +180,9 @@ export function useSheetCoverage(planReviewId?: string) {
 }
 
 export function useDeficienciesV2(planReviewId?: string) {
-  return useQuery({
+  const qc = useQueryClient();
+
+  const query = useQuery({
     queryKey: ["deficiencies_v2", planReviewId],
     enabled: !!planReviewId,
     queryFn: async () => {
@@ -193,6 +195,60 @@ export function useDeficienciesV2(planReviewId?: string) {
       return (data ?? []) as unknown as DeficiencyV2Row[];
     },
   });
+
+  // Live stream: as each discipline expert writes findings, they appear in the
+  // dashboard immediately. Mirrors the pipeline-stepper subscription above.
+  useEffect(() => {
+    if (!planReviewId) return;
+    const ch = supabase
+      .channel(`deficiencies-${planReviewId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "deficiencies_v2",
+          filter: `plan_review_id=eq.${planReviewId}`,
+        },
+        () => qc.invalidateQueries({ queryKey: ["deficiencies_v2", planReviewId] }),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [planReviewId, qc]);
+
+  return query;
+}
+
+/**
+ * Optimistic disposition update — patches the React Query cache immediately so
+ * Confirm / Reject / Modify clicks feel instant, then sends the DB write. The
+ * realtime subscription above will reconcile any drift when the row echoes back.
+ */
+export function useOptimisticDisposition(planReviewId?: string) {
+  const qc = useQueryClient();
+  return async (
+    id: string,
+    patch: Partial<Pick<DeficiencyV2Row, "reviewer_disposition" | "reviewer_notes" | "status">>,
+  ) => {
+    const key = ["deficiencies_v2", planReviewId];
+    const prev = qc.getQueryData<DeficiencyV2Row[]>(key);
+    if (prev) {
+      qc.setQueryData<DeficiencyV2Row[]>(
+        key,
+        prev.map((d) => (d.id === id ? { ...d, ...patch } : d)),
+      );
+    }
+    try {
+      await updateDeficiencyDisposition(id, patch);
+    } catch (e) {
+      // Roll back on failure — realtime echo would also reconcile, but rolling
+      // back immediately gives faster, more accurate feedback.
+      if (prev) qc.setQueryData(key, prev);
+      throw e;
+    }
+  };
 }
 
 export async function updateDeficiencyDisposition(
@@ -297,7 +353,9 @@ export const DEFERRED_SCOPE_LABELS: Record<DeferredScopeCategory, string> = {
 };
 
 export function useDeferredScope(planReviewId?: string) {
-  return useQuery({
+  const qc = useQueryClient();
+
+  const query = useQuery({
     queryKey: ["deferred_scope", planReviewId],
     enabled: !!planReviewId,
     queryFn: async () => {
@@ -310,6 +368,29 @@ export function useDeferredScope(planReviewId?: string) {
       return (data ?? []) as unknown as DeferredScopeItem[];
     },
   });
+
+  // Live stream — same pattern as deficiencies above.
+  useEffect(() => {
+    if (!planReviewId) return;
+    const ch = supabase
+      .channel(`deferred-scope-${planReviewId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "deferred_scope_items",
+          filter: `plan_review_id=eq.${planReviewId}`,
+        },
+        () => qc.invalidateQueries({ queryKey: ["deferred_scope", planReviewId] }),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [planReviewId, qc]);
+
+  return query;
 }
 
 export async function updateDeferredScopeItem(
