@@ -238,7 +238,7 @@ export default function ProjectDetail() {
 
  const daysElapsed = getDaysElapsed(project.notice_filed_at);
  const currentStepIndex = statusOrder[project.status] ?? 0;
- const findingsCount = (reviews || []).reduce((sum, r) => sum + (Array.isArray(r.ai_findings) ? (r.ai_findings as unknown[]).length : 0), 0);
+ const findingsCount = (reviews || []).reduce((sum, r) => sum + (r.findings_count || 0), 0);
 
  const detailRows = [
  project.county && ["County", project.county],
@@ -504,7 +504,7 @@ export default function ProjectDetail() {
  ) : (
  <div className="space-y-2">
  {(reviews || []).map((r) => {
- const count = Array.isArray(r.ai_findings) ? (r.ai_findings as unknown[]).length : 0;
+ const count = r.findings_count || 0;
  return (
  <div
  key={r.id}
