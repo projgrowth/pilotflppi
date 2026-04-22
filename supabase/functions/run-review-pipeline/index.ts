@@ -2332,7 +2332,11 @@ async function stageDedupe(
           b.sheets.size === 0 ||
           [...a.sheets].some((s) => b.sheets.has(s));
         if (!sheetOverlap) continue;
-        if (jaccard(a.tokens, b.tokens) < 0.55) continue;
+        // Use a lower threshold for cross-discipline matches (same FBC section,
+      // different discipline vocabulary). Same-discipline pairs share more
+      // specific terms and tolerate the tighter 0.55 bound.
+      const threshold = a.row.discipline === b.row.discipline ? 0.55 : 0.35;
+      if (jaccard(a.tokens, b.tokens) < threshold) continue;
         group.push(j);
         visited.add(j);
       }
