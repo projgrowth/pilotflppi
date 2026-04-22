@@ -202,26 +202,9 @@ async function callAI(
 }
 
 // ---------- discipline routing ----------
+// disciplineForSheet removed — had incorrect mappings (L→Accessibility, missing C/Civil).
+// Active routing: normalizeAIDiscipline (title-block AI) + disciplineForSheetFallback (prefix).
 
-/** Map a sheet_ref prefix to the discipline that should review it. */
-function disciplineForSheet(sheetRef: string): string | null {
-  const p = sheetRef.trim().toUpperCase()[0];
-  switch (p) {
-    case "A":
-      return "Architectural";
-    case "S":
-      return "Structural";
-    case "M":
-    case "P":
-    case "E":
-    case "F":
-      return "MEP";
-    case "L":
-      return "Accessibility"; // life-safety / landscape sometimes
-    default:
-      return null; // G-, T-, cover sheets → general notes, sent to every call
-  }
-}
 
 /**
  * @deprecated Prefer `sheet_coverage.discipline` (AI-extracted from the title block).
@@ -412,11 +395,11 @@ const SHEET_MAP_SCHEMA = {
   },
 } as const;
 
-const EXPECTED_SHEETS_BY_DISCIPLINE: Record<string, string[]> = {
-  Architectural: ["A-001", "A-101", "A-201"],
-  Structural: ["S-001", "S-101"],
-  MEP: ["M-101", "E-101", "P-101"],
-};
+// EXPECTED_SHEETS_BY_DISCIPLINE removed — the heuristic fired missing_critical rows
+// for every project regardless of scope (e.g. TIs without structural work always
+// flagged S-001/S-101 as missing). The discipline_review stage handles scope
+// awareness: if no sheets route to a discipline, it raises a human-review finding.
+
 
 async function stageSheetMap(
   admin: ReturnType<typeof createClient>,
@@ -520,34 +503,14 @@ async function stageSheetMap(
     page_index: p.page_index,
   }));
 
-  // Compute missing-critical sheets per discipline (heuristic baseline).
-  const presentRefs = new Set(present.map((p) => p.sheet_ref));
-  const missingRows: typeof presentRows = [];
-  for (const [discipline, expected] of Object.entries(EXPECTED_SHEETS_BY_DISCIPLINE)) {
-    for (const ref of expected) {
-      if (!presentRefs.has(ref)) {
-        missingRows.push({
-          plan_review_id: planReviewId,
-          firm_id: firmId,
-          sheet_ref: ref,
-          sheet_title: null,
-          discipline,
-          expected: true,
-          status: "missing_critical",
-          page_index: null,
-        });
-      }
-    }
-  }
-
-  const allRows = [...presentRows, ...missingRows];
+  // No hardcoded expected-sheets heuristic — scope varies per project.
+  const allRows = [...presentRows];
   if (allRows.length === 0) return { sheets: 0 };
   const { error } = await admin.from("sheet_coverage").insert(allRows);
   if (error) throw error;
   return {
     sheets: allRows.length,
     present: presentRows.length,
-    missing_critical: missingRows.length,
   };
 }
 
