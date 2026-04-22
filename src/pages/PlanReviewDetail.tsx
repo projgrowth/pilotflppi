@@ -345,14 +345,9 @@ export default function PlanReviewDetail() {
  pageInFile: idx + 1,
  }))
  );
- // Pad text items array if extraction returned fewer pages than images.
- for (let idx = 0; idx < images.length; idx++) {
- allTextItems.push(textItems[idx] || []);
- }
- setRenderProgress(((fi + 1) / r.file_urls.length) * 100);
- }
- setPageImages(allImages);
- void allTextItems; // text-layer index no longer used; kept for cap-banner accuracy.
+  setRenderProgress(((fi + 1) / r.file_urls.length) * 100);
+  }
+  setPageImages(allImages);
  setPageCapInfo({ total: totalSheetsAcrossFiles, rendered: renderedSheetsAcrossFiles });
  return allImages;
  } catch {
