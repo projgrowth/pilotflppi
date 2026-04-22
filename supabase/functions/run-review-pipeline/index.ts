@@ -19,10 +19,10 @@ type Stage =
   | "sheet_map"
   | "dna_extract"
   | "discipline_review"
-  | "verify"
-  | "dedupe"
-  | "ground_citations"
   | "cross_check"
+  | "verify"
+  | "ground_citations"
+  | "dedupe"
   | "deferred_scope"
   | "prioritize"
   | "complete";
@@ -32,10 +32,10 @@ const STAGES: Stage[] = [
   "sheet_map",
   "dna_extract",
   "discipline_review",
-  "verify",
-  "dedupe",
-  "ground_citations",
   "cross_check",
+  "verify",
+  "ground_citations",
+  "dedupe",
   "deferred_scope",
   "prioritize",
   "complete",
@@ -71,7 +71,8 @@ function normalizeAIDiscipline(raw: string | null | undefined): string | null {
   if (k === "general" || k === "other") return null;
   if (k === "architectural" || k === "arch") return "Architectural";
   if (k === "structural" || k === "struct") return "Structural";
-  if (k === "mep" || k === "mechanical" || k === "electrical" || k === "plumbing" || k === "fire protection" || k === "fp") return "MEP";
+  if (k === "mep" || k === "mechanical" || k === "electrical" || k === "plumbing") return "MEP";
+  if (k === "fire protection" || k === "fp") return "Life Safety"; // FBC Ch.9 suppression owned by Life Safety expert
   if (k === "energy") return "Energy";
   if (k === "accessibility" || k === "ada") return "Accessibility";
   if (k === "civil" || k === "site") return "Civil";
@@ -137,6 +138,9 @@ async function withRetry<T>(
       return await fn();
     } catch (err) {
       lastErr = err;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      // Never retry billing errors — they will not resolve on their own.
+      if (errMsg === 'payment_required') throw err;
       console.error(`[${label}] attempt ${attempt} failed:`, err);
       if (attempt === maxAttempts) break;
       const backoff = Math.min(8000, 500 * Math.pow(2, attempt - 1));
@@ -475,6 +479,7 @@ async function stageSheetMap(
           discipline: string;
         }>;
       };
+      const returnedIndices = new Set((result?.sheets ?? []).map((s) => s.page_index));
       for (const s of result?.sheets ?? []) {
         present.push({
           page_index: s.page_index,
@@ -482,6 +487,13 @@ async function stageSheetMap(
           sheet_title: s.sheet_title?.slice(0, 200) ?? null,
           discipline: s.discipline ?? "General",
         });
+      }
+      // Backfill any pages the model skipped (e.g. blank sheets) so downstream
+      // signedUrls[page_index] lookups never silently return undefined.
+      for (let i = start; i < start + slice.length; i++) {
+        if (!returnedIndices.has(i)) {
+          present.push({ page_index: i, sheet_ref: `X-${i}`, sheet_title: null, discipline: "General" });
+        }
       }
     } catch (err) {
       console.error(`[sheet_map] batch ${start} failed:`, err);
@@ -1038,7 +1050,7 @@ async function runDisciplineChecks(
   const fbcEdition = (ctx.dna?.fbc_edition as string | null) ?? null;
   let patternQuery = admin
     .from("correction_patterns")
-    .select("id, pattern_summary, original_finding, code_reference, reason_notes, rejection_count")
+    .select("id, pattern_summary, original_finding, code_reference, reason_notes, rejection_count, occupancy_classification, construction_type")
     .eq("discipline", ctx.discipline)
     .eq("is_active", true)
     .order("rejection_count", { ascending: false })
@@ -1053,9 +1065,15 @@ async function runDisciplineChecks(
     code_reference: { section?: string } | null;
     reason_notes: string;
     rejection_count: number;
+    occupancy_classification: string | null;
+    construction_type: string | null;
   }>;
-  // Filter for project-DNA relevance when possible (best-effort).
-  const relevantPatterns = patterns.slice(0, 12);
+  // Filter for project-DNA relevance: prefer patterns matching this project's
+  // occupancy and construction type. Patterns with no DNA context are always included.
+  const relevantPatterns = patterns.filter((p) =>
+    (!p.occupancy_classification || p.occupancy_classification === occupancy) &&
+    (!p.construction_type || p.construction_type === constructionType)
+  ).slice(0, 12);
 
   const learnedText = relevantPatterns.length
     ? relevantPatterns
@@ -1096,9 +1114,7 @@ async function runDisciplineChecks(
     `\n\nAnalyze the attached pages (general-notes pages first, then ${ctx.discipline} sheets). ` +
     `Return findings via submit_discipline_findings.`;
 
-  // Avoid unused-variable warnings on context vars used only for relevance heuristics.
-  void occupancy;
-  void constructionType;
+  // fbcEdition is available for future prompt injection if needed.
   void fbcEdition;
 
   const content: Array<
@@ -2316,7 +2332,11 @@ async function stageDedupe(
           b.sheets.size === 0 ||
           [...a.sheets].some((s) => b.sheets.has(s));
         if (!sheetOverlap) continue;
-        if (jaccard(a.tokens, b.tokens) < 0.55) continue;
+        // Use a lower threshold for cross-discipline matches (same FBC section,
+      // different discipline vocabulary). Same-discipline pairs share more
+      // specific terms and tolerate the tighter 0.55 bound.
+      const threshold = a.row.discipline === b.row.discipline ? 0.55 : 0.35;
+      if (jaccard(a.tokens, b.tokens) < threshold) continue;
         group.push(j);
         visited.add(j);
       }
@@ -2648,10 +2668,10 @@ Deno.serve(async (req) => {
       sheet_map: () => stageSheetMap(admin, plan_review_id, firmId),
       dna_extract: () => stageDnaExtract(admin, plan_review_id, firmId),
       discipline_review: () => stageDisciplineReview(admin, plan_review_id, firmId),
-      verify: () => stageVerify(admin, plan_review_id),
-      dedupe: () => stageDedupe(admin, plan_review_id),
-      ground_citations: () => stageGroundCitations(admin, plan_review_id),
       cross_check: () => stageCrossCheck(admin, plan_review_id, firmId),
+      verify: () => stageVerify(admin, plan_review_id),
+      ground_citations: () => stageGroundCitations(admin, plan_review_id),
+      dedupe: () => stageDedupe(admin, plan_review_id),
       deferred_scope: () => stageDeferredScope(admin, plan_review_id, firmId),
       prioritize: () => stagePrioritize(admin, plan_review_id),
       complete: () => stageComplete(admin, plan_review_id),

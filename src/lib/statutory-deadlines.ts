@@ -90,10 +90,10 @@ export function isBusinessDay(date: Date): boolean {
   return !holidays.has(formatDateKey(date));
 }
 
-export function getBusinessDaysElapsed(startDate: string | null): number {
+export function getBusinessDaysElapsed(startDate: string | null, asOf?: Date): number {
   if (!startDate) return 0;
   const start = new Date(startDate);
-  const now = new Date();
+  const now = asOf ?? new Date();
   let count = 0;
   const current = new Date(start);
   current.setDate(current.getDate() + 1); // Start counting from next day
@@ -171,8 +171,14 @@ export function getStatutoryStatus(project: {
     phase = "review";
   }
 
-  const effectiveStart = isPaused ? project.review_clock_paused_at! : clockStart;
-  const reviewDaysUsed = phase === "review" ? getBusinessDaysElapsed(effectiveStart) : 0;
+  // When paused, freeze the count at the moment of pause (F.S. 553.791 compliance).
+  // Pass paused_at as asOf so we count days from clockStart up to the pause timestamp,
+  // not days since the pause was set.
+  const reviewDaysUsed = phase === "review"
+    ? (isPaused
+        ? getBusinessDaysElapsed(clockStart, new Date(project.review_clock_paused_at!))
+        : getBusinessDaysElapsed(clockStart))
+    : 0;
   const reviewDaysRemaining = Math.max(0, reviewDays - reviewDaysUsed);
 
   // Inspection phase uses dedicated inspection clock
