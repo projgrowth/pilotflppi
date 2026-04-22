@@ -40,7 +40,7 @@ export function useFindingFilters(
 
     const filtered = findings.filter((f, i) => {
       if (filters.status !== "all" && (findingStatuses[i] || "open") !== filters.status) return false;
-      if (filters.confidence !== "all" && (f.markup?.pin_confidence || "low") !== filters.confidence) return false;
+      if (filters.confidence !== "all" && (f.confidence || "low") !== filters.confidence) return false;
       if (filters.discipline !== "all" && (f.discipline || "structural") !== filters.discipline) return false;
       if (filters.sheet !== "all" && (f.page || "Unknown").trim() !== filters.sheet) return false;
       return true;
@@ -49,9 +49,9 @@ export function useFindingFilters(
 
     const confidenceCounts: Record<ConfidenceFilter, number> = {
       all: findings.length,
-      high: findings.filter((f) => (f.markup?.pin_confidence || "low") === "high").length,
-      medium: findings.filter((f) => (f.markup?.pin_confidence || "low") === "medium").length,
-      low: findings.filter((f) => (f.markup?.pin_confidence || "low") === "low").length,
+      high: findings.filter((f) => (f.confidence || "low") === "high").length,
+      medium: findings.filter((f) => (f.confidence || "low") === "medium").length,
+      low: findings.filter((f) => (f.confidence || "low") === "low").length,
     };
 
     const disciplinesPresent = Array.from(new Set(findings.map((f) => f.discipline || "structural"))).sort(

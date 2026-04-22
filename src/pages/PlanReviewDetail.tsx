@@ -47,6 +47,7 @@ import { type ConfidenceFilter } from "@/components/BulkTriageFilters";
 import { DisciplineChecklist } from "@/components/DisciplineChecklist";
 import { SitePlanChecklist } from "@/components/SitePlanChecklist";
 import { isHVHZ } from "@/lib/county-utils";
+import { getStatutoryStatus } from "@/lib/statutory-deadlines";
 import type { PlanReviewRow } from "@/types";
 import { usePlanReviewData } from "@/hooks/plan-review/usePlanReviewData";
 import { useFindingFilters, useRoundDiff } from "@/hooks/plan-review/useFindingFilters";
@@ -54,13 +55,6 @@ import { useFindingStatuses } from "@/hooks/plan-review/useFindingStatuses";
 import { usePdfPageRender } from "@/hooks/plan-review/usePdfPageRender";
 
 type RightPanelMode = "findings" | "checklist" | "completeness" | "letter" | "county";
-
-function getDaysRemaining(createdAt: string): number {
-  const deadline = new Date(createdAt);
-  deadline.setDate(deadline.getDate() + 21);
-  const now = new Date();
-  return Math.max(0, Math.ceil((deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
-}
 
 export default function PlanReviewDetail() {
   const isMobile = useIsMobile();
