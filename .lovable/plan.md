@@ -1,75 +1,42 @@
 
+## Raise PDF Upload Limit to 50 MB
 
-# Fix: "cannot add postgres_changes after subscribe" realtime error
+The 20 MB cap is enforced in three places. All three need to change for 50 MB to actually work end-to-end.
 
-## Root cause
+### What changes
 
-`useDeficienciesV2(reviewId)` is called from **six** components on the Review Dashboard at once (`ReviewDashboard`, `LetterQualityGate`, `DedupeAuditTrail`, `ReviewSummaryHeader`, `ReviewHealthStrip`, `useFilteredDeficiencies → DeficiencyList`). Each call runs a `useEffect` that creates a Supabase channel named `deficiencies-${reviewId}`.
+**1. Storage bucket limit (server-side, hard cap)**
+The `documents` bucket in Lovable Cloud currently rejects anything over 20 MB before the file even reaches your code. New migration to raise it:
 
-Supabase Realtime requires unique channel topic names per client. The second hook to mount tries to attach `.on("postgres_changes", ...)` to a topic that's already in the `joined` state, which throws:
-
-> cannot add `postgres_changes` callbacks for `realtime:deficiencies-…` after `subscribe()`.
-
-The same bug exists for:
-- `pipeline-${reviewId}` (`usePipelineStatus`, called from ≥2 places)
-- A redundant `plan-review-detail-defs-${reviewId}` channel in `usePlanReviewData.ts` that duplicates `deficiencies-${reviewId}`
-
-## Fix: module-level channel registry, one channel per topic
-
-Add a tiny ref-counted registry in `useReviewDashboard.ts` so all consumers share **one** channel per `(table, planReviewId)` pair.
-
-```ts
-// At module scope in useReviewDashboard.ts
-type Sub = { channel: RealtimeChannel; refCount: number; listeners: Set<() => void> };
-const subs = new Map<string, Sub>();
-
-function subscribeShared(key: string, table: string, filter: string, onChange: () => void) {
-  let entry = subs.get(key);
-  if (!entry) {
-    const channel = supabase
-      .channel(key)
-      .on("postgres_changes", { event: "*", schema: "public", table, filter },
-          () => entry!.listeners.forEach((fn) => fn()))
-      .subscribe();
-    entry = { channel, refCount: 0, listeners: new Set() };
-    subs.set(key, entry);
-  }
-  entry.listeners.add(onChange);
-  entry.refCount += 1;
-  return () => {
-    entry!.listeners.delete(onChange);
-    entry!.refCount -= 1;
-    if (entry!.refCount === 0) {
-      supabase.removeChannel(entry!.channel);
-      subs.delete(key);
-    }
-  };
-}
+```sql
+UPDATE storage.buckets
+SET file_size_limit = 52428800   -- 50 MB in bytes
+WHERE id = 'documents';
 ```
 
-Then rewrite the three `useEffect` blocks to call `subscribeShared(...)` instead of building a channel inline:
-- `useDeficienciesV2` → `subscribeShared(\`deficiencies-${planReviewId}\`, "deficiencies_v2", \`plan_review_id=eq.${planReviewId}\`, invalidate)`
-- `usePipelineStatus` → `subscribeShared(\`pipeline-${planReviewId}\`, "review_pipeline_status", \`plan_review_id=eq.${planReviewId}\`, invalidate)`
-- `useDeferredScope` → `subscribeShared(\`deferred-scope-${planReviewId}\`, "deferred_scope_items", \`plan_review_id=eq.${planReviewId}\`, invalidate)`
+**2. Client-side validation (`src/components/NewPlanReviewWizard.tsx`, line ~169)**
+```ts
+if (file.size > 50 * 1024 * 1024) {
+  toast.error(`${file.name} exceeds 50MB limit`);
+  continue;
+}
+```
+And the helper text on line ~436: `"PDF files up to 50MB each • Header validation enabled"`.
 
-## Cleanup: remove the redundant channel in `usePlanReviewData.ts`
+**3. Drop-zone helper text (`src/components/plan-review/PlanViewerPanel.tsx`, line 62)**
+`"PDF files up to 50MB"`.
 
-`plan-review-detail-defs-${review.id}` watches the same rows as `deficiencies-${review.id}` and only invalidates a different query key. Replace its `useEffect` with the shared subscriber, passing a callback that invalidates `["v2-findings-for-viewer", review.id]`.
+### Caveats worth knowing before you approve
 
-(Optional, but it eliminates a second WebSocket topic per detail view.)
+- **PDF.js render memory** — 50 MB plans (often 100+ pages, large rasters) can spike browser memory hard during page rendering. If you're hitting OOM crashes after this change, the next step is rendering pages on-demand instead of all upfront.
+- **Gemini vision pipeline** — `run-review-pipeline` sends page images to the AI gateway. Larger documents = more pages = longer pipeline runs and higher token costs. No code change needed, just a heads-up.
+- **Edge function payload limit** — Supabase edge functions have a 6 MB request body limit, but you upload directly to Storage (not through a function), so this is fine.
 
-## What the user sees
+### If you want a different number
 
-- Console error disappears.
-- Realtime invalidations still fire — every consumer of `useDeficienciesV2` re-renders when the pipeline writes a new finding (one channel, fanned out to N React Query invalidations).
-- Fewer WebSocket topics open per page (1 instead of 6 for deficiencies).
-- React 18 StrictMode double-mount in dev no longer trips the same error.
+Say "make it 100 MB" or "make it 200 MB" and I'll swap the values. The byte math: `MB × 1024 × 1024`. For 100 MB → `104857600`. For 200 MB → `209715200`.
 
-## Files
-
-**Modified**
-- `src/hooks/useReviewDashboard.ts` (add registry + rewrite 3 useEffects)
-- `src/hooks/plan-review/usePlanReviewData.ts` (use shared subscriber for findings refetch)
-
-No DB migration needed — `deficiencies_v2`, `review_pipeline_status`, and `deferred_scope_items` are already in the `supabase_realtime` publication (verified).
-
+### Files touched
+- New: `supabase/migrations/<timestamp>_raise_documents_bucket_limit.sql`
+- Edit: `src/components/NewPlanReviewWizard.tsx` (2 lines)
+- Edit: `src/components/plan-review/PlanViewerPanel.tsx` (1 line)
