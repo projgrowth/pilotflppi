@@ -191,6 +191,48 @@ export async function deletePattern(patternId: string) {
   if (error) throw error;
 }
 
+/**
+ * Record a reviewer CONFIRMATION as positive signal on any matching pattern.
+ * When a reviewer confirms a finding that matches an existing correction pattern
+ * (same discipline + code section), increment confirm_count so the reliability
+ * score can counterweight rejection_count. Patterns with high confirm_count
+ * relative to rejection_count should NOT be suppressed — they reflect real
+ * deficiencies the AI correctly identifies.
+ *
+ * Call this alongside updating reviewer_disposition = 'confirm' on a deficiency.
+ */
+export async function recordPatternConfirmation(input: {
+  planReviewId: string;
+  deficiency: {
+    discipline: string;
+    code_reference: { code?: string; section?: string; edition?: string } | null;
+  };
+}) {
+  const codeSection = input.deficiency.code_reference?.section ?? null;
+  if (!codeSection) return; // can't match without a section anchor
+
+  // Find matching pattern (same discipline + code section within firm scope via RLS).
+  const { data } = await db
+    .from("correction_patterns")
+    .select("id, confirm_count")
+    .eq("discipline", input.deficiency.discipline)
+    .filter("code_reference->>section", "eq", codeSection)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (!data) return; // no pattern to credit — this is a genuinely new find
+
+  const { error } = await db
+    .from("correction_patterns")
+    .update({
+      confirm_count: (data.confirm_count ?? 0) + 1,
+      last_seen_at: new Date().toISOString(),
+    })
+    .eq("id", data.id);
+
+  if (error) throw error;
+}
+
 export function useInvalidateCorrectionPatterns() {
   const qc = useQueryClient();
   return () => {

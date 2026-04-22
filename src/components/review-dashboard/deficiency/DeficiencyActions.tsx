@@ -20,6 +20,7 @@ import {
 import RejectionReasonDialog from "../RejectionReasonDialog";
 import {
   recordCorrectionPattern,
+  recordPatternConfirmation,
   type RejectionReason,
 } from "@/hooks/useCorrectionPatterns";
 
@@ -44,6 +45,23 @@ export default function DeficiencyActions({ planReviewId, def }: Props) {
     try {
       // Optimistic — cache patches immediately, realtime echo reconciles.
       await optimisticUpdate(def.id, { reviewer_disposition: d });
+      // When confirming, credit any matching correction pattern so confirm_count
+      // counterweights rejection_count in the reliability score.
+      if (d === "confirm") {
+        await recordPatternConfirmation({
+          planReviewId,
+          deficiency: {
+            discipline: def.discipline,
+            code_reference: def.code_reference as {
+              code?: string;
+              section?: string;
+              edition?: string;
+            } | null,
+          },
+        }).catch(() => {
+          /* non-critical — don't surface to reviewer */
+        });
+      }
       toast.success(`Marked ${d}`);
     } catch {
       toast.error("Could not save");
