@@ -1229,7 +1229,6 @@ export type Database = {
           finding_statuses: Json | null
           firm_id: string | null
           id: string
-          pipeline_version: string
           previous_findings: Json | null
           project_id: string
           qc_notes: string | null
@@ -1251,7 +1250,6 @@ export type Database = {
           finding_statuses?: Json | null
           firm_id?: string | null
           id?: string
-          pipeline_version?: string
           previous_findings?: Json | null
           project_id: string
           qc_notes?: string | null
@@ -1273,7 +1271,6 @@ export type Database = {
           finding_statuses?: Json | null
           firm_id?: string | null
           id?: string
-          pipeline_version?: string
           previous_findings?: Json | null
           project_id?: string
           qc_notes?: string | null
