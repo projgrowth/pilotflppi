@@ -382,36 +382,12 @@ export default function PlanReviewDetail() {
   // the /dashboard route. The "Run AI Check" buttons in this page route the user
   // there. See plan #2 / Wave 2 cleanup.
 
- const createNewRound = async () => {
- if (!review || !allRounds) return;
- if (review.pipeline_version === "v2") {
-  toast.error("New rounds for V2 reviews must be created from the V2 dashboard so deficiencies_v2 carries forward correctly.");
-  return;
- }
- try {
- const maxRound = allRounds.reduce((max, r) => Math.max(max, r.round), 0);
- const { data: newReview, error } = await supabase
- .from("plan_reviews")
- .insert({
- project_id: review.project_id,
- round: maxRound + 1,
- file_urls: review.file_urls,
- previous_findings: JSON.parse(JSON.stringify(review.ai_findings || [])),
- })
- .select("id")
- .single();
- if (error) throw error;
-
- await supabase.from("projects").update({
- deadline_at: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
- }).eq("id", review.project_id);
-
- toast.success(`Round ${maxRound + 1} created`);
- navigate(`/plan-review/${newReview.id}`);
- } catch (err) {
- toast.error(err instanceof Error ? err.message : "Failed to create new round");
- }
- };
+  const createNewRound = () => {
+    // New rounds belong on the v2 dashboard so deficiencies_v2 carries forward
+    // correctly. The dashboard owns the only writer of pipeline output.
+    if (!review) return;
+    navigate(`/plan-review/${review.id}/dashboard`);
+  };
 
  const generateCommentLetter = async (r: PlanReviewRow) => {
  // Abort any in-flight letter generation before starting a new one.
@@ -431,9 +407,8 @@ export default function PlanReviewDetail() {
  trade_type: r.project?.trade_type,
  county: r.project?.county,
  jurisdiction: r.project?.jurisdiction,
-  // V2 reviews: ai_findings is empty; send the adapted V2 findings instead so
-  // the generated letter reflects the verified, dedup'd source-of-truth set.
-  findings: r.pipeline_version === "v2" ? (v2Findings ?? []) : r.ai_findings,
+          // Comment letter is generated from the verified, dedup'd v2 findings.
+          findings: v2Findings ?? [],
  round: r.round,
  },
  onDelta: (chunk) => setCommentLetter((prev) => prev + chunk),
@@ -490,10 +465,8 @@ export default function PlanReviewDetail() {
  const tag = (e.target as HTMLElement)?.tagName;
  if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
  if (e.metaKey || e.ctrlKey || e.altKey) return;
-  const findingsList = review?.pipeline_version === "v2"
-   ? (v2Findings ?? [])
-   : ((review?.ai_findings as Finding[] | undefined) || []);
-  if (findingsList.length === 0) return;
+      const findingsList = v2Findings ?? [];
+      if (findingsList.length === 0) return;
 
  const cur = activeFindingIndex;
  const last = findingsList.length - 1;
@@ -572,10 +545,10 @@ export default function PlanReviewDetail() {
  );
  }
 
- // Source-of-truth selector: V2 reviews read adapted deficiencies_v2 rows;
- // legacy reviews keep reading ai_findings. v2Findings is undefined while loading,
- // which gracefully shows an empty findings list (skeleton-equivalent) until ready.
- const findings = isV2Pipeline ? (v2Findings ?? []) : ((review.ai_findings as Finding[]) || []);
+  // All findings come from deficiencies_v2 via the adapter. While the query is
+  // loading we render an empty list (skeleton-equivalent) so the page doesn't
+  // flash old data.
+  const findings = v2Findings ?? [];
  const previousFindings = (review.previous_findings as Finding[]) || [];
  const groupedFindings = groupFindingsByDiscipline(findings);
  const county = review.project?.county || "";
@@ -685,86 +658,26 @@ export default function PlanReviewDetail() {
  round={review.round}
  reviewId={review.id}
  daysLeft={daysLeft}
- aiRunning={aiRunning}
- aiCompleteFlash={aiCompleteFlash}
- hasFindings={hasFindings}
- rounds={projectRounds}
- onBack={() => navigate("/plan-review")}
- onRunAICheck={() => runAICheck(review)}
- onNavigateRound={(rid) => navigate(`/plan-review/${rid}`)}
-  onNewRound={createNewRound}
- />
+        aiRunning={false}
+        aiCompleteFlash={null}
+        hasFindings={hasFindings}
+        rounds={projectRounds}
+        onBack={() => navigate("/plan-review")}
+        onRunAICheck={() => navigate(`/plan-review/${review.id}/dashboard`)}
+        onNavigateRound={(rid) => navigate(`/plan-review/${rid}`)}
+        onNewRound={createNewRound}
+      />
 
-  {/* ── V2 pipeline banner: viewer renders adapted V2 findings; mutating actions
-       (Run AI Check, New Round, pin reposition) are gated and routed to the
-       V2 dashboard so we never split the source of truth. ── */}
-  {isV2Pipeline && (
-   <div className="shrink-0 border-b border-primary/20 bg-primary/5 px-4 py-2 flex items-center justify-between gap-3">
-    <div className="flex items-center gap-2 min-w-0">
-     <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" />
-     <span className="text-2xs font-semibold uppercase tracking-wide text-primary">V2 Pipeline</span>
-     <span className="text-xs text-muted-foreground truncate">
-      {v2Findings === undefined
-       ? "Loading verified findings from the V2 pipeline…"
-       : `${v2Findings.length} verified finding${v2Findings.length === 1 ? "" : "s"} loaded. Run pipeline, dispositions, and deferred scope live on the dashboard.`}
-     </span>
-    </div>
-    <Button size="sm" variant="default" onClick={() => navigate(`/plan-review/${review.id}/dashboard`)} className="shrink-0 h-7 text-xs">
-     Open V2 Dashboard
-    </Button>
-   </div>
-  )}
-
- {/* ── Resume banner: another tab is mid-run on this review ── */}
- {resumingFromOtherTab && !aiRunning && (
- <div className="shrink-0 border-b bg-accent/10 px-4 py-1.5 flex items-center gap-2">
- <Loader2 className="h-3 w-3 text-accent animate-spin" />
- <span className="text-2xs font-semibold text-accent uppercase tracking-wide">Resuming review</span>
- <span className="text-xs text-foreground/80">
- Another session is analyzing these plans ({aiPhase}). Findings will appear here automatically.
- </span>
- </div>
- )}
-
- {/* ── Page-cap banner: surface silent 10-page truncation honestly ── */}
- {!aiRunning && pageCapInfo && pageCapInfo.total > pageCapInfo.rendered && (
- <div className="shrink-0 border-b bg-warning/10 px-4 py-1.5 flex items-center gap-2">
- <span className="text-2xs font-semibold text-warning uppercase tracking-wide">Limited review</span>
- <span className="text-xs text-foreground/80">
- Reviewing the first <strong>{pageCapInfo.rendered}</strong> of <strong>{pageCapInfo.total}</strong> sheet{pageCapInfo.total !== 1 ? "s" : ""}.
- Findings on later sheets cannot be detected by AI in this round.
- </span>
- </div>
- )}
-
- {/* ── AI Scanning Overlay ── */}
- {aiRunning && (
- <div className="shrink-0 border-b bg-accent/5 px-4 py-3">
- <div className="max-w-lg space-y-2">
- {/* Real per-phase progress: shows the user we're not frozen. */}
- <div className="flex items-center gap-2">
- <Loader2 className="h-3.5 w-3.5 text-accent animate-spin shrink-0" />
- <p className="text-xs text-accent font-medium">
- {aiPhase === "rendering" && (
- pageCapInfo
- ? `Rendering ${pageCapInfo.rendered} sheet${pageCapInfo.rendered !== 1 ? "s" : ""} for analysis…`
- : "Rendering plan pages…"
- )}
- {aiPhase === "extracting_text" && "Extracting text + dimensions from PDF vector layer…"}
- {aiPhase === "vision" && "Running visual code review (this may take 60–120s)…"}
- {aiPhase === "validating" && "Snapping pins to actual callouts and validating findings…"}
- {aiPhase === "refining" && "Re-analyzing low-confidence pins at 2× zoom for precision…"}
- {aiPhase === "saving" && "Saving findings…"}
- {aiPhase === "idle" && "Preparing analysis…"}
- </p>
- </div>
- {renderingPages && (
- <Progress value={renderProgress} className="h-1" />
- )}
- <ScanTimeline currentStep={scanStep} />
- </div>
- </div>
- )}
+      {/* ── Page-cap banner: surface silent 10-page truncation honestly ── */}
+      {pageCapInfo && pageCapInfo.total > pageCapInfo.rendered && (
+        <div className="shrink-0 border-b bg-warning/10 px-4 py-1.5 flex items-center gap-2">
+          <span className="text-2xs font-semibold text-warning uppercase tracking-wide">Limited review</span>
+          <span className="text-xs text-foreground/80">
+            Reviewing the first <strong>{pageCapInfo.rendered}</strong> of <strong>{pageCapInfo.total}</strong> sheet{pageCapInfo.total !== 1 ? "s" : ""}.
+            Findings on later sheets cannot be detected by AI in this round.
+          </span>
+        </div>
+      )}
 
  {/* ── Main Split Layout ── */}
  {isMobile ? (
@@ -820,13 +733,13 @@ export default function PlanReviewDetail() {
  <div className="overflow-y-auto">
  {rightPanel === "findings" && (
  <div className="p-3 space-y-2">
- {!hasFindings && !aiRunning && (
- <div className="flex flex-col items-center justify-center py-12 px-4">
- {hasDocuments ? (
- <div className="text-center space-y-3 max-w-[220px]">
- <div className="mx-auto w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center"><Sparkles className="h-5 w-5 text-accent" /></div>
- <p className="text-sm font-medium">Ready to analyze</p>
- <Button size="sm" onClick={() => runAICheck(review)} className="w-full"><Sparkles className="h-3.5 w-3.5 mr-1.5" /> Analyze Plans</Button>
+  {!hasFindings && (
+  <div className="flex flex-col items-center justify-center py-12 px-4">
+  {hasDocuments ? (
+  <div className="text-center space-y-3 max-w-[220px]">
+  <div className="mx-auto w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center"><Sparkles className="h-5 w-5 text-accent" /></div>
+  <p className="text-sm font-medium">Ready to analyze</p>
+  <Button size="sm" onClick={() => navigate(`/plan-review/${review.id}/dashboard`)} className="w-full"><Sparkles className="h-3.5 w-3.5 mr-1.5" /> Open Dashboard</Button>
  </div>
  ) : (
  <div className="text-center space-y-2"><Upload className="h-8 w-8 text-muted-foreground/20 mx-auto" /><p className="text-sm text-muted-foreground">Upload documents to begin</p></div>
