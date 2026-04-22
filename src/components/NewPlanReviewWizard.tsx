@@ -326,12 +326,26 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  fileUrls.push(path);
  }
 
- // Update plan_review with file URLs
+  // Update plan_review with file URLs
  if (fileUrls.length > 0) {
  await supabase
  .from("plan_reviews")
  .update({ file_urls: fileUrls })
  .eq("id", review.id);
+
+ // Also insert into plan_review_files so the pipeline can find them
+ const { data: { user } } = await supabase.auth.getUser();
+ const { error: prfErr } = await supabase.from("plan_review_files").insert(
+ fileUrls.map((fp) => ({
+ plan_review_id: review.id,
+ file_path: fp,
+ round: 1,
+ uploaded_by: user?.id ?? null,
+ })),
+ );
+ if (prfErr) {
+ toast.error(`Failed to register files for pipeline: ${prfErr.message}`);
+ }
  }
 
  queryClient.invalidateQueries({ queryKey: ["plan-reviews"] });
