@@ -93,8 +93,8 @@ export interface PlanReviewRow {
   qc_reviewer_id?: string | null;
   qc_notes?: string;
   reviewer_id?: string | null;
-  /** v1 = legacy ai_findings JSONB; v2 = deficiencies_v2 table is source of truth.
-   *  When v2, the viewer reads via adaptV2ToFindings() and disables write paths
-   *  that mutate ai_findings (run AI check, new round, pin reposition). */
+  /** Defaults to 'v2'. Legacy 'v1' rows are backfilled into deficiencies_v2.
+   *  The viewer reads via adaptV2ToFindings() and disables write paths that
+   *  mutate ai_findings (run AI check, new round, pin reposition). */
   pipeline_version?: string;
 }

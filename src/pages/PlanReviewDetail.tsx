@@ -127,16 +127,15 @@ export default function PlanReviewDetail() {
  enabled: !!review?.project_id,
  });
 
- // ── V2 source-of-truth: when pipeline_version === 'v2', findings live in the
- // deficiencies_v2 table (verified, dedup'd, with human-review flags) instead of
- // the legacy ai_findings JSONB. We adapt them down to the legacy Finding shape
- // so the existing PDF viewer, comment letter, lint, and SitePlanChecklist all
- // render V2 data without bespoke V2 components. Write paths that would mutate
- // ai_findings (run AI, new round, reposition pin) are disabled below.
  const isV2Pipeline = review?.pipeline_version === "v2";
+ // ── Findings live in deficiencies_v2 (verified, dedup'd, with human-review
+ // flags). We adapt them down to the legacy Finding shape so the existing PDF
+ // viewer, comment letter, lint, and SitePlanChecklist all consume V2 data
+ // without bespoke V2 components. The legacy ai_findings JSONB on plan_reviews
+ // is read-only fallback for very old rows; nothing writes to it anymore.
  const { data: v2Findings } = useQuery({
   queryKey: ["v2-findings-for-viewer", review?.id],
-  enabled: !!review?.id && isV2Pipeline,
+  enabled: !!review?.id,
   queryFn: async () => {
    const { data, error } = await supabase
     .from("deficiencies_v2")
@@ -221,32 +220,15 @@ export default function PlanReviewDetail() {
  }
  }, []);
 
- const handleRepositionConfirm = useCallback(async (idx: number, newMarkup: { page_index: number; x: number; y: number; width: number; height: number }) => {
- if (!review) return;
- // V2 source of truth doesn't store per-finding pin coordinates yet — repositioning
- // would write to ai_findings (ignored on reload) and silently fail. Until V2 markup
- // lands, route the reviewer to do this on the V1 round if needed.
- if (review.pipeline_version === "v2") {
-  toast.error("Pin repositioning isn't available for V2 reviews yet — V2 findings reference sheets, not pixel coordinates.");
+ const handleRepositionConfirm = useCallback(async (_idx: number, _newMarkup: { page_index: number; x: number; y: number; width: number; height: number }) => {
+  // Findings now live in deficiencies_v2 and reference sheets, not pixel
+  // coordinates. Pin repositioning isn't yet supported on the v2 source of
+  // truth — fail loud rather than silently writing to a dead JSONB column.
+  void _idx;
+  void _newMarkup;
+  toast.error("Pin repositioning isn't available — findings now reference sheets, not pixel coordinates.");
   setRepositioningIndex(null);
-  return;
- }
- const current = (review.ai_findings as Finding[]) || [];
- // A human-placed pin is always high confidence and must never be downgraded on reload.
- const updated = current.map((f, i) => i === idx ? {
- ...f,
- markup: {
- ...(f.markup || {}),
- ...newMarkup,
- pin_confidence: "high" as const,
- user_repositioned: true,
- },
- } : f);
- await supabase.from("plan_reviews").update({ ai_findings: JSON.parse(JSON.stringify(updated)) }).eq("id", review.id);
- queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
- setRepositioningIndex(null);
- toast.success(`Pin repositioned for finding #${idx + 1}`);
- }, [review, id, queryClient]);
+ }, []);
 
  useEffect(() => {
  if (review?.finding_statuses) {
@@ -269,25 +251,10 @@ export default function PlanReviewDetail() {
  }
  }, [review]);
 
- // Auto-trigger AI check for newly created pending reviews — but only if no
- // other tab is mid-run on this review. The resume effect below detects that.
- // V2 reviews own their own pipeline (via "Run Pipeline" on the dashboard), so
- // we never auto-trigger the legacy v1 runner against them.
- const hasAutoTriggered = useRef(false);
- useEffect(() => {
- if (
- review &&
- review.ai_check_status === "pending" &&
- review.file_urls?.length > 0 &&
- !aiRunning &&
- !hasAutoTriggered.current &&
- !resumingFromOtherTab &&
- review.pipeline_version !== "v2"
- ) {
- hasAutoTriggered.current = true;
- runAICheck(review);
- }
- }, [review, resumingFromOtherTab]);
+ // Pipeline auto-trigger removed: the v2 dashboard owns pipeline orchestration
+ // via the "Run Pipeline" button. The legacy v1 auto-runner is intentionally
+ // disabled to prevent it from writing to ai_findings and creating a second
+ // source of truth that disagrees with deficiencies_v2.
 
  // ── Cross-tab resume: if this review is already "running" elsewhere AND its
  // ai_run_progress was updated within the last 2 minutes, treat it as a live
@@ -512,19 +479,16 @@ export default function PlanReviewDetail() {
  const blob = await response.blob();
  const file = new File([blob], `vision-${filePath}`, { type: "application/pdf" });
  const base64s = await renderPDFPagesForVisionWithGrid(file, 10, 220);
- visionImages.push(...base64s);
+  visionImages.push(...base64s);
  }
- return visionImages;
+  return visionImages;
  };
 
  const runAICheck = async (r: PlanReviewRow) => {
- // V2 reviews must run via the V2 pipeline (Run Pipeline on the dashboard).
- // Allowing the legacy v1 check here would overwrite ai_findings and create
- // a second source of truth that disagrees with deficiencies_v2.
- if (r.pipeline_version === "v2") {
-  toast.error("This review uses the V2 pipeline. Use 'Run Pipeline' on the V2 dashboard.");
-  return;
- }
+  // Legacy in-page AI runner — kept for the auto-trigger that has been
+  // removed above. Reviewers should use "Run Pipeline" on the v2 dashboard,
+  // which is the only writer for deficiencies_v2. Body retained for now in
+  // case any leftover row needs it; will be deleted in a follow-up cleanup.
  setAiRunning(true);
  setRightPanel("findings");
  setActiveFindingIndex(null);
