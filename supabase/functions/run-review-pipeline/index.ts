@@ -1597,14 +1597,15 @@ async function runDisciplineChecks(
   const occupancy = (ctx.dna?.occupancy_classification as string | null) ?? null;
   const constructionType = (ctx.dna?.construction_type as string | null) ?? null;
   const fbcEdition = (ctx.dna?.fbc_edition as string | null) ?? null;
+  // Reliability score: rejection_count - confirm_count. A pattern reviewers
+  // later confirmed (high confirm_count) stops being injected as a warning.
   let patternQuery = admin
     .from("correction_patterns")
-    .select("id, pattern_summary, original_finding, code_reference, reason_notes, rejection_count, occupancy_classification, construction_type")
+    .select("id, pattern_summary, original_finding, code_reference, reason_notes, rejection_count, confirm_count, occupancy_classification, construction_type")
     .eq("discipline", ctx.discipline)
     .eq("is_active", true)
-    .order("rejection_count", { ascending: false })
     .order("last_seen_at", { ascending: false })
-    .limit(20);
+    .limit(40);
   if (firmId) patternQuery = patternQuery.eq("firm_id", firmId);
   const { data: patternsData } = await patternQuery;
   const patterns = (patternsData ?? []) as Array<{
