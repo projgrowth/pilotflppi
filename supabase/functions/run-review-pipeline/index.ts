@@ -2935,10 +2935,10 @@ Deno.serve(async (req) => {
     const mode: PipelineMode =
       rawMode === "deep" || rawMode === "full" ? rawMode : "core";
     const activeChain = stagesForMode(mode);
-    const targetSource: string | null =
-      typeof body?.target_source === "string" && body.target_source.length > 0
-        ? body.target_source
-        : null;
+    // target_source dropped from the contract — the verify-only prepare_pages
+    // never forks per-PDF workers. Body field is ignored if a legacy caller
+    // still sends it.
+    void body?.target_source;
     const isInternalSelfInvoke =
       body?._internal === true || req.headers.get("x-internal-self-invoke") === "1";
 
@@ -3023,7 +3023,7 @@ Deno.serve(async (req) => {
 
     const stageImpls: Record<Stage, () => Promise<Record<string, unknown>>> = {
       upload: () => stageUpload(admin, plan_review_id),
-      prepare_pages: () => stagePreparePages(admin, plan_review_id, firmId, targetSource),
+      prepare_pages: () => stagePreparePages(admin, plan_review_id, firmId),
       sheet_map: () => stageSheetMap(admin, plan_review_id, firmId),
       dna_extract: () =>
         startFrom && STAGES.indexOf(startFrom) > 0 && stageToRun === "dna_extract"
