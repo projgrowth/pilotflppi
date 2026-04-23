@@ -1188,10 +1188,43 @@ async function stageDisciplineReview(
       .maybeSingle(),
     admin
       .from("plan_reviews")
-      .select("round, previous_findings, checklist_state")
+      .select("round, previous_findings, checklist_state, stage_checkpoints")
       .eq("id", planReviewId)
       .maybeSingle(),
   ]);
+
+  // Stage start timestamp for the soft 120s mid-stage timeout safety net.
+  // If a discipline loop is still running when we cross the threshold, we
+  // persist progress and self-reschedule rather than risk hitting the
+  // edge function's hard 150s wall.
+  const stageStartedAt = Date.now();
+  const STAGE_SOFT_TIMEOUT_MS = 120_000;
+
+  // Resumable chunk checkpoints. `stage_checkpoints.discipline_review` is a
+  // map of `{ [discipline]: lastChunkCompleted }`. On retry we skip every
+  // chunk index up to and including the saved value so we don't pay for
+  // chunks already represented by upserted def_numbers.
+  const checkpointsRow = (reviewMetaRow.data ?? null) as
+    | { stage_checkpoints?: Record<string, unknown> | null }
+    | null;
+  const allCheckpoints = (checkpointsRow?.stage_checkpoints ?? {}) as Record<
+    string,
+    Record<string, number>
+  >;
+  const disciplineCheckpoints: Record<string, number> = {
+    ...((allCheckpoints.discipline_review ?? {}) as Record<string, number>),
+  };
+  const persistDisciplineCheckpoint = async (discipline: string, chunkIdx: number) => {
+    disciplineCheckpoints[discipline] = chunkIdx;
+    const next = {
+      ...allCheckpoints,
+      discipline_review: { ...disciplineCheckpoints },
+    };
+    await admin
+      .from("plan_reviews")
+      .update({ stage_checkpoints: next })
+      .eq("id", planReviewId);
+  };
 
   const allSheets = (sheets.data ?? []) as Array<{
     sheet_ref: string;
