@@ -1132,9 +1132,13 @@ async function stageDisciplineReview(
   for (const discipline of disciplinesToRun) {
     try {
       const disciplineSheets = routed.filter((s) => s.discipline === discipline);
-      const disciplineImageUrls = disciplineSheets
+      // Cap discipline image payload to keep AI request body and edge worker
+      // memory under control. ~10 pages per discipline still gives the model
+      // plenty of context for finding-grade review.
+      const MAX_DISCIPLINE_PAGES = 10;
+      const disciplineImageUrls = (disciplineSheets
         .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
-        .filter(Boolean) as string[];
+        .filter(Boolean) as string[]).slice(0, MAX_DISCIPLINE_PAGES);
 
       // No sheets routed → log a single human-review item and continue.
       if (disciplineImageUrls.length === 0) {
