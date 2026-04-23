@@ -1090,17 +1090,24 @@ function evaluateDnaHealth(
   const jurisdictionMismatch =
     !!dnaCounty && !!projCounty && dnaCounty !== projCounty;
 
+  // Hard-block if ANY of the truly load-bearing fields are missing.
+  // These three drive: which code edition to apply (fbc_edition), which chapters
+  // are relevant (occupancy_classification), and which jurisdictional amendments
+  // load (county). Without them every downstream finding is guess-work, so the
+  // old "≥50% complete" threshold let too many bad runs through.
+  const HARD_REQUIRED: readonly string[] = ["county", "occupancy_classification", "fbc_edition"];
+  const hardMissing = HARD_REQUIRED.filter((f) => criticalMissing.includes(f));
+
   let blocking = false;
   let block_reason: string | null = null;
-  if (criticalMissing.includes("county")) {
+  if (hardMissing.length > 0) {
     blocking = true;
-    block_reason = "County missing from extracted DNA — cannot apply jurisdiction-specific code.";
+    block_reason = `Required DNA field${hardMissing.length > 1 ? "s" : ""} missing: ${hardMissing.join(
+      ", ",
+    )} — findings would be unreliable without these.`;
   } else if (jurisdictionMismatch) {
     blocking = true;
     block_reason = `Extracted county (${dna.county}) does not match project county (${projectCounty}) — wrong code edition would be applied.`;
-  } else if (completeness < 0.5) {
-    blocking = true;
-    block_reason = `Only ${Math.round(completeness * 100)}% of critical DNA fields populated — findings would be unreliable.`;
   }
 
   return {
@@ -2920,7 +2927,13 @@ async function stageGroundCitations(
         );
         const aiBlob = `${def.finding} ${def.required_action}`;
         score = citationOverlapScore(aiBlob, hit.requirement_text);
-        status = score >= 0.18 ? "verified" : "mismatch";
+        // Tighter grounding: 0.30 Jaccard AND the AI's text must literally
+        // mention the section number. Old 0.18 let generic findings ("provide
+        // smoke detectors") pass against unrelated sections that happened to
+        // share a few common words. Section-number presence is the cheapest
+        // honest check that the AI was actually citing what it claims.
+        const sectionMentioned = aiBlob.toLowerCase().includes(hit.section.toLowerCase());
+        status = score >= 0.30 && sectionMentioned ? "verified" : "mismatch";
       }
     }
     counts[status]++;
