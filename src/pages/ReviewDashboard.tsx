@@ -267,15 +267,21 @@ export default function ReviewDashboard() {
         />
       )}
 
+      <ReviewerMemoryCard planReviewId={id} />
+
       <LetterQualityGate
         planReviewId={id}
         letterDraft={review?.comment_letter_draft ?? null}
-        onJumpToFinding={() => setActiveTab("deficiencies")}
+        onJumpToFinding={() => setActiveTab("triage")}
       />
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList>
-          <TabsTrigger value="deficiencies">Deficiencies</TabsTrigger>
+          <TabsTrigger value="triage">
+            <Inbox className="mr-1 h-3.5 w-3.5" />
+            Triage
+          </TabsTrigger>
+          <TabsTrigger value="deficiencies">All Findings</TabsTrigger>
           <TabsTrigger value="human">Human Review</TabsTrigger>
           <TabsTrigger value="deferred">
             Deferred Scope{deferredItems.length > 0 ? ` (${deferredItems.length})` : ""}
@@ -287,6 +293,9 @@ export default function ReviewDashboard() {
           <TabsTrigger value="dna">Project DNA</TabsTrigger>
           <TabsTrigger value="coverage">Sheet Coverage</TabsTrigger>
         </TabsList>
+        <TabsContent value="triage" className="mt-4">
+          <TriageInbox planReviewId={id} />
+        </TabsContent>
         <TabsContent value="deficiencies" className="mt-4">
           <DeficiencyList planReviewId={id} />
         </TabsContent>
@@ -306,7 +315,7 @@ export default function ReviewDashboard() {
           <ProjectDNAViewer
             planReviewId={id}
             jurisdictionMismatch={jurisdictionMismatch}
-            onAfterRerun={() => setActiveTab("deficiencies")}
+            onAfterRerun={() => setActiveTab("triage")}
           />
         </TabsContent>
         <TabsContent value="coverage" className="mt-4">
