@@ -416,28 +416,15 @@ async function signedSheetUrls(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
   _firmId: string | null = null,
-  /**
-   * Optional filter — when supplied, only sign URLs for these page indices.
-   * Avoids signing 78 URLs in a stage that only needs 8 (e.g. a single
-   * discipline_review chunk). The full manifest is still cached separately
-   * so a later stage that DOES need everything reuses prior work.
-   */
-  pageIndices?: number[],
 ): Promise<Array<{ file_path: string; signed_url: string }>> {
   void _firmId;
   const cached = _pageManifestCache.get(planReviewId);
-  if (cached) {
-    if (!pageIndices || pageIndices.length === 0) return cached;
-    const set = new Set(pageIndices);
-    return cached.filter((_, idx) => set.has(idx));
-  }
+  if (cached) return cached;
 
   const fromDb = await readSignedManifest(admin, planReviewId);
   if (fromDb && fromDb.length > 0) {
     _pageManifestCache.set(planReviewId, fromDb);
-    if (!pageIndices || pageIndices.length === 0) return fromDb;
-    const set = new Set(pageIndices);
-    return fromDb.filter((_, idx) => set.has(idx));
+    return fromDb;
   }
 
   // Legacy fallback: pre-manifest reviews stored pages under `<dir>/pages/`.
@@ -1103,17 +1090,24 @@ function evaluateDnaHealth(
   const jurisdictionMismatch =
     !!dnaCounty && !!projCounty && dnaCounty !== projCounty;
 
+  // Hard-block if ANY of the truly load-bearing fields are missing.
+  // These three drive: which code edition to apply (fbc_edition), which chapters
+  // are relevant (occupancy_classification), and which jurisdictional amendments
+  // load (county). Without them every downstream finding is guess-work, so the
+  // old "≥50% complete" threshold let too many bad runs through.
+  const HARD_REQUIRED: readonly string[] = ["county", "occupancy_classification", "fbc_edition"];
+  const hardMissing = HARD_REQUIRED.filter((f) => criticalMissing.includes(f));
+
   let blocking = false;
   let block_reason: string | null = null;
-  if (criticalMissing.includes("county")) {
+  if (hardMissing.length > 0) {
     blocking = true;
-    block_reason = "County missing from extracted DNA — cannot apply jurisdiction-specific code.";
+    block_reason = `Required DNA field${hardMissing.length > 1 ? "s" : ""} missing: ${hardMissing.join(
+      ", ",
+    )} — findings would be unreliable without these.`;
   } else if (jurisdictionMismatch) {
     blocking = true;
     block_reason = `Extracted county (${dna.county}) does not match project county (${projectCounty}) — wrong code edition would be applied.`;
-  } else if (completeness < 0.5) {
-    blocking = true;
-    block_reason = `Only ${Math.round(completeness * 100)}% of critical DNA fields populated — findings would be unreliable.`;
   }
 
   return {
@@ -1146,6 +1140,31 @@ async function stageDnaReevaluate(
       .plan_reviews?.projects?.county) ?? null;
   const health = evaluateDnaHealth(dna as Record<string, unknown>, projectCounty);
   return { reevaluated: true, ...health };
+}
+
+/**
+ * Resolve the currently active prompt_versions.id for a given key. Stamped on
+ * every deficiency we insert so we can A/B prompt revisions later and filter
+ * quality metrics by prompt generation. Returns null if no row matches — the
+ * pipeline still inserts, just without a provenance pointer.
+ */
+async function getActivePromptVersionId(
+  admin: ReturnType<typeof createClient>,
+  promptKey: string,
+): Promise<string | null> {
+  const { data, error } = await admin
+    .from("prompt_versions")
+    .select("id")
+    .eq("prompt_key", promptKey)
+    .eq("is_active", true)
+    .order("effective_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error(`[prompt_versions] lookup failed for ${promptKey}:`, error);
+    return null;
+  }
+  return data?.id ?? null;
 }
 
 async function stageDisciplineReview(
@@ -1232,51 +1251,8 @@ async function stageDisciplineReview(
   const failed: string[] = [];
   let totalFindings = 0;
 
-  // ── Hoist per-stage prompt context ─────────────────────────────────────
-  // dnaSummary / jurSummary / useTypeLine never change across the chunks
-  // and disciplines below. Build them once instead of stringifying ~80
-  // times (10 chunks × 9 disciplines, worst case).
-  const dnaSummary = dna
-    ? JSON.stringify(
-        {
-          occupancy: dna.occupancy_classification,
-          construction_type: dna.construction_type,
-          stories: dna.stories,
-          total_sq_ft: dna.total_sq_ft,
-          wind_speed_vult: dna.wind_speed_vult,
-          exposure_category: dna.exposure_category,
-          risk_category: dna.risk_category,
-          flood_zone: dna.flood_zone,
-          hvhz: dna.hvhz,
-          mixed_occupancy: dna.mixed_occupancy,
-          is_high_rise: dna.is_high_rise,
-          has_mezzanine: dna.has_mezzanine,
-          missing_fields: dna.missing_fields,
-        },
-        null,
-        2,
-      )
-    : "(not yet extracted)";
-  const jurSummary = jurisdiction
-    ? JSON.stringify(
-        {
-          county: jurisdiction.county,
-          fbc_edition: jurisdiction.fbc_edition,
-          hvhz: jurisdiction.hvhz,
-          coastal: jurisdiction.coastal,
-          flood_zone_critical: jurisdiction.flood_zone_critical,
-          high_volume: jurisdiction.high_volume,
-          notes: jurisdiction.notes,
-        },
-        null,
-        2,
-      )
-    : "(unknown jurisdiction)";
-  const useTypeLine = useType === "residential"
-    ? `## Project Use Type\nRESIDENTIAL — apply FBC Residential (FBCR), NOT FBC Building. Skip commercial accessibility (FBC Ch.11). Use IRC/FBCR-style code references.\n\n`
-    : useType === "commercial"
-      ? `## Project Use Type\nCOMMERCIAL — apply FBC Building (not FBCR). Accessibility (FBC Ch.11/ADA) and commercial life-safety apply.\n\n`
-      : ``;
+  // Resolve once per stage; passed to every chunk so all rows share provenance.
+  const promptVersionId = await getActivePromptVersionId(admin, "discipline_review");
 
   // Per-discipline batching replaces the old MAX_DISCIPLINE_PAGES = 10 cap.
   // Architectural with 74 sheets becomes ~10 calls of 8 sheets each so every
@@ -1315,9 +1291,7 @@ async function stageDisciplineReview(
           dna,
           jurisdiction,
           useType,
-          dnaSummary,
-          jurSummary,
-          useTypeLine,
+          promptVersionId,
         });
         totalFindings += inserted;
         byDiscipline[discipline].reviewed += chunk.length;
@@ -1372,12 +1346,9 @@ interface DisciplineRunCtx {
   dna: Record<string, unknown> | null;
   jurisdiction: Record<string, unknown> | null;
   useType: string | null;
-  /** Pre-formatted strings hoisted out of runDisciplineChecks. Built once
-   *  per stageDisciplineReview call so 10 chunks × 9 disciplines don't each
-   *  re-stringify the same DNA + jurisdiction blob. */
-  dnaSummary: string;
-  jurSummary: string;
-  useTypeLine: string;
+  /** Active prompt_versions.id for `discipline_review`, stamped on every insert
+   *  so we can A/B prompt revisions and filter quality metrics by generation. */
+  promptVersionId: string | null;
 }
 
 async function runDisciplineChecks(
@@ -1401,10 +1372,43 @@ async function runDisciplineChecks(
     trigger_condition: string | null;
   }>;
 
-  // dnaSummary / jurSummary / useTypeLine are pre-built once per
-  // stageDisciplineReview call (see ctx) — no per-chunk re-stringification.
-  const dnaSummary = ctx.dnaSummary;
-  const jurSummary = ctx.jurSummary;
+  const dnaSummary = ctx.dna
+    ? JSON.stringify(
+        {
+          occupancy: ctx.dna.occupancy_classification,
+          construction_type: ctx.dna.construction_type,
+          stories: ctx.dna.stories,
+          total_sq_ft: ctx.dna.total_sq_ft,
+          wind_speed_vult: ctx.dna.wind_speed_vult,
+          exposure_category: ctx.dna.exposure_category,
+          risk_category: ctx.dna.risk_category,
+          flood_zone: ctx.dna.flood_zone,
+          hvhz: ctx.dna.hvhz,
+          mixed_occupancy: ctx.dna.mixed_occupancy,
+          is_high_rise: ctx.dna.is_high_rise,
+          has_mezzanine: ctx.dna.has_mezzanine,
+          missing_fields: ctx.dna.missing_fields,
+        },
+        null,
+        2,
+      )
+    : "(not yet extracted)";
+
+  const jurSummary = ctx.jurisdiction
+    ? JSON.stringify(
+        {
+          county: ctx.jurisdiction.county,
+          fbc_edition: ctx.jurisdiction.fbc_edition,
+          hvhz: ctx.jurisdiction.hvhz,
+          coastal: ctx.jurisdiction.coastal,
+          flood_zone_critical: ctx.jurisdiction.flood_zone_critical,
+          high_volume: ctx.jurisdiction.high_volume,
+          notes: ctx.jurisdiction.notes,
+        },
+        null,
+        2,
+      )
+    : "(unknown jurisdiction)";
 
   const checklistText = checklist.length
     ? checklist
@@ -1488,9 +1492,16 @@ async function runDisciplineChecks(
   // common failure modes + wording/evidence guidance + shared review rules.
   const systemPrompt = composeDisciplineSystemPrompt(ctx.discipline);
 
-  // Use-type prefix is pre-built once in stageDisciplineReview (ctx.useTypeLine).
+  // Use-type prefix tells the expert which FBC code path applies before they
+  // start reading sheets — prevents commercial-coded findings on residential.
+  const useTypeLine = ctx.useType === "residential"
+    ? `## Project Use Type\nRESIDENTIAL — apply FBC Residential (FBCR), NOT FBC Building. Skip commercial accessibility (FBC Ch.11). Use IRC/FBCR-style code references.\n\n`
+    : ctx.useType === "commercial"
+      ? `## Project Use Type\nCOMMERCIAL — apply FBC Building (not FBCR). Accessibility (FBC Ch.11/ADA) and commercial life-safety apply.\n\n`
+      : ``;
+
   const userText =
-    ctx.useTypeLine +
+    useTypeLine +
     `## Project DNA\n${dnaSummary}\n\n` +
     `## Jurisdiction\n${jurSummary}\n\n` +
     `## Sheets routed to ${ctx.discipline}\n${sheetIndex || "(none)"}\n\n` +
@@ -1577,6 +1588,7 @@ async function runDisciplineChecks(
     confidence_score: Math.max(0, Math.min(1, f.confidence_score ?? 0.5)),
     confidence_basis: f.confidence_basis ?? "Vision-extracted",
     model_version: "google/gemini-2.5-flash",
+    prompt_version_id: ctx.promptVersionId,
     status: "open",
   }));
 
@@ -2401,13 +2413,10 @@ async function stageVerify(
   for (let start = 0; start < targets.length; start += BATCH) {
     const slice = targets.slice(start, start + BATCH);
 
-    // Aggregate page indices across the batch. The cap is now derived from the
-    // findings themselves (each target carries ≤3 page_indices, batch of 3
-    // findings → ≤9 unique pages worst case, typically 1-4). The old fixed
-    // .slice(0, 5) silently dropped sheets a finding actually cited.
+    // Aggregate page indices across the batch (capped to keep payload tight).
     const pageSet = new Set<number>();
     for (const t of slice) for (const p of t.page_indices) pageSet.add(p);
-    const pages = Array.from(pageSet);
+    const pages = Array.from(pageSet).slice(0, 5);
     const imageUrls = pages
       .map((p) => signed[p]?.signed_url)
       .filter(Boolean) as string[];
@@ -2951,7 +2960,13 @@ async function stageGroundCitations(
         );
         const aiBlob = `${def.finding} ${def.required_action}`;
         score = citationOverlapScore(aiBlob, hit.requirement_text);
-        status = score >= 0.18 ? "verified" : "mismatch";
+        // Tighter grounding: 0.30 Jaccard AND the AI's text must literally
+        // mention the section number. Old 0.18 let generic findings ("provide
+        // smoke detectors") pass against unrelated sections that happened to
+        // share a few common words. Section-number presence is the cheapest
+        // honest check that the AI was actually citing what it claims.
+        const sectionMentioned = aiBlob.toLowerCase().includes(hit.section.toLowerCase());
+        status = score >= 0.30 && sectionMentioned ? "verified" : "mismatch";
       }
     }
     counts[status]++;
