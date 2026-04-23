@@ -27,6 +27,7 @@ import DocumentsGen from "./pages/DocumentsGen";
 import Deficiencies from "./pages/Deficiencies";
 import Analytics from "./pages/Analytics";
 import Jurisdictions from "./pages/Jurisdictions";
+import PipelineActivity from "./pages/PipelineActivity";
 
 const queryClient = new QueryClient();
 
@@ -66,6 +67,7 @@ const App = () => (
               <Route path="/invoices" element={<Invoices />} />
               <Route path="/review" element={<Review />} />
               <Route path="/review/:id" element={<ReviewDetail />} />
+              <Route path="/pipelines" element={<PipelineActivity />} />
               <Route path="/plan-review/:id" element={<PlanReviewDetail />} />
               <Route path="/plan-review/:id/dashboard" element={<ReviewDashboard />} />
               <Route path="/inspections" element={<Inspections />} />
