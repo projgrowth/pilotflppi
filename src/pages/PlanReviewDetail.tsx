@@ -88,7 +88,6 @@ export default function PlanReviewDetail() {
   // failure (Edge can't rasterize PDFs reliably). Surface a banner so reviewers
   // can recover without leaving this page.
   const { data: pipeRows = [] } = usePipelineStatus(id);
-  const [reprepping, setReprepping] = useState(false);
   const preparePagesErrored = (() => {
     const row = pipeRows.find((r) => r.stage === "prepare_pages");
     if (!row || row.status !== "error") return false;
@@ -117,28 +116,6 @@ export default function PlanReviewDetail() {
     enabled: !!id,
     refetchInterval: 5000,
   });
-  const handleReprepareInBrowser = useCallback(async () => {
-    if (!id || reprepping) return;
-    setReprepping(true);
-    const t = toast.loading("Re-preparing pages in your browser…");
-    try {
-      const result = await reprepareInBrowser(id);
-      toast.dismiss(t);
-      if (result.ok) {
-        toast.success(result.message);
-        queryClient.invalidateQueries({ queryKey: ["pipeline_status", id] });
-        queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
-      } else {
-        toast.error(result.message);
-      }
-      for (const w of result.warnings) toast.warning(w);
-    } catch (e) {
-      toast.dismiss(t);
-      toast.error(e instanceof Error ? e.message : "Re-prepare failed");
-    } finally {
-      setReprepping(false);
-    }
-  }, [id, reprepping, queryClient]);
 
   // ── UI state ───────────────────────────────────────────────────────────
   const [commentLetter, setCommentLetter] = useState("");
