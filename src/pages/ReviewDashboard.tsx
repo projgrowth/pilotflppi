@@ -160,13 +160,33 @@ export default function ReviewDashboard() {
           {/* Re-run analysis is a secondary action — the wizard handles the
               first run automatically. Keep this for follow-up rounds where
               the reviewer uploads new sheets. */}
-          <Button size="sm" variant="ghost" onClick={runPipeline} disabled={running} title="Re-run the analysis pipeline">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => runPipeline("core")}
+            disabled={running}
+            title="Re-run the core analysis pipeline"
+          >
             {running ? (
               <Loader2 className="mr-1 h-4 w-4 animate-spin" />
             ) : (
               <Play className="mr-1 h-4 w-4" />
             )}
-            {running ? "Running…" : "Re-run Analysis"}
+            {running ? "Running…" : "Re-run Core"}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => runPipeline("deep")}
+            disabled={runningDeep}
+            title="Run Deep QA: verify, citations, cross-check, deferred scope, prioritize"
+          >
+            {runningDeep ? (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="mr-1 h-4 w-4" />
+            )}
+            {runningDeep ? "Deep QA…" : "Run Deep QA"}
           </Button>
         </div>
       </div>
