@@ -152,10 +152,10 @@ export async function uploadPlanReviewFiles(
   // 6. Kick off the pipeline. This is the step previously swallowed by a
   // console.warn — surface it now so the user knows when nothing started.
   const pipeline = await startPipeline(reviewId, "core");
-  const pipelineStarted = pipeline.ok;
   if (!pipeline.ok) {
     warnings.push(`Pipeline did not start: ${pipeline.message}`);
   }
+  const pipelineStarted = pipeline.ok;
 
   return {
     acceptedCount: newFilePaths.length,
