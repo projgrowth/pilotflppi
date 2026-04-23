@@ -951,7 +951,7 @@ async function stageDisciplineReview(
       .maybeSingle(),
     admin
       .from("plan_reviews")
-      .select("projects(county)")
+      .select("projects(county, use_type)")
       .eq("id", planReviewId)
       .maybeSingle(),
   ]);
@@ -963,9 +963,11 @@ async function stageDisciplineReview(
     page_index: number | null;
   }>;
   const dna = (dnaRow.data ?? null) as Record<string, unknown> | null;
-  const county = ((jurisdictionRow.data ?? null) as
-    | { projects: { county: string } | null }
-    | null)?.projects?.county ?? null;
+  const jurisdictionProject = (jurisdictionRow.data ?? null) as
+    | { projects: { county: string; use_type: string | null } | null }
+    | null;
+  const county = jurisdictionProject?.projects?.county ?? null;
+  const useType = jurisdictionProject?.projects?.use_type ?? null;
 
   let jurisdiction: Record<string, unknown> | null = null;
   if (county) {
@@ -976,6 +978,13 @@ async function stageDisciplineReview(
       .maybeSingle();
     jurisdiction = (jr ?? null) as Record<string, unknown> | null;
   }
+
+  // Residential 1-2 family projects don't need a commercial accessibility
+  // (ADA / FBC Ch.11) review — skip that discipline entirely so the AI
+  // doesn't manufacture irrelevant findings.
+  const disciplinesToRun = useType === "residential"
+    ? DISCIPLINES.filter((d) => d !== "Accessibility")
+    : DISCIPLINES;
 
   // Resolve each sheet's discipline: prefer the AI-extracted title-block
   // discipline (sheet_coverage.discipline). Fall back to prefix heuristic ONLY
