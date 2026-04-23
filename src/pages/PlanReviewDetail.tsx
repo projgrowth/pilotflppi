@@ -53,6 +53,9 @@ import { usePlanReviewData } from "@/hooks/plan-review/usePlanReviewData";
 import { useFindingFilters, useRoundDiff } from "@/hooks/plan-review/useFindingFilters";
 import { useFindingStatuses } from "@/hooks/plan-review/useFindingStatuses";
 import { usePdfPageRender } from "@/hooks/plan-review/usePdfPageRender";
+import { usePipelineStatus } from "@/hooks/useReviewDashboard";
+import { reprepareInBrowser } from "@/lib/reprepare-in-browser";
+import { Wand2, AlertTriangle, Loader2 } from "lucide-react";
 
 type RightPanelMode = "findings" | "checklist" | "completeness" | "letter" | "county";
 
@@ -74,6 +77,46 @@ export default function PlanReviewDetail() {
   // ── PDF rendering ──────────────────────────────────────────────────────
   const { pageImages, pageCapInfo, renderingPages, renderProgress, renderDocumentPages, resetPages } =
     usePdfPageRender();
+
+  // ── Pipeline error recovery ───────────────────────────────────────────
+  // Re-prepare in browser is the only way out of a needs_browser_rasterization
+  // failure (Edge can't rasterize PDFs reliably). Surface a banner so reviewers
+  // can recover without leaving this page.
+  const { data: pipeRows = [] } = usePipelineStatus(id);
+  const [reprepping, setReprepping] = useState(false);
+  const preparePagesErrored = (() => {
+    const row = pipeRows.find((r) => r.stage === "prepare_pages");
+    if (!row || row.status !== "error") return false;
+    const meta = (row as unknown as { metadata?: { error_class?: string } })?.metadata;
+    const msg = (row.error_message ?? "").toLowerCase();
+    return (
+      meta?.error_class === "needs_browser_rasterization" ||
+      msg.includes("re-prepare") ||
+      msg.includes("haven't been prepared")
+    );
+  })();
+  const handleReprepareInBrowser = useCallback(async () => {
+    if (!id || reprepping) return;
+    setReprepping(true);
+    const t = toast.loading("Re-preparing pages in your browser…");
+    try {
+      const result = await reprepareInBrowser(id);
+      toast.dismiss(t);
+      if (result.ok) {
+        toast.success(result.message);
+        queryClient.invalidateQueries({ queryKey: ["pipeline_status", id] });
+        queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+      } else {
+        toast.error(result.message);
+      }
+      for (const w of result.warnings) toast.warning(w);
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e instanceof Error ? e.message : "Re-prepare failed");
+    } finally {
+      setReprepping(false);
+    }
+  }, [id, reprepping, queryClient]);
 
   // ── UI state ───────────────────────────────────────────────────────────
   const [commentLetter, setCommentLetter] = useState("");
@@ -590,6 +633,34 @@ export default function PlanReviewDetail() {
         onPipelineComplete={handlePipelineComplete}
         onOpenDashboard={openDashboard}
       />
+
+      {preparePagesErrored && (
+        <div className="shrink-0 border-b border-destructive/30 bg-destructive/5 px-4 py-2 flex items-center gap-3">
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
+          <div className="flex-1 min-w-0">
+            <span className="text-2xs font-semibold text-destructive uppercase tracking-wide mr-2">
+              Pages not prepared
+            </span>
+            <span className="text-xs text-foreground/80">
+              The server can't rasterize PDFs — your browser will render them locally and restart the pipeline.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="default"
+            onClick={handleReprepareInBrowser}
+            disabled={reprepping}
+            className="h-7 text-xs"
+          >
+            {reprepping ? (
+              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Wand2 className="mr-1 h-3.5 w-3.5" />
+            )}
+            {reprepping ? "Re-preparing…" : "Re-prepare in browser"}
+          </Button>
+        </div>
+      )}
 
       {/* Page-cap banner: surface silent 10-page truncation honestly */}
       {pageCapInfo && pageCapInfo.total > pageCapInfo.rendered && (

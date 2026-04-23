@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Play, Loader2, FileDown, Layers, Sparkles, Square, Inbox } from "lucide-react";
+import { ArrowLeft, Play, Loader2, FileDown, Layers, Sparkles, Square, Inbox, Wand2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { PageHeader } from "@/components/PageHeader";
@@ -25,6 +25,7 @@ import { generateCountyReport } from "@/lib/county-report";
 import { determineReviewStatus } from "@/lib/review-status";
 import { cancelPipelineForReview } from "@/lib/pipeline-cancel";
 import { usePipelineErrorStream } from "@/hooks/usePipelineErrors";
+import { reprepareInBrowser } from "@/lib/reprepare-in-browser";
 
 interface ReviewWithProject {
   id: string;
@@ -46,14 +47,50 @@ export default function ReviewDashboard() {
   const [running, setRunning] = useState(false);
   const [runningDeep, setRunningDeep] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [reprepping, setReprepping] = useState(false);
   // Triage is now the default landing tab — surfaces priority items first.
   const [activeTab, setActiveTab] = useState("triage");
 
+  // One-click re-prepare for the needs_browser_rasterization error class.
+  // The server can't rasterize PDFs (CPU budget); the browser does it via
+  // pdf.js, writes the manifest, and restarts the pipeline.
+  const handleReprepareInBrowser = async () => {
+    if (!id || reprepping) return;
+    setReprepping(true);
+    const t = toast.loading("Re-preparing pages in your browser…");
+    try {
+      const result = await reprepareInBrowser(id);
+      toast.dismiss(t);
+      if (result.ok) {
+        toast.success(result.message);
+        qc.invalidateQueries({ queryKey: ["pipeline_status", id] });
+      } else {
+        toast.error(result.message);
+      }
+      for (const w of result.warnings) toast.warning(w);
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e instanceof Error ? e.message : "Re-prepare failed");
+    } finally {
+      setReprepping(false);
+    }
+  };
+
   // Toast on pipeline error so reviewers don't have to refresh to find out.
+  // For NEEDS_BROWSER_RASTERIZATION, attach a one-click recovery action.
   usePipelineErrorStream(id, (err) => {
+    const isNeedsBrowser = err.error_class === "needs_browser_rasterization";
     toast.error(`${err.stage.replace(/_/g, " ")} failed`, {
-      description: err.error_message?.slice(0, 140) ?? "Unknown error",
-      duration: 8000,
+      description: isNeedsBrowser
+        ? "Pages haven't been prepared. Click Re-prepare to render them in your browser."
+        : err.error_message?.slice(0, 140) ?? "Unknown error",
+      duration: isNeedsBrowser ? 15000 : 8000,
+      action: isNeedsBrowser
+        ? {
+            label: "Re-prepare in browser",
+            onClick: () => void handleReprepareInBrowser(),
+          }
+        : undefined,
     });
   });
 
@@ -135,6 +172,21 @@ export default function ReviewDashboard() {
     () => pipeRows.some((r) => r.status === "running" || r.status === "pending"),
     [pipeRows],
   );
+
+  // Detect the needs-browser-rasterization condition so the page header can
+  // expose a persistent recovery button (the toast is easy to miss/dismiss).
+  const preparePagesErrored = useMemo(() => {
+    const row = pipeRows.find((r) => r.stage === "prepare_pages");
+    if (!row || row.status !== "error") return false;
+    const meta = (row as unknown as { metadata?: { error_class?: string } } | undefined)
+      ?.metadata;
+    const msg = (row.error_message ?? "").toLowerCase();
+    return (
+      meta?.error_class === "needs_browser_rasterization" ||
+      msg.includes("re-prepare") ||
+      msg.includes("haven't been prepared")
+    );
+  }, [pipeRows]);
 
   const status = useMemo(() => determineReviewStatus(defs), [defs]);
   const jurisdictionMismatch =
@@ -246,6 +298,34 @@ export default function ReviewDashboard() {
           </Button>
         </div>
       </div>
+
+      {preparePagesErrored && (
+        <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+          <div className="flex-1 space-y-1">
+            <div className="text-sm font-semibold text-destructive">
+              Pages need to be re-prepared in your browser
+            </div>
+            <p className="text-sm text-muted-foreground">
+              The server can't rasterize PDFs directly — your browser will download the source files,
+              render them with pdf.js, and restart the pipeline. This usually takes 10–30 seconds.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="default"
+            onClick={handleReprepareInBrowser}
+            disabled={reprepping}
+          >
+            {reprepping ? (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            ) : (
+              <Wand2 className="mr-1 h-4 w-4" />
+            )}
+            {reprepping ? "Re-preparing…" : "Re-prepare in browser"}
+          </Button>
+        </div>
+      )}
 
       {review?.project && (
         <DnaHealthBanner
