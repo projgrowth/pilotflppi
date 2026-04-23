@@ -335,22 +335,17 @@ async function readSignedManifest(
 }
 
 /**
- * Ensure each plan_review_files row has rasterized PNG pages in storage at
- * `<dir>/pages/p-NNN.png`, then return one entry per page (in upload order
- * across all files) suitable for vision input.
- *
- * Caching strategy:
- *   1. Per-invocation in-memory cache (fastest — used across stages of one run)
- *   2. plan_review_page_assets DB manifest (persists across runs/restarts)
- *   3. Storage listing of `<dir>/pages/` (legacy — covers reviews created
- *      before the manifest was introduced)
- *   4. Cold path: download PDF + rasterize via MuPDF, then persist manifest
+ * Manifest-only page lookup. Reads `plan_review_page_assets` and signs each
+ * row's storage_path. The cold-path rasterization lives ONLY in
+ * `stagePreparePages` so heavy MuPDF work runs in its own dedicated edge
+ * worker invocation and can't co-exist with AI calls or other stage state.
  */
 async function signedSheetUrls(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
-  firmId: string | null = null,
+  _firmId: string | null = null,
 ): Promise<Array<{ file_path: string; signed_url: string }>> {
+  void _firmId;
   const cached = _pageManifestCache.get(planReviewId);
   if (cached) return cached;
 
@@ -360,6 +355,10 @@ async function signedSheetUrls(
     return fromDb;
   }
 
+  // Legacy fallback: pre-manifest reviews stored pages under `<dir>/pages/`.
+  // Index them into the manifest without rasterizing so subsequent stages have
+  // a stable source of truth. If no pages exist, return empty — the caller's
+  // stage will fail and prepare_pages must be re-run.
   const { data: files, error } = await admin
     .from("plan_review_files")
     .select("file_path")
@@ -381,8 +380,6 @@ async function signedSheetUrls(
   for (const f of (files ?? []) as Array<{ file_path: string }>) {
     const filePath = f.file_path;
     const isPdf = filePath.toLowerCase().endsWith(".pdf");
-
-    // Non-PDF (PNG/JPG already): pass through as a single page.
     if (!isPdf) {
       const { data: signed } = await admin.storage
         .from("documents")
@@ -391,7 +388,7 @@ async function signedSheetUrls(
         out.push({ file_path: filePath, signed_url: signed.signedUrl });
         manifestRows.push({
           plan_review_id: planReviewId,
-          firm_id: firmId,
+          firm_id: _firmId,
           source_file_path: filePath,
           page_index: globalPageIndex,
           storage_path: filePath,
@@ -401,61 +398,16 @@ async function signedSheetUrls(
       }
       continue;
     }
-
-    // Pages live next to the source PDF in a sibling `pages/` folder.
     const lastSlash = filePath.lastIndexOf("/");
     const dir = lastSlash >= 0 ? filePath.slice(0, lastSlash) : "";
     const pagesDir = `${dir}/pages`;
-
-    // Cheap existence check: list the pages folder (legacy reviews).
     const { data: existing } = await admin.storage
       .from("documents")
       .list(pagesDir, { limit: 1000, sortBy: { column: "name", order: "asc" } });
-
-    const existingPagePaths = (existing ?? [])
+    const pagePaths = (existing ?? [])
       .filter((o: { name: string }) => /^p-\d{3,}\.png$/.test(o.name))
       .map((o: { name: string }) => `${pagesDir}/${o.name}`)
       .sort();
-
-    let pagePaths = existingPagePaths;
-
-    if (pagePaths.length === 0) {
-      // Need to rasterize. Download the source PDF.
-      const { data: pdfBlob, error: dlErr } = await admin.storage
-        .from("documents")
-        .download(filePath);
-      if (dlErr || !pdfBlob) {
-        console.error(`[rasterize] download failed for ${filePath}:`, dlErr);
-        continue;
-      }
-      const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer());
-
-      const uploaded: string[] = [];
-      try {
-        await rasterizePdfStreaming(pdfBytes, async (i, pngBytes) => {
-          const pageName = `p-${String(i).padStart(3, "0")}.png`;
-          const fullPath = `${pagesDir}/${pageName}`;
-          const { error: upErr } = await admin.storage
-            .from("documents")
-            .upload(fullPath, pngBytes, {
-              contentType: "image/png",
-              upsert: true,
-            });
-          if (upErr) {
-            console.error(`[rasterize] upload failed for ${fullPath}:`, upErr);
-            return;
-          }
-          uploaded.push(fullPath);
-        });
-      } catch (err) {
-        console.error(`[rasterize] mupdf failed for ${filePath}:`, err);
-        continue;
-      }
-      uploaded.sort();
-      pagePaths = uploaded;
-    }
-
-    // Sign each page URL and queue a manifest row.
     for (const p of pagePaths) {
       const { data: signed } = await admin.storage
         .from("documents")
@@ -464,7 +416,7 @@ async function signedSheetUrls(
         out.push({ file_path: p, signed_url: signed.signedUrl });
         manifestRows.push({
           plan_review_id: planReviewId,
-          firm_id: firmId,
+          firm_id: _firmId,
           source_file_path: filePath,
           page_index: globalPageIndex,
           storage_path: p,
@@ -475,7 +427,6 @@ async function signedSheetUrls(
     }
   }
 
-  // Persist the manifest so future runs / future stages skip storage listing.
   if (manifestRows.length > 0) {
     const { error: insErr } = await admin
       .from("plan_review_page_assets")
@@ -487,8 +438,187 @@ async function signedSheetUrls(
   return out;
 }
 
-// Suppress unused warning — kept for potential future incremental rasterization.
-void RASTERIZE_CHUNK;
+/**
+ * Chunked rasterizer. Finds the first source PDF in `plan_review_files` that
+ * still has un-rasterized pages, rasterizes the next RASTERIZE_CHUNK pages of
+ * it, persists manifest rows, and returns whether more work remains.
+ *
+ * One invocation = one chunk = ≤12 pages of ONE PDF. MuPDF WASM never has to
+ * hold a whole plan set in memory at once.
+ */
+async function rasterizeNextChunk(
+  admin: ReturnType<typeof createClient>,
+  planReviewId: string,
+  firmId: string | null,
+): Promise<{ done: boolean; rasterized: number; source?: string }> {
+  const { data: files, error } = await admin
+    .from("plan_review_files")
+    .select("file_path")
+    .eq("plan_review_id", planReviewId)
+    .order("uploaded_at", { ascending: true });
+  if (error) throw error;
+
+  // Pull existing manifest rows once so we know which (source,page) pairs are done.
+  const { data: existingRows } = await admin
+    .from("plan_review_page_assets")
+    .select("source_file_path, page_index, storage_path")
+    .eq("plan_review_id", planReviewId);
+  const existing = (existingRows ?? []) as Array<{
+    source_file_path: string;
+    page_index: number;
+    storage_path: string;
+  }>;
+  const doneBySource = new Map<string, Set<number>>();
+  for (const r of existing) {
+    let s = doneBySource.get(r.source_file_path);
+    if (!s) {
+      s = new Set();
+      doneBySource.set(r.source_file_path, s);
+    }
+    // page_index here is the GLOBAL index, but we need per-source. We re-derive
+    // local index from storage_path's `p-NNN.png` suffix when present.
+    const m = r.storage_path.match(/p-(\d{3,})\.png$/);
+    if (m) s.add(parseInt(m[1], 10));
+    else s.add(r.page_index);
+  }
+
+  // Compute the next global page index to assign (continues across chunks).
+  let nextGlobal = existing.reduce(
+    (acc, r) => (r.page_index >= acc ? r.page_index + 1 : acc),
+    0,
+  );
+
+  for (const f of (files ?? []) as Array<{ file_path: string }>) {
+    const filePath = f.file_path;
+    const isPdf = filePath.toLowerCase().endsWith(".pdf");
+    const doneSet = doneBySource.get(filePath) ?? new Set<number>();
+
+    if (!isPdf) {
+      // Single image — register if not already done.
+      if (doneSet.size === 0) {
+        await admin
+          .from("plan_review_page_assets")
+          .upsert(
+            [
+              {
+                plan_review_id: planReviewId,
+                firm_id: firmId,
+                source_file_path: filePath,
+                page_index: nextGlobal,
+                storage_path: filePath,
+                status: "ready",
+              },
+            ],
+            { onConflict: "plan_review_id,page_index" },
+          );
+        nextGlobal++;
+        return { done: false, rasterized: 1, source: filePath };
+      }
+      continue;
+    }
+
+    // Download just enough metadata to know the page count.
+    const { data: pdfBlob, error: dlErr } = await admin.storage
+      .from("documents")
+      .download(filePath);
+    if (dlErr || !pdfBlob) {
+      console.error(`[prepare_pages] download failed for ${filePath}:`, dlErr);
+      continue;
+    }
+    const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer());
+    const doc = mupdf.Document.openDocument(pdfBytes, "application/pdf");
+    let totalPages = 0;
+    try {
+      totalPages = Math.min(doc.countPages(), MAX_PAGES_PER_PDF);
+    } finally {
+      doc.destroy();
+    }
+
+    // All pages already done?
+    let allDone = true;
+    for (let i = 0; i < totalPages; i++) {
+      if (!doneSet.has(i)) {
+        allDone = false;
+        break;
+      }
+    }
+    if (allDone) continue;
+
+    // Find the next contiguous chunk of missing pages for this PDF.
+    const targets: number[] = [];
+    for (let i = 0; i < totalPages && targets.length < RASTERIZE_CHUNK; i++) {
+      if (!doneSet.has(i)) targets.push(i);
+    }
+
+    const lastSlash = filePath.lastIndexOf("/");
+    const dir = lastSlash >= 0 ? filePath.slice(0, lastSlash) : "";
+    const pagesDir = `${dir}/pages`;
+
+    const doc2 = mupdf.Document.openDocument(pdfBytes, "application/pdf");
+    const matrix = mupdf.Matrix.scale(RASTER_SCALE, RASTER_SCALE);
+    let rasterized = 0;
+    try {
+      for (const i of targets) {
+        const page = doc2.loadPage(i);
+        try {
+          const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false);
+          try {
+            const png = pixmap.asPNG();
+            const pageName = `p-${String(i).padStart(3, "0")}.png`;
+            const fullPath = `${pagesDir}/${pageName}`;
+            const { error: upErr } = await admin.storage
+              .from("documents")
+              .upload(fullPath, png, { contentType: "image/png", upsert: true });
+            if (upErr) {
+              console.error(`[prepare_pages] upload failed for ${fullPath}:`, upErr);
+              continue;
+            }
+            await admin
+              .from("plan_review_page_assets")
+              .upsert(
+                [
+                  {
+                    plan_review_id: planReviewId,
+                    firm_id: firmId,
+                    source_file_path: filePath,
+                    page_index: nextGlobal,
+                    storage_path: fullPath,
+                    status: "ready",
+                  },
+                ],
+                { onConflict: "plan_review_id,page_index" },
+              );
+            nextGlobal++;
+            rasterized++;
+          } finally {
+            pixmap.destroy();
+          }
+        } finally {
+          page.destroy();
+        }
+      }
+    } finally {
+      doc2.destroy();
+    }
+
+    // Determine if this PDF still has more pages to do after this chunk.
+    let stillHasMore = false;
+    for (let i = 0; i < totalPages; i++) {
+      if (!doneSet.has(i) && !targets.includes(i)) {
+        stillHasMore = true;
+        break;
+      }
+    }
+    return {
+      done: !stillHasMore && filePath === (files ?? [])[(files ?? []).length - 1]?.file_path,
+      rasterized,
+      source: filePath,
+    };
+  }
+
+  // Nothing left to do across all files.
+  return { done: true, rasterized: 0 };
+}
 
 
 const FINDINGS_SCHEMA = {
