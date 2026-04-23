@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Check, AlertCircle, Circle, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -79,6 +79,12 @@ export function PipelineProgressStepper({
     return () => clearInterval(id);
   }, []);
 
+  // Track which (stage, started_at) attempts we've already auto-retried so we
+  // never restart the same stuck attempt twice. Cap auto-retries per stage at 2.
+  const autoRetryLog = useRef<Map<PipelineStage, { count: number; lastStartedAt: string | null }>>(
+    new Map(),
+  );
+
   const byStage = useMemo(() => {
     const m = new Map<PipelineStage, (typeof rows)[number]>();
     for (const r of rows) m.set(r.stage as PipelineStage, r);
@@ -94,20 +100,51 @@ export function PipelineProgressStepper({
 
   const stages = compact ? PIPELINE_STAGES.filter((s) => VISIBLE_STAGES.includes(s.key)) : PIPELINE_STAGES;
 
-  const handleRetryStage = async (stage: PipelineStage) => {
+  const handleRetryStage = async (stage: PipelineStage, opts?: { auto?: boolean }) => {
     setRetryingStage(stage);
     try {
       const { error } = await supabase.functions.invoke("run-review-pipeline", {
         body: { plan_review_id: planReviewId, stage },
       });
       if (error) throw error;
-      toast.success(`Retrying "${FRIENDLY_LABELS[stage]}"…`);
+      if (opts?.auto) {
+        toast.warning(`"${FRIENDLY_LABELS[stage]}" stalled — auto-restarting…`, {
+          description: "The worker stopped responding after 90s. Nudging it with a fresh attempt.",
+        });
+      } else {
+        toast.success(`Retrying "${FRIENDLY_LABELS[stage]}"…`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Retry failed");
     } finally {
       setRetryingStage(null);
     }
   };
+
+  // Auto-retry watcher: any visible stage that's been `running` past the stuck
+  // threshold gets one nudge per attempt, capped at 2 auto-retries per stage.
+  // `prepare_pages` is the most common offender but the rule applies broadly.
+  useEffect(() => {
+    for (const row of rows) {
+      const stage = row.stage as PipelineStage;
+      if (!VISIBLE_STAGES.includes(stage)) continue;
+      if (row.status !== "running" || !row.started_at) continue;
+
+      const startedAtMs = new Date(row.started_at).getTime();
+      if (Date.now() - startedAtMs <= STUCK_THRESHOLD_MS) continue;
+
+      const log = autoRetryLog.current.get(stage) ?? { count: 0, lastStartedAt: null };
+      if (log.lastStartedAt === row.started_at) continue; // already retried this attempt
+      if (log.count >= 2) continue; // cap to avoid infinite loops on hard failures
+
+      autoRetryLog.current.set(stage, {
+        count: log.count + 1,
+        lastStartedAt: row.started_at,
+      });
+      void handleRetryStage(stage, { auto: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, planReviewId]);
 
   return (
     <ul className={cn("space-y-1.5", className)}>
@@ -160,7 +197,13 @@ export function PipelineProgressStepper({
                   <span className="ml-2 text-xs text-destructive/80">{row.error_message}</span>
                 ) : isStuck ? (
                   <span className="ml-2 text-xs text-destructive/80">
-                    Stuck for &gt;{Math.round(STUCK_THRESHOLD_MS / 1000)}s — worker may have died
+                    Stuck for &gt;{Math.round(STUCK_THRESHOLD_MS / 1000)}s
+                    {(() => {
+                      const c = autoRetryLog.current.get(s.key)?.count ?? 0;
+                      if (c === 0) return " — auto-restarting…";
+                      if (c < 2) return ` — auto-restarted ${c}× (will try again)`;
+                      return ` — auto-restarted ${c}× (max reached, retry manually)`;
+                    })()}
                   </span>
                 ) : status === "running" && hint ? (
                   <span className="ml-2 text-xs text-muted-foreground">{hint}…</span>
