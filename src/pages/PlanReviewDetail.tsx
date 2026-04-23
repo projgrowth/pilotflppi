@@ -139,11 +139,38 @@ export default function PlanReviewDetail() {
   const [showLintDialog, setShowLintDialog] = useState(false);
   const [aiRunning, setAiRunning] = useState(false);
   const [aiCompleteFlash, setAiCompleteFlash] = useState<number | null>(null);
+  const [reprepping, setReprepping] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{
     phase: string;
     prepared: number;
     expected: number;
   } | null>(null);
+
+  // Re-prepare pages in the browser using pdf.js — only path out of a
+  // needs_browser_rasterization failure since Edge can't reliably rasterize PDFs.
+  const handleReprepareInBrowser = useCallback(async () => {
+    if (!id || reprepping) return;
+    setReprepping(true);
+    const t = toast.loading("Re-preparing pages in your browser…");
+    try {
+      const result = await reprepareInBrowser(id);
+      toast.dismiss(t);
+      if (result.ok) {
+        toast.success(result.message);
+        queryClient.invalidateQueries({ queryKey: ["pipeline_status", id] });
+        queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+        queryClient.invalidateQueries({ queryKey: ["plan-review-page-asset-count", id] });
+      } else {
+        toast.error(result.message);
+      }
+      for (const w of result.warnings) toast.warning(w);
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e instanceof Error ? e.message : "Re-prepare failed");
+    } finally {
+      setReprepping(false);
+    }
+  }, [id, reprepping, queryClient]);
   const letterHydratedRef = useRef<string | null>(null);
 
   // Autosave the comment letter to the review row, debounced.
