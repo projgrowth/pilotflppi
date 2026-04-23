@@ -173,6 +173,21 @@ export default function ReviewDashboard() {
     [pipeRows],
   );
 
+  // Detect the needs-browser-rasterization condition so the page header can
+  // expose a persistent recovery button (the toast is easy to miss/dismiss).
+  const preparePagesErrored = useMemo(() => {
+    const row = pipeRows.find((r) => r.stage === "prepare_pages");
+    if (!row || row.status !== "error") return false;
+    const meta = (row as unknown as { metadata?: { error_class?: string } } | undefined)
+      ?.metadata;
+    const msg = (row.error_message ?? "").toLowerCase();
+    return (
+      meta?.error_class === "needs_browser_rasterization" ||
+      msg.includes("re-prepare") ||
+      msg.includes("haven't been prepared")
+    );
+  }, [pipeRows]);
+
   const status = useMemo(() => determineReviewStatus(defs), [defs]);
   const jurisdictionMismatch =
     !!dna &&
