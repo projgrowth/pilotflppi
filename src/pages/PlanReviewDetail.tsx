@@ -135,7 +135,7 @@ export default function PlanReviewDetail() {
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [repositioningIndex, setRepositioningIndex] = useState<number | null>(null);
-  const [showShortcuts, setShowShortcuts] = useState(false);
+  // showShortcuts removed — workspace shortcuts surface via the dashboard's TriageShortcutsOverlay.
   const [lintIssues, setLintIssues] = useState<LintIssue[]>([]);
   const [showLintDialog, setShowLintDialog] = useState(false);
   const [aiRunning, setAiRunning] = useState(false);
@@ -312,12 +312,15 @@ export default function PlanReviewDetail() {
   );
 
   // ── Reviewer keyboard shortcuts (global to the page) ───────────────────
-  // J / K — next / prev finding · R — reposition · S — resolved · X — deferred · O — open
+  // Unified contract from src/lib/review-shortcuts.ts. Workspace honors only
+  // the navigation subset (J/K) — disposition keys (C / Shift+R / M / S) live
+  // on the dashboard's triage controller. Bare R/X/O are intentionally unbound:
+  // the legacy reposition / deferred / open shortcuts no longer have v2
+  // semantics and were a source of accidental writes.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isTypingTarget(e.target)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       if (findings.length === 0) return;
 
       const cur = activeFindingIndex;
@@ -334,51 +337,11 @@ export default function PlanReviewDetail() {
           setActiveFindingIndex(cur === null ? 0 : Math.max(0, cur - 1));
           break;
         }
-        case "r": {
-          if (cur !== null && findings[cur]?.markup) {
-            e.preventDefault();
-            setRepositioningIndex(cur);
-          }
-          break;
-        }
-        case "s": {
-          if (cur !== null) {
-            e.preventDefault();
-            updateFindingStatus(findings[cur]?.finding_id ?? String(cur), "resolved");
-          }
-          break;
-        }
-        case "x": {
-          if (cur !== null) {
-            e.preventDefault();
-            updateFindingStatus(findings[cur]?.finding_id ?? String(cur), "deferred");
-          }
-          break;
-        }
-        case "o": {
-          if (cur !== null) {
-            e.preventDefault();
-            updateFindingStatus(findings[cur]?.finding_id ?? String(cur), "open");
-          }
-          break;
-        }
-        case "?": {
-          e.preventDefault();
-          setShowShortcuts((s) => !s);
-          break;
-        }
-        case "escape": {
-          if (showShortcuts) {
-            e.preventDefault();
-            setShowShortcuts(false);
-          }
-          break;
-        }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activeFindingIndex, findings, updateFindingStatus, showShortcuts]);
+  }, [activeFindingIndex, findings]);
 
   // ── Filters & round-diff (must run unconditionally — hook order rule) ──
   // We compute these BEFORE any early-return guards so React always sees the
