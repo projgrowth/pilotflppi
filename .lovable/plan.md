@@ -1,78 +1,175 @@
 
+## Simplify the review pipeline into a fast, precise “Core Review” path
 
-## Other things that can prevent plan-review upload + analysis from working
+### What to strip down
 
-You've focused on the `prepare_pages` CPU crash. The DB confirms it's still failing: latest run at 13:10:47 marked `prepare_pages: running`, `CPU Time exceeded` 4 minutes later, and `plan_review_page_assets` has **zero rows for that review**. The JPEG/chunk-8 fix isn't enough on its own. Here are the remaining issues that can independently break upload + review.
+The current flow is doing too many sequential AI passes after upload, and two of them are hidden from the stepper:
 
-### 1. MuPDF WASM cold-load itself is the real CPU killer (highest priority)
+```text
+upload
+prepare_pages
+sheet_map
+dna_extract
+discipline_review
+verify
+dedupe
+ground_citations
+cross_check      <- hidden in current stepper
+deferred_scope   <- hidden in current stepper
+prioritize
+complete
+```
 
-`import * as mupdf from "npm:mupdf@1.3.0"` lazily instantiates a ~10 MB WASM module the first time `Document.openDocument` is called. That instantiation alone burns ~1.5–2 s of CPU per cold worker, before any page is rendered. With each `prepare_pages` chunk getting a fresh worker, **every chunk pays the WASM cold-start tax**, and the worker dies before producing a single manifest row.
+That creates two problems:
+1. It feels like the system is “working forever” even when visible steps look done.
+2. Precision work is being spread across too many stages, so latency and failure surface area are high.
 
-Fix options (any one will work; first is easiest):
-- **Drop `RASTERIZE_CHUNK` to 4** so the first chunk fits inside the budget even with the WASM cold-start.
-- **Move the `mupdf` import to dynamic `await import("npm:mupdf@1.3.0")` inside `rasterizeNextChunk`** and add a top-of-function `EdgeRuntime.userWorkerEvents`-style budget guard so we abort cleanly with a "needs another chunk" return instead of a hard kill.
-- **Skip MuPDF entirely on the first chunk**: read just `pdfBlob.arrayBuffer().byteLength` to confirm the file is reachable, write one placeholder manifest row marking the source as "in-progress", and self-invoke for the second chunk where MuPDF actually loads.
+### Proposed simplification
 
-### 2. The launch flow is not idempotent — a 5-min worker death leaves the review unrecoverable from the UI
+#### 1. Make the default pipeline “Core Review” only
+Keep only the stages that generate the main review accurately:
 
-`NewPlanReviewWizard.handleLaunch` invokes the pipeline once via `supabase.functions.invoke(...)` and then closes. There is no way for the UI to:
-- detect that a stage has been `running` for >2 minutes and is actually dead,
-- or restart `prepare_pages` from where it left off,
-- or surface the failure to the user beyond the realtime stepper showing a stuck spinner.
+```text
+upload
+pages_ready
+sheet_map
+dna_extract
+discipline_review
+dedupe
+complete
+```
 
-Symptom from the user's perspective: "preparing pages forever, no error, no retry button."
+Implementation intent:
+- `upload` = validate files exist.
+- `pages_ready` = client-rasterized pages already uploaded; no server raster loop in the default path.
+- `sheet_map` = keep.
+- `dna_extract` = keep.
+- `discipline_review` = keep as the main precision stage.
+- `dedupe` = keep because it is deterministic cleanup.
+- `complete` = keep for comment-letter output.
 
-Fix:
-- In `PipelineProgressStepper`, if any stage has `status='running'` with `started_at` older than 90 s, show a **Retry stage** button.
-- Wire it to call `run-review-pipeline` with `{ plan_review_id, stage: 'prepare_pages' }` to nudge a fresh worker.
+#### 2. Move the expensive “QA / enrichment” stages out of the default run
+Remove these from the automatic first pass:
+- `verify`
+- `ground_citations`
+- `cross_check`
+- `deferred_scope`
+- `prioritize`
 
-### 3. Client-side AI extraction during upload can hang the wizard before files are even uploaded
+Instead, expose them as a secondary action:
+- “Run Deep QA”
+- or “Enrich findings”
 
-`extractProjectInfo` (Step 1 → Step 2) calls `renderTitleBlock` (PDF.js in the browser) and then `callAI({ action: 'extract_project_info' })` against the `ai` edge function. If `ai` is down, slow, or returns malformed JSON, the user is stuck on Step 1 with an indefinite spinner — they think "upload is broken" when in fact it's the AI extraction.
+That way the user gets results fast first, then can opt into heavier validation only when needed.
 
-Fix:
-- Add a 20 s timeout around `callAI` and on timeout fall through to `setStep(2)` with empty fields and a toast: "AI extraction unavailable, please fill in manually."
-- The **Skip extraction** button already exists but isn't visible enough; promote it.
+### Why this keeps precision
 
-### 4. No file-count / total-size guardrail
+Most of the actual finding quality comes from:
+- correct page assets,
+- correct sheet routing,
+- correct project DNA,
+- disciplined sheet-by-sheet review.
 
-`handleFileUpload` enforces 50 MB per file but allows unlimited files. Two 50 MB PDFs at 80 pages each = 160 pages × ~110 DPI JPEGs = ~50 chunks × WASM cold-start ≈ guaranteed multi-hour run even after the CPU fix.
+Those are already concentrated in:
+- `sheet_map`
+- `dna_extract`
+- `discipline_review`
 
-Fix:
-- Cap **total upload size at 80 MB** and **total page count at 120** across all files, validated client-side in `handleFileUpload` before adding to `uploadedFiles`. Show a clear error if exceeded.
+The later stages mostly:
+- re-audit findings,
+- enrich citations,
+- look for cross-sheet mismatches,
+- detect deferred scope,
+- reprioritize.
 
-### 5. The dispatcher's parallel-fork branch can double-bill CPU
+They can improve confidence, but they are not required to get a solid first-pass review. To preserve precision after stripping stages:
+- tighten `discipline_review` prompts,
+- keep evidence-only findings,
+- keep `requires_human_review` when evidence is weak,
+- optionally upgrade just the core discipline pass to a stronger model since there will be fewer total AI calls.
 
-In the `prepare_pages` branch of `runOneStage` (lines ~3241–3266), if a review has 2+ PDFs and the current worker has no `targetSource`, it fires **two** `scheduleNextStage` calls in parallel. With WASM cold-start being the dominant cost, both forked workers pay it independently and are more likely to both crash than to finish. Currently the user has only 1 PDF so this isn't biting yet, but it will.
+### Additional simplifications to reduce churn
 
-Fix:
-- Disable the parallel fork until single-PDF prepare is reliable. Always schedule exactly one next worker.
+#### 3. Remove server-side `prepare_pages` fallback from the default path
+The upload wizard already pre-rasterizes pages in the browser and inserts `plan_review_page_assets`.
 
-### 6. The wizard's "fire-and-forget" pipeline call hides startup errors
+So the default pipeline should:
+- trust pre-rasterized assets,
+- verify manifest completeness,
+- fail fast if they are missing,
+- not fall back to MuPDF chunking unless explicitly running a rescue path.
 
-`invokePipeline` is called with `.catch()` only after `setStep(3)`. If the function returns a 401/500 (e.g. JWT issue, missing service role), the user sees the stepper sitting at "Pending" forever with no toast.
+This removes the most failure-prone part of the system.
 
-Fix:
-- `await` the invoke, surface non-202 responses as `pipelineError`, and only advance to Step 3 once the function returns 202.
+#### 4. Stop creating “no sheets found” pseudo-deficiencies for absent disciplines
+`discipline_review` currently loops through all disciplines and inserts human-review items when no sheets are routed.
 
-### 7. Edge function CORS allow-list omits two headers Supabase JS now sends
+Simplify that to:
+- run only on disciplines that actually have mapped sheets,
+- optionally keep a lightweight warning in stage metadata instead of inserting a deficiency row.
 
-The current `Access-Control-Allow-Headers` on `run-review-pipeline` lists `x-supabase-client-platform` etc. but does not include `x-supabase-api-version`, which newer `@supabase/supabase-js` releases add. Browsers will silently drop the preflight and the user sees a generic "Edge Function returned a non-2xx status code." Add it.
+That reduces noise and DB churn without hurting review quality.
 
----
+#### 5. Align the UI to the actual executed stages
+Right now hidden backend stages make the dashboard feel stalled.
 
-### Recommended order of attack
+Update the stepper so it either:
+- shows only the simplified core stages, or
+- separates “Core Review” and “Deep QA” into distinct sections.
 
-1. **#1** — drop `RASTERIZE_CHUNK` to 4 and confirm the first chunk completes (one-line change, immediate signal).
-2. **#2** — add the 90-second "stuck stage" detector + Retry button so the user is never stranded again.
-3. **#4** — add total-size and total-page guardrails to upload.
-4. **#3** — add timeout/skip on AI extraction so upload can't be blocked by `ai`.
-5. **#6, #7** — small reliability cleanups.
-6. **#5** — disable the multi-PDF parallel fork until #1 is proven stable.
+### Files to change
 
-### Files that would change
+#### `supabase/functions/run-review-pipeline/index.ts`
+- Add a pipeline mode, e.g. `mode: "core" | "deep"`, defaulting to `"core"`.
+- Reduce the default stage order to the core set.
+- Convert `prepare_pages` into a manifest-validation / fast-pass stage for pre-rasterized uploads.
+- Remove automatic scheduling of `verify`, `ground_citations`, `cross_check`, `deferred_scope`, and `prioritize` from the default chain.
+- Change `discipline_review` to run only on disciplines with routed sheets.
+- Keep `dedupe` and `complete` in the default path.
+- Keep the stripped stages callable via an explicit deep-QA trigger.
 
-- `supabase/functions/run-review-pipeline/index.ts` — `RASTERIZE_CHUNK`, dispatcher fork branch, CORS allow-list.
-- `src/components/NewPlanReviewWizard.tsx` — upload size/page caps, AI extraction timeout, awaited invoke.
-- `src/components/plan-review/PipelineProgressStepper.tsx` — stuck-stage detector + Retry button calling `run-review-pipeline` with explicit `stage`.
+#### `src/components/NewPlanReviewWizard.tsx`
+- Launch the pipeline in `core` mode by default.
+- Fail early if the expected pre-rasterized page count does not match what was registered.
+- Update user messaging so the first pass is positioned as “core analysis.”
 
+#### `src/hooks/useReviewDashboard.ts`
+- Update the canonical stage list for the default mode.
+- If deep QA remains available, add a second stage set or metadata flag so the UI can distinguish it cleanly.
+
+#### `src/components/plan-review/PipelineProgressStepper.tsx`
+- Show only the simplified default stages.
+- Remove the confusing hidden-work gap.
+- If deep QA is added later, present it as a separate optional sequence rather than silent continuation.
+
+#### `src/pages/ReviewDashboard.tsx`
+- Add a “Run Deep QA” action after core review completes.
+- Keep the existing rerun action for full reruns, but default it to core mode.
+
+### Expected result
+
+- Much shorter time-to-first-results.
+- No “it keeps working forever” feeling from hidden post-processing.
+- Fewer background retries and fewer failure points.
+- Better user trust because the UI matches what is actually happening.
+- Precision stays high because the core evidence-generation path remains intact.
+
+### Technical details
+
+#### New default pipeline
+```text
+Core Review:
+upload -> pages_ready -> sheet_map -> dna_extract -> discipline_review -> dedupe -> complete
+```
+
+#### Optional second pass
+```text
+Deep QA:
+verify -> ground_citations -> cross_check -> deferred_scope -> prioritize
+```
+
+#### Precision guardrails to keep
+- Require quoted evidence in findings.
+- Keep human-review escalation for weak/uncertain findings.
+- Keep deterministic dedupe.
+- Prefer stronger model quality in `discipline_review` if total stage count is reduced.
