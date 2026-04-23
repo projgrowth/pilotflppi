@@ -3568,6 +3568,18 @@ Deno.serve(async (req) => {
     }
     const firmId = (pr as { firm_id: string | null }).firm_id;
 
+    // Seed cost-telemetry context for this request. Individual stages can
+    // refine via withCostCtx() to add discipline / chunk attribution.
+    CURRENT_COST_CTX = {
+      admin,
+      planReviewId: plan_review_id,
+      firmId,
+      stage: requestedStage ?? null,
+      discipline: null,
+      chunk: null,
+    };
+
+
     // Resolve which single stage this invocation runs.
     // - First call (no `stage`, no `start_from`): seed pending rows for the
     //   active mode's chain and run its first stage.
