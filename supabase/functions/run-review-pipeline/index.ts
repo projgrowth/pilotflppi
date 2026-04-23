@@ -589,56 +589,62 @@ async function stageUpload(
 }
 
 /**
- * Rasterizes the next chunk of pages for this review. If more chunks remain,
- * returns metadata signaling the dispatcher to schedule another `prepare_pages`
- * invocation instead of advancing to `sheet_map`.
+ * Verify-only `prepare_pages` stage.
+ *
+ * The browser (pdf.js in `uploadPlanReviewFiles` / `reprepareInBrowser`) is
+ * the ONLY place that rasterizes plan PDFs into per-page JPEGs. This stage
+ * just confirms the manifest exists and at least one asset is reachable;
+ * everything else throws NEEDS_BROWSER_RASTERIZATION so the dashboard can
+ * surface a "Re-prepare in browser" CTA.
+ *
+ * Cost budget: ~50ms — one count(*), one signed URL, no MuPDF, no downloads.
  */
 async function stagePreparePages(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
-  firmId: string | null,
-  targetSource?: string | null,
+  _firmId: string | null,
 ) {
-  const { data: review } = await admin
-    .from("plan_reviews")
-    .select("ai_run_progress")
-    .eq("id", planReviewId)
-    .maybeSingle();
-  const progress = (review as { ai_run_progress?: Record<string, unknown> | null } | null)?.ai_run_progress ?? {};
-  const expectedPreparedPages =
-    typeof progress.pre_rasterized_pages === "number" ? progress.pre_rasterized_pages : 0;
-  const { count: existingPreparedPages } = await admin
+  const { count: readyCount } = await admin
     .from("plan_review_page_assets")
     .select("id", { count: "exact", head: true })
     .eq("plan_review_id", planReviewId)
     .eq("status", "ready");
+  const prepared = readyCount ?? 0;
 
-  if (
-    progress.pre_rasterized === true &&
-    expectedPreparedPages > 0 &&
-    (existingPreparedPages ?? 0) >= expectedPreparedPages
-  ) {
-    _pageManifestCache.delete(planReviewId);
-    return {
-      rasterized: 0,
-      source: null,
-      target_source: targetSource ?? null,
-      remaining_sources: [],
-      needs_more_chunks: false,
-      pre_rasterized: true,
-      prepared_pages: existingPreparedPages ?? 0,
-    };
+  if (prepared <= 0) {
+    throw new Error(
+      `${NEEDS_BROWSER_RASTERIZATION}: no page assets in manifest for plan_review ${planReviewId}`,
+    );
   }
 
-  const result = await rasterizeNextChunk(admin, planReviewId, firmId, targetSource);
-  // Clear the per-invocation cache so the next worker re-reads from DB.
+  // Spot-check the first manifest row resolves to a signable storage object.
+  // If it doesn't, the manifest is stale (storage cleared, asset paths wrong)
+  // and the browser needs to re-rasterize.
+  const { data: firstRow } = await admin
+    .from("plan_review_page_assets")
+    .select("storage_path")
+    .eq("plan_review_id", planReviewId)
+    .eq("status", "ready")
+    .order("page_index", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  const storagePath = (firstRow as { storage_path?: string } | null)?.storage_path;
+  if (!storagePath) {
+    throw new Error(`${NEEDS_BROWSER_RASTERIZATION}: manifest row missing storage_path`);
+  }
+  const { data: signed, error: signErr } = await admin.storage
+    .from("documents")
+    .createSignedUrl(storagePath, 60);
+  if (signErr || !signed) {
+    throw new Error(
+      `${NEEDS_BROWSER_RASTERIZATION}: cannot sign first manifest asset (${storagePath}): ${signErr?.message ?? "unknown"}`,
+    );
+  }
+
   _pageManifestCache.delete(planReviewId);
   return {
-    rasterized: result.rasterized,
-    source: result.source ?? null,
-    target_source: targetSource ?? null,
-    remaining_sources: result.remaining_sources ?? [],
-    needs_more_chunks: !result.done,
+    prepared_pages: prepared,
+    pre_rasterized: true,
   };
 }
 
@@ -2882,7 +2888,7 @@ async function stageGroundCitations(
 function scheduleNextStage(
   planReviewId: string,
   nextStage: Stage,
-  extra?: { target_source?: string | null; mode?: PipelineMode },
+  extra?: { mode?: PipelineMode },
 ) {
   const url = `${SUPABASE_URL}/functions/v1/run-review-pipeline`;
   // Don't await — return immediately and let waitUntil keep this socket alive
@@ -2897,7 +2903,6 @@ function scheduleNextStage(
     body: JSON.stringify({
       plan_review_id: planReviewId,
       stage: nextStage,
-      target_source: extra?.target_source ?? null,
       mode: extra?.mode ?? "core",
       _internal: true,
     }),
@@ -3012,34 +3017,9 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── prepare_pages watchdog (per planReviewId, scoped) ─────────────────
-    // If this review's prepare_pages row is `running` but hasn't been touched
-    // in PREPARE_STALE_RUNNING_MS, treat it as dead. Two outcomes:
-    //   - If we're already trying to run prepare_pages → fall through and
-    //     resume the chunk loop (the row will be updated by setStage(running)).
-    //   - If we're trying to run any OTHER stage → redirect this invocation
-    //     to prepare_pages so the dead worker gets revived. The other stage
-    //     will be re-scheduled when prepare_pages finishes.
-    {
-      const { data: prepareRow } = await admin
-        .from("review_pipeline_status")
-        .select("status, updated_at, metadata")
-        .eq("plan_review_id", plan_review_id)
-        .eq("stage", "prepare_pages")
-        .maybeSingle();
-      const r = prepareRow as
-        | { status?: string; updated_at?: string; metadata?: Record<string, unknown> | null }
-        | null;
-      const ageMs = r?.updated_at ? Date.now() - new Date(r.updated_at).getTime() : 0;
-      const isStaleRunning = r?.status === "running" && ageMs > PREPARE_STALE_RUNNING_MS;
-      if (isStaleRunning && stageToRun !== "prepare_pages") {
-        console.log(
-          `[watchdog] prepare_pages stale-running (${Math.round(ageMs / 1000)}s) — redirecting ${stageToRun} → prepare_pages`,
-        );
-        stageToRun = "prepare_pages";
-        await setStage(admin, plan_review_id, firmId, "prepare_pages", { status: "pending" });
-      }
-    }
+    // prepare_pages watchdog removed: the stage is now O(1) (verify the
+    // manifest, sign one URL) so it cannot get "stuck running". If the row
+    // is in `running` state, the worker is genuinely doing the verify call.
 
     const stageImpls: Record<Stage, () => Promise<Record<string, unknown>>> = {
       upload: () => stageUpload(admin, plan_review_id),
@@ -3092,33 +3072,8 @@ Deno.serve(async (req) => {
       try {
         const meta = await withRetry(() => stageImpls[stageToRun](), `stage:${stageToRun}`);
 
-        // Special case: prepare_pages may need to loop itself for more chunks
-        // before advancing to sheet_map. Schedule exactly one follow-up worker
-        // AFTER the current chunk's manifest has been written.
-        if (stageToRun === "prepare_pages") {
-          const m = meta as {
-            needs_more_chunks?: boolean;
-            remaining_sources?: string[];
-            source?: string | null;
-            target_source?: string | null;
-            prepare_attempts?: number;
-          };
-          if (m.needs_more_chunks) {
-            // Reset the attempt counter on success — failures only accumulate
-            // when a chunk genuinely throws.
-            await setStage(admin, plan_review_id, firmId, stageToRun, {
-              status: "running",
-              metadata: { ...meta, prepare_attempts: 0 },
-            });
-            scheduleNextStage(plan_review_id, "prepare_pages", {
-              target_source:
-                (m.remaining_sources && m.remaining_sources[0]) ?? targetSource,
-              mode,
-            });
-            return;
-          }
-          // Done with prepare — fall through to mark complete & advance.
-        }
+        // prepare_pages is now a single O(1) verify call — no chunk loop, no
+        // self-rescheduling. Falls straight through to the standard advance.
 
         await setStage(admin, plan_review_id, firmId, stageToRun, {
           status: "complete",
@@ -3162,45 +3117,27 @@ Deno.serve(async (req) => {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
 
-        // BOUNDED RETRY for prepare_pages: CPU-kills look like throws here.
-        // Re-mark `running` (not error) and schedule one more attempt with a
-        // small delay, capped at 8 attempts. This keeps the chunk loop alive
-        // through transient cold-load CPU exhaustion.
+        // prepare_pages is now verify-only. Any throw here means the manifest
+        // is missing/corrupt — only the BROWSER can rasterize the source PDFs
+        // (Supabase Edge can't reliably finish even one page in its CPU
+        // budget). Surface a clear error class + log row so the dashboard can
+        // show a one-click "Re-prepare in browser" CTA.
         if (stageToRun === "prepare_pages") {
-          const { data: existingRow } = await admin
-            .from("review_pipeline_status")
-            .select("metadata")
-            .eq("plan_review_id", plan_review_id)
-            .eq("stage", "prepare_pages")
-            .maybeSingle();
-          const existingMeta =
-            (existingRow as { metadata?: Record<string, unknown> | null } | null)?.metadata ??
-            {};
-          const attempts =
-            typeof existingMeta.prepare_attempts === "number"
-              ? existingMeta.prepare_attempts + 1
-              : 1;
-          if (attempts <= 8) {
-            console.warn(
-              `[prepare_pages] attempt ${attempts}/8 failed (${message}) — re-scheduling in 2s`,
-            );
-            await setStage(admin, plan_review_id, firmId, "prepare_pages", {
-              status: "running",
-              metadata: { ...existingMeta, prepare_attempts: attempts, last_error: message },
-            });
-            // 2s delay before re-scheduling so a hot CPU limit can drain.
-            setTimeout(() => {
-              scheduleNextStage(plan_review_id, "prepare_pages", {
-                target_source: targetSource,
-                mode,
-              });
-            }, 2000);
-            return;
-          }
+          const isNeedsBrowser = message.includes(NEEDS_BROWSER_RASTERIZATION);
+          const userMessage = isNeedsBrowser
+            ? "This review's pages haven't been prepared. Click \"Re-prepare in browser\" on the dashboard to render them locally."
+            : `prepare_pages failed: ${message}`;
+          await recordPipelineError(admin, {
+            planReviewId: plan_review_id,
+            firmId,
+            stage: "prepare_pages",
+            errorClass: isNeedsBrowser ? NEEDS_BROWSER_RASTERIZATION : "prepare_pages_failed",
+            errorMessage: message,
+          });
           await setStage(admin, plan_review_id, firmId, "prepare_pages", {
             status: "error",
-            error_message: `prepare_pages exhausted ${attempts - 1} retries: ${message}`,
-            metadata: { ...existingMeta, prepare_attempts: attempts, last_error: message },
+            error_message: userMessage,
+            metadata: { error_class: isNeedsBrowser ? NEEDS_BROWSER_RASTERIZATION : "prepare_pages_failed" },
           });
           return;
         }
