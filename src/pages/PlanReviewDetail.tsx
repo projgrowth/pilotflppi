@@ -633,6 +633,7 @@ export default function PlanReviewDetail() {
           dismissible via localStorage. */}
       {(() => {
         const progress = ((review as unknown as { ai_run_progress?: Record<string, unknown> }).ai_run_progress ?? {}) as Record<string, unknown>;
+        const status = (review as unknown as { ai_check_status?: string }).ai_check_status ?? null;
         return (
           <div className="shrink-0 px-4 pt-2 empty:hidden">
             <StuckRecoveryBanner
@@ -640,6 +641,8 @@ export default function PlanReviewDetail() {
               autoRecoveredAt={typeof progress.auto_recovered_at === "string" ? progress.auto_recovered_at : null}
               recoveredFromStage={typeof progress.last_stage === "string" ? progress.last_stage : null}
               recoveryCount={typeof progress.auto_recovery_count === "number" ? progress.auto_recovery_count : undefined}
+              aiCheckStatus={status}
+              failureReason={typeof progress.failure_reason === "string" ? progress.failure_reason : null}
             />
           </div>
         );
