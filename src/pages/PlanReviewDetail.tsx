@@ -198,6 +198,7 @@ export default function PlanReviewDetail() {
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || !review) return;
     setUploading(true);
+    setUploadProgress({ phase: "Starting…", prepared: 0, expected: 0 });
     try {
       const { uploadPlanReviewFiles } = await import("@/lib/plan-review-upload");
       const { count: existingPageCount } = await supabase
@@ -212,13 +213,19 @@ export default function PlanReviewDetail() {
         existingPageCount: existingPageCount ?? 0,
         files: Array.from(files),
         userId: user?.id ?? null,
+        onProgress: (p) => setUploadProgress(p),
       });
 
       // Surface every meaningful issue from the upload pipeline. The previous
       // code swallowed pipeline-invoke failures with a console.warn, so the
       // user thought the upload had succeeded when nothing was running.
       for (const w of result.warnings) toast.warning(w);
-      if (!result.pipelineStarted) {
+      if (result.partialRasterize) {
+        toast.error(
+          `Only ${result.pageAssetCount} of ${result.expectedPages} pages prepared. Click "Prepare pages now" to retry the gaps before analyzing.`,
+          { duration: 8000 },
+        );
+      } else if (!result.pipelineStarted) {
         toast.error("Pipeline did not start — click Re-run on the dashboard.", {
           action: {
             label: "Open dashboard",
@@ -234,6 +241,7 @@ export default function PlanReviewDetail() {
       }
 
       queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+      queryClient.invalidateQueries({ queryKey: ["plan-review-page-asset-count", id] });
       hasAutoRendered.current = false;
       resetPages();
       setUploadSuccess(true);
@@ -242,8 +250,24 @@ export default function PlanReviewDetail() {
       toast.error(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   };
+
+  // Block tab close while upload/rasterization is in flight — closing now
+  // would leave the server holding a PDF with no page assets, which used to
+  // require manual `reprepareInBrowser` recovery 20 minutes later.
+  useEffect(() => {
+    if (!uploading) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue =
+        "Pages are still being prepared. Closing now will require you to re-open the project to finish.";
+      return e.returnValue;
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [uploading]);
 
   const createNewRound = () => {
     // New rounds belong on the v2 dashboard so deficiencies_v2 carries forward
