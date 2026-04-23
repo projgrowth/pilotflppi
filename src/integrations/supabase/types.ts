@@ -1268,6 +1268,8 @@ export type Database = {
       }
       plan_review_page_assets: {
         Row: {
+          cached_signed_url: string | null
+          cached_until: string | null
           created_at: string
           firm_id: string | null
           id: string
@@ -1276,8 +1278,11 @@ export type Database = {
           source_file_path: string
           status: string
           storage_path: string
+          vision_storage_path: string | null
         }
         Insert: {
+          cached_signed_url?: string | null
+          cached_until?: string | null
           created_at?: string
           firm_id?: string | null
           id?: string
@@ -1286,8 +1291,11 @@ export type Database = {
           source_file_path: string
           status?: string
           storage_path: string
+          vision_storage_path?: string | null
         }
         Update: {
+          cached_signed_url?: string | null
+          cached_until?: string | null
           created_at?: string
           firm_id?: string | null
           id?: string
@@ -1296,6 +1304,7 @@ export type Database = {
           source_file_path?: string
           status?: string
           storage_path?: string
+          vision_storage_path?: string | null
         }
         Relationships: [
           {
@@ -1624,6 +1633,44 @@ export type Database = {
           version?: number
         }
         Relationships: []
+      }
+      review_coverage: {
+        Row: {
+          by_discipline: Json
+          capped_at: number | null
+          firm_id: string | null
+          plan_review_id: string
+          sheets_reviewed: number
+          sheets_total: number
+          updated_at: string
+        }
+        Insert: {
+          by_discipline?: Json
+          capped_at?: number | null
+          firm_id?: string | null
+          plan_review_id: string
+          sheets_reviewed?: number
+          sheets_total?: number
+          updated_at?: string
+        }
+        Update: {
+          by_discipline?: Json
+          capped_at?: number | null
+          firm_id?: string | null
+          plan_review_id?: string
+          sheets_reviewed?: number
+          sheets_total?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "review_coverage_plan_review_id_fkey"
+            columns: ["plan_review_id"]
+            isOneToOne: true
+            referencedRelation: "plan_reviews"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       review_feedback: {
         Row: {
