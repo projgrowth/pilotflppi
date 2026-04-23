@@ -1,78 +1,72 @@
 
 
-## Add a global "Pipeline Activity" screen with one-click cancel
+## Why the latest upload pulled nothing
 
-### What you'll get
+I traced the failing run (`26b31242…`) end-to-end:
 
-A new page at `/pipelines` (linked from the sidebar as **Pipeline Activity**) that lists every plan review with active or recent pipeline work — across all your projects — with a **Cancel** button on each row. No more hunting for which dashboard is still grinding.
+1. `upload` stage finished cleanly at 14:03:29.
+2. `prepare_pages` started at 14:03:40 and is **still `running` 11 minutes later** with only **1 page** in the manifest.
+3. The edge function logs show one `booted` event at 14:03:24 and then nothing — the worker died on the CPU limit mid-rasterization and never came back.
+4. Because `prepare_pages` is "fatal" in the dispatcher, the rest of the chain (`sheet_map`, `dna_extract`, `discipline_review`, `dedupe`) never ran. No DNA, no findings, nothing for the dashboard to show.
 
-### What the screen shows
+### Root cause
 
-For each plan review that has any pipeline rows from the last 24h:
+The current `prepare_pages` design has two problems pulling against each other:
 
-```text
-┌─────────────────────────────────────────────────────────────────────┐
-│ Project name · Round 2          Mode: Core    [Open] [Cancel]      │
-│ 1234 Main St · Hillsborough                                         │
-│ ━━━━●━━━━○━━━━○━━━○━━━○━━━○                                          │
-│ upload  prepare  sheet  dna  disc  dedupe  complete                 │
-│ Currently: discipline_review · running 4m 12s                       │
-│ ⚠ Stuck >2 min — likely safe to cancel                              │
-└─────────────────────────────────────────────────────────────────────┘
-```
+1. **The "crash-resilient pre-schedule"** fires a *recovery* `prepare_pages` worker ~0s **before** the current worker starts rasterizing. Both workers race on chunk 0 of the same PDF:
+   - Both download the same 50-MB PDF.
+   - Both cold-load MuPDF WASM (~1.5s of pure CPU each).
+   - Both target page 0 (cold-start budget = 1 page).
+   - At least one dies on CPU before writing its manifest row.
+   - Neither worker ever schedules a **third** worker, because the recovery was pre-scheduled before the work even started — there's no recovery-for-the-recovery.
 
-Sections on the page:
-1. **Active now** — anything with a `running` or `pending` stage. Sorted by oldest start time so the most stuck ones float to the top.
-2. **Stuck (no progress >2 min)** — same rows, but flagged with an orange "Stuck" badge so you can spot them immediately.
-3. **Recently finished (last 24h)** — read-only history so you can confirm a cancel actually took effect.
+2. **`PREPARE_STALE_RUNNING_MS = 60_000` is defined but never read.** Nothing in the dispatcher actually takes over a stuck `running` row.
 
-Each row has:
-- Project name, address, round, and pipeline mode (Core / Deep).
-- Mini-stepper showing current stage.
-- Elapsed time on the current stage with a "Stuck" warning at >120s.
-- **Open** button → jumps to that review's dashboard.
-- **Cancel** button → stops the pipeline (only enabled when something is actually running/pending).
-- A **Cancel All** button at the top of the Active section for the nuclear option.
+Net effect: one CPU-kill on the very first chunk strands the whole pipeline. That's exactly what's in the database right now.
 
-### How cancel works
+This upload also went through the inline drop-zone (`PlanViewerPanel`), not the wizard, so the browser-side pre-rasterization that normally avoids server MuPDF was skipped — which is why the worker had to do the heaviest possible work (cold MuPDF + render + upload) on its own.
 
-Reuses the exact mechanism already in `ReviewDashboard.tsx`:
-1. Write `cancelled_at` into `plan_reviews.ai_run_progress` (the worker's circuit breaker).
-2. Mark every `running`/`pending` row in `review_pipeline_status` for that review as `error` with message `"Cancelled by user"` so the UI updates instantly.
-3. Toast confirmation; row re-renders as cancelled within ~1s thanks to the existing realtime subscription.
+## The fix — strip prepare_pages down to one honest path
 
-No edge function or DB changes — the cancel sentinel is already wired up end-to-end.
+### A. Edge function (`supabase/functions/run-review-pipeline/index.ts`)
 
-### Where it lives
+**Remove the racing recovery pre-schedule.** Each `prepare_pages` worker:
 
-- New sidebar entry **Pipeline Activity** with a `Activity` icon, placed right under **Plan Review** so it sits with the review workflow.
-- A small badge on the sidebar item showing the count of active pipelines (e.g. `Pipeline Activity · 3`) so you notice background work without opening the page.
-- Also surfaced as a compact **"3 pipelines running"** chip in the top of the existing Review list page, linking to `/pipelines`.
+1. Checks cancellation.
+2. Marks the stage `running` with `started_at = now()`.
+3. Rasterizes exactly **one** chunk (current `RASTERIZE_CHUNK_COLD_START = 1` first time, `RASTERIZE_CHUNK = 2` after).
+4. **Only after** the chunk's manifest rows are committed:
+   - If more chunks remain → schedule **one** next `prepare_pages` worker, leave row in `running` with updated `metadata.prepared_pages`.
+   - If done → mark `complete` and schedule `sheet_map`.
+5. If the worker throws, the row is left as-is (still `running`).
 
-### Cleanup of current zombie state
+**Add a real stale-row takeover** in the dispatcher entry path. When a `prepare_pages` invocation arrives and the existing row is `running` with `updated_at` older than `PREPARE_STALE_RUNNING_MS` (60s), treat it as dead and proceed — same chunk-of-one logic.
 
-Right now the DB has ~20 `pending` rows with `started_at = NULL` (orphans from earlier failed runs). The new page will:
-- Treat `pending` rows older than 10 minutes with no `started_at` as **orphaned** and show a "Clear orphaned" button that bulk-marks them as `error` with `"Orphaned — never started"`. One-click cleanup.
+**Add a single `prepare_pages` watchdog** at the top of every dispatcher invocation (cheap one-row query): if the review's `prepare_pages` row has been `running` >60s with no updated_at change AND the current call is for any other stage, redirect to `prepare_pages` to resume. This guarantees that even an orphaned upload eventually gets revived the next time anything pokes the function (cancel, manual re-run, even another review's call into the function — no, actually scoped per planReviewId so only its own invocations revive it).
 
-### Files to add / change
+**Stop classifying `prepare_pages` as fatal-on-error.** Instead, on a thrown error inside `runOneStage` for `prepare_pages`:
+   - If the manifest already has ≥1 ready page, mark the row `running` (not `error`) and re-schedule a single follow-up worker with a 2s delay. CPU-kills look like throws or worker death; both should auto-resume up to a small bounded number of times (track an attempt counter in `metadata.prepare_attempts`, cap at 8). After 8 attempts → mark `error` so the user is told plainly.
 
-**New**
-- `src/pages/PipelineActivity.tsx` — the new screen.
-- `src/hooks/useAllActivePipelines.ts` — query for all `review_pipeline_status` rows in the last 24h joined with `plan_reviews` + `projects`, plus a shared realtime subscription on the `review_pipeline_status` table firm-wide.
+### B. Front-end safety net
 
-**Edit**
-- `src/App.tsx` — register `/pipelines` route inside the `AppLayout` guard.
-- `src/components/AppSidebar.tsx` — add **Pipeline Activity** nav item with `Activity` icon and live count badge.
-- `src/pages/Review.tsx` — add the small "N pipelines running" chip linking to `/pipelines` (optional surface).
-- `src/pages/ReviewDashboard.tsx` — extract the existing `cancelPipeline` logic into a small shared helper (`src/lib/pipeline-cancel.ts`) so both the dashboard and the new page share one implementation.
+**`PlanViewerPanel` upload path** currently bypasses the wizard's browser-side rasterization. After the file finishes uploading and a plan_review row exists, kick off a lightweight browser-side rasterization (the same code the wizard uses) before invoking `run-review-pipeline`. When the user drops a file inline, they get the same fast path the wizard does.
 
-**No backend/edge changes** — the cancellation sentinel and worker behavior already work; we're just adding a centralized UI on top.
+If browser rasterization isn't available (no `window`, very large PDF), fall through to the edge function — but the edge function's chunked + watchdog loop will now actually finish.
 
-### Technical details
+### C. Cleanup of the current zombie
 
-- Query: `select * from review_pipeline_status where started_at > now() - interval '24 hours' or status in ('running','pending')` — cap to firm via existing RLS.
-- Realtime: one shared channel `pipeline-activity-all` filtered by `firm_id` (using existing `subscribeShared` helper).
-- Stuck threshold: `Date.now() - started_at > 120_000 && status === 'running'`.
-- Orphan threshold: `status === 'pending' && created_at < now() - 10min && started_at is null`.
-- Mode detection: read `plan_reviews.ai_run_progress.mode` (already written by the wizard / re-run buttons).
+The dashboard's "Pipeline Activity" page already has a "Resume" button. With the takeover logic above, clicking Resume on `26b31242…` will pick up at page 1 of the PDF and finish the prepare → sheet_map → dna → discipline → dedupe chain. No manual DB surgery needed.
+
+### Files changed
+
+- `supabase/functions/run-review-pipeline/index.ts` — remove pre-schedule race; add stale-row takeover; add per-review watchdog; bounded retry on prepare error; honest `metadata.prepare_attempts`.
+- `src/components/PlanViewerPanel.tsx` — wire browser-side pre-rasterization before invoking the pipeline (mirroring `NewPlanReviewWizard.tsx` lines around `pageAssetRows`).
+- `src/components/NewPlanReviewWizard.tsx` — extract its rasterize-and-upload-page-assets helper into `src/lib/pdf-utils.ts` (or a sibling) so the inline drop-zone can reuse it.
+
+### Outcome
+
+- One worker per chunk, no racing.
+- Stuck `running` rows get revived automatically within 60s of the next invocation.
+- Inline drag-drop uploads use the same browser-side pre-rasterization the wizard does, so the edge function's `prepare_pages` becomes a fast no-op for most uploads.
+- The current stuck review can be revived with one Resume click.
 
