@@ -727,6 +727,26 @@ async function stageUpload(
   return { file_count: data.length };
 }
 
+/**
+ * Rasterizes the next chunk of pages for this review. If more chunks remain,
+ * returns metadata signaling the dispatcher to schedule another `prepare_pages`
+ * invocation instead of advancing to `sheet_map`.
+ */
+async function stagePreparePages(
+  admin: ReturnType<typeof createClient>,
+  planReviewId: string,
+  firmId: string | null,
+) {
+  const result = await rasterizeNextChunk(admin, planReviewId, firmId);
+  // Clear the per-invocation cache so the next worker re-reads from DB.
+  _pageManifestCache.delete(planReviewId);
+  return {
+    rasterized: result.rasterized,
+    source: result.source ?? null,
+    needs_more_chunks: !result.done,
+  };
+}
+
 const SHEET_MAP_SCHEMA = {
   name: "submit_sheet_map",
   description:
