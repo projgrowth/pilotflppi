@@ -14,6 +14,7 @@ interface PipelineProgressStepperProps {
 // Stages we surface in the friendly stepper. Keeps "complete" as the terminator.
 const VISIBLE_STAGES: PipelineStage[] = [
   "upload",
+  "prepare_pages",
   "sheet_map",
   "dna_extract",
   "discipline_review",
@@ -26,6 +27,7 @@ const VISIBLE_STAGES: PipelineStage[] = [
 
 const FRIENDLY_LABELS: Record<PipelineStage, string> = {
   upload: "Upload",
+  prepare_pages: "Prepare pages",
   sheet_map: "Sheet map",
   dna_extract: "Project DNA",
   discipline_review: "Discipline review",
@@ -40,6 +42,7 @@ const FRIENDLY_LABELS: Record<PipelineStage, string> = {
 
 const FRIENDLY_HINTS: Partial<Record<PipelineStage, string>> = {
   upload: "Files received",
+  prepare_pages: "Rasterizing PDF pages in chunks",
   sheet_map: "Indexing sheets",
   dna_extract: "Reading title block & code data",
   discipline_review: "Architectural, structural, MEP, life safety…",
