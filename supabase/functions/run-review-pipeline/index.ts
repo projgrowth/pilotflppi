@@ -6,10 +6,6 @@
 // continues to the next stage where possible.
 
 import { createClient as _createClient } from "https://esm.sh/@supabase/supabase-js@2.74.0";
-// MuPDF.js (WASM) — used to rasterize uploaded PDFs into per-page PNGs so
-// Gemini vision can consume them. Gemini's image_url field rejects raw PDF
-// URLs ("Unsupported image format"), so this conversion is mandatory.
-import * as mupdf from "npm:mupdf@1.3.0";
 import { composeDisciplineSystemPrompt } from "./discipline-experts.ts";
 
 // Untyped client wrapper — the edge function does not have access to generated
@@ -259,6 +255,7 @@ function disciplineForSheetFallback(sheetRef: string): string | null {
 // stages instead of all at once.
 const RASTER_SCALE = 1.528; // ~110 DPI — small/medium PDFs
 const RASTER_SCALE_LARGE = 1.111; // ~80 DPI — used when a PDF has > LARGE_PDF_THRESHOLD pages
+const RASTER_SCALE_COLD = 0.833; // ~60 DPI — cold-start rescue mode for the very first chunk of a PDF
 const LARGE_PDF_THRESHOLD = 40;
 const MAX_PAGES_PER_PDF = 80;
 // JPEG quality used by asJPEG(). 75 is plenty for vision models reading
@@ -271,6 +268,7 @@ const RASTER_JPEG_QUALITY = 75;
 // cold workers; warm workers (rare) finish faster than the round-trip cost
 // of an extra invocation, so this is the right floor.
 const RASTERIZE_CHUNK = 4;
+const RASTERIZE_CHUNK_COLD_START = 1;
 // Parallel concurrency for storage uploads + manifest writes within a chunk.
 // MuPDF rasterization itself stays serial (single-threaded WASM).
 const RASTER_UPLOAD_CONCURRENCY = 6;
@@ -279,10 +277,20 @@ const RASTER_UPLOAD_CONCURRENCY = 6;
 const PAGE_ASSET_RE = /^p-\d{3,}\.(png|jpe?g)$/;
 const PAGE_ASSET_INDEX_RE = /p-(\d{3,})\.(png|jpe?g)$/;
 
+let mupdfModulePromise: Promise<any> | null = null;
+
+async function getMupdf() {
+  if (!mupdfModulePromise) {
+    mupdfModulePromise = import("npm:mupdf@1.3.0");
+  }
+  return await mupdfModulePromise;
+}
+
 async function rasterizePdfStreaming(
   pdfBytes: Uint8Array,
   onPage: (pageIndex: number, jpegBytes: Uint8Array) => Promise<void>,
 ): Promise<number> {
+  const mupdf = await getMupdf();
   const doc = mupdf.Document.openDocument(pdfBytes, "application/pdf");
   try {
     const pageCount = Math.min(doc.countPages(), MAX_PAGES_PER_PDF);
