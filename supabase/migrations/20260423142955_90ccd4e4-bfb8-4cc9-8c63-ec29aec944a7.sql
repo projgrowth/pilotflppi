@@ -1,0 +1,1 @@
+DROP POLICY IF EXISTS "Firm members insert pipeline_error_log" ON public.pipeline_error_log;
