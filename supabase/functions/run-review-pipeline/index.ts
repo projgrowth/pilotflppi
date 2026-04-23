@@ -3330,12 +3330,34 @@ Deno.serve(async (req) => {
         });
         return;
       }
+
+      // CRASH-RESILIENT PREPARE: pre-schedule the next prepare_pages worker
+      // BEFORE we start rasterizing. If the current worker dies on a CPU
+      // limit (MuPDF cold-load + render is right at the edge of the budget),
+      // the follow-up worker will arrive, see the manifest already has N
+      // pages, and either finish the remaining chunks or no-op into the
+      // next stage. Without this a single CPU-kill stranded `prepare_pages`
+      // forever in `running`.
+      let prepareRecoveryScheduled = false;
+      if (stageToRun === "prepare_pages") {
+        prepareRecoveryScheduled = true;
+        // Fire-and-forget — don't await. The recovery worker comes online
+        // ~1s later and is idempotent: if our chunk already finished, it
+        // just advances to sheet_map.
+        scheduleNextStage(plan_review_id, "prepare_pages", {
+          target_source: targetSource,
+          mode,
+        });
+      }
+
       await setStage(admin, plan_review_id, firmId, stageToRun, { status: "running" });
       try {
         const meta = await withRetry(() => stageImpls[stageToRun](), `stage:${stageToRun}`);
 
         // Special case: prepare_pages may need to loop itself for more chunks
-        // before advancing to sheet_map.
+        // before advancing to sheet_map. We already pre-scheduled a recovery
+        // worker above; only schedule an EXTRA worker if it would target a
+        // different PDF than the recovery covers.
         if (stageToRun === "prepare_pages") {
           const m = meta as {
             needs_more_chunks?: boolean;
@@ -3348,33 +3370,11 @@ Deno.serve(async (req) => {
               status: "running",
               metadata: meta,
             });
-
-            // Default: continue on the same PDF we just chunked (warm cache).
-            const justFinished = m.source ?? null;
-            const remaining = m.remaining_sources ?? [];
-
-            // Always single-track: schedule exactly one next worker. The
-            // multi-PDF parallel fork is disabled because each forked worker
-            // pays the full ~1.5–2s MuPDF WASM cold-start tax independently,
-            // making both more likely to OOM/CPU-kill than to finish. Re-enable
-            // only after single-PDF prepare is reliably stable.
-            const nextTarget =
-              justFinished && remaining.includes(justFinished)
-                ? justFinished
-                : remaining[0] ?? null;
-            if (await isCancelled()) {
-              await setStage(admin, plan_review_id, firmId, stageToRun, {
-                status: "error",
-                error_message: "Cancelled by user",
-              });
-              return;
-            }
-            scheduleNextStage(plan_review_id, "prepare_pages", {
-              target_source: nextTarget,
-              mode,
-            });
+            // The pre-scheduled recovery worker (with `targetSource`) will
+            // pick up where we left off. Don't double-schedule.
             return;
           }
+          // Done with prepare — fall through to mark complete & advance.
         }
 
         await setStage(admin, plan_review_id, firmId, stageToRun, {
