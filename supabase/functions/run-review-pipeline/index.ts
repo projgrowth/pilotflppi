@@ -33,6 +33,9 @@ type Stage =
   | "prioritize"
   | "complete";
 
+// Full canonical stage list (kept for backward-compat callers passing
+// `start_from`). Default execution uses CORE_STAGES; opt-in DEEP_STAGES
+// runs the heavier QA passes after core finishes.
 const STAGES: Stage[] = [
   "upload",
   "prepare_pages",
@@ -47,6 +50,39 @@ const STAGES: Stage[] = [
   "prioritize",
   "complete",
 ];
+
+// Core Review = the minimum precise pipeline. Fast time-to-results.
+// `prepare_pages` here is a manifest-validation fast-pass (the wizard
+// pre-rasterizes in the browser); it does NOT loop through MuPDF chunks
+// in the default path.
+const CORE_STAGES: Stage[] = [
+  "upload",
+  "prepare_pages",
+  "sheet_map",
+  "dna_extract",
+  "discipline_review",
+  "dedupe",
+  "complete",
+];
+
+// Deep QA = optional secondary pass. Runs only when explicitly invoked
+// with mode='deep'. Reuses existing core artifacts (deficiencies,
+// project_dna, sheet_coverage) — does not re-run discipline_review.
+const DEEP_STAGES: Stage[] = [
+  "verify",
+  "ground_citations",
+  "cross_check",
+  "deferred_scope",
+  "prioritize",
+];
+
+type PipelineMode = "core" | "deep" | "full";
+
+function stagesForMode(mode: PipelineMode): Stage[] {
+  if (mode === "deep") return DEEP_STAGES;
+  if (mode === "full") return STAGES;
+  return CORE_STAGES;
+}
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
