@@ -86,15 +86,21 @@ function MiniStepper({ activity }: { activity: ReviewActivity }) {
 function ActivityRow({
   activity,
   onCancel,
+  onResume,
   cancelling,
+  resuming,
 }: {
   activity: ReviewActivity;
   onCancel: (id: string) => void;
+  onResume: (id: string, stage: string) => void;
   cancelling: boolean;
+  resuming: boolean;
 }) {
   const project = activity.meta?.project;
   const round = activity.meta?.round ?? 1;
   const current = activity.current;
+  const canResume =
+    activity.isStuck && current?.status === "running" && !!current.stage;
 
   return (
     <Card className="overflow-hidden">
@@ -135,6 +141,21 @@ function ActivityRow({
                 Open
               </Link>
             </Button>
+            {canResume && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onResume(activity.planReviewId, current!.stage)}
+                disabled={resuming}
+              >
+                {resuming ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Play className="h-3.5 w-3.5 mr-1" />
+                )}
+                Resume
+              </Button>
+            )}
             <Button
               size="sm"
               variant="destructive"
