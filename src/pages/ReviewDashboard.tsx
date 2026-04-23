@@ -148,6 +148,11 @@ export default function ReviewDashboard() {
     return meta?.groups_merged ?? 0;
   }, [pipeRows]);
 
+  const isPipelineActive = useMemo(
+    () => pipeRows.some((r) => r.status === "running" || r.status === "pending"),
+    [pipeRows],
+  );
+
   const status = useMemo(() => determineReviewStatus(defs), [defs]);
   const jurisdictionMismatch =
     !!dna &&
