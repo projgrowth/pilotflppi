@@ -840,6 +840,37 @@ async function stagePreparePages(
   firmId: string | null,
   targetSource?: string | null,
 ) {
+  const { data: review } = await admin
+    .from("plan_reviews")
+    .select("ai_run_progress")
+    .eq("id", planReviewId)
+    .maybeSingle();
+  const progress = (review as { ai_run_progress?: Record<string, unknown> | null } | null)?.ai_run_progress ?? {};
+  const expectedPreparedPages =
+    typeof progress.pre_rasterized_pages === "number" ? progress.pre_rasterized_pages : 0;
+  const { count: existingPreparedPages } = await admin
+    .from("plan_review_page_assets")
+    .select("id", { count: "exact", head: true })
+    .eq("plan_review_id", planReviewId)
+    .eq("status", "ready");
+
+  if (
+    progress.pre_rasterized === true &&
+    expectedPreparedPages > 0 &&
+    (existingPreparedPages ?? 0) >= expectedPreparedPages
+  ) {
+    _pageManifestCache.delete(planReviewId);
+    return {
+      rasterized: 0,
+      source: null,
+      target_source: targetSource ?? null,
+      remaining_sources: [],
+      needs_more_chunks: false,
+      pre_rasterized: true,
+      prepared_pages: existingPreparedPages ?? 0,
+    };
+  }
+
   const result = await rasterizeNextChunk(admin, planReviewId, firmId, targetSource);
   // Clear the per-invocation cache so the next worker re-reads from DB.
   _pageManifestCache.delete(planReviewId);
