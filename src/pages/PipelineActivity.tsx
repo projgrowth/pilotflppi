@@ -373,6 +373,7 @@ export default function PipelineActivity() {
         />
       ) : (
         <div className="space-y-6">
+          <CostTimingPanel />
           {active.length > 0 && (
             <section className="space-y-3">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
