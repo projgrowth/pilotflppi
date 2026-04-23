@@ -1,83 +1,101 @@
 
 
-# Next Best Improvements — Quality, Trust & Throughput
+# Overhaul `prepare_pages` — eliminate the server rasterizer
 
-The P0/P1 fixes from the last audit shipped. The system is now stable enough that the next gains come from **what reviewers actually do with it** and **how well the AI gets out of their way**. The data tells the story:
+## What the data tells us
 
 ```text
-85 v2 findings produced → only 1 confirmed, 15 rejected, 69 untouched (81%!)
-27 findings flagged "requires_human_review" — same UI as the rest, no priority cue
-8 correction patterns captured, 0 confirmations recorded → reliability score is
-   one-sided: the AI only learns it was wrong, never that it was right
-Pipeline: still 4-7 errors per stage in the last 7 days (sheet_map, dedupe,
-   discipline_review the worst). New retry helper helps but errors aren't
-   surfaced anywhere a human will see them.
+Last 10 reviews:
+  pre_rasterized=true        → 1   (asset_count = 6, prepare_pages OK)
+  pre_rasterized=null/false  → 9   (asset_count = 0 or 1, prepare_pages errored)
+
+Last-7d prepare_pages stage rows:
+  status=error: 5    status=complete: 0
+  → 100% failure rate when the server has to rasterize anything
 ```
 
-So the next round is three themes: **trust the output faster**, **close the learning loop**, and **see when something breaks**.
+**Root cause:** Whenever `prepare_pages` actually has to run server-side, it dies on the first chunk. The CPU budget on a fresh Supabase Edge worker is ~2s. MuPDF WASM cold-load alone is ~1.5–2s, then it has to download a 50MB PDF, decode page 0, JPEG-encode at 60–110 DPI, upload the JPEG, write the manifest row. Even with `RASTERIZE_CHUNK_COLD_START = 1` and `RASTER_SCALE_COLD = 0.833`, the first chunk usually doesn't finish before the runtime kills it.
+
+The 8-attempt bounded retry just retries the same losing race 8 times, then marks the stage `error`. Reviews stuck after just 1 page in the manifest are the proof — chunk 0 sometimes squeaks through, chunk 1 never does on a cold worker.
+
+**Why the 1 working review worked:** It came through the wizard, where `uploadPlanReviewFiles()` ran browser-side rasterization with pdf.js BEFORE invoking the pipeline. Server `prepare_pages` was a 50 ms no-op that just verified the manifest count matched. Every other recent upload skipped the browser rasterization (either inline-uploaded before today's helper landed, or the browser path failed silently and fell through to the server).
+
+The architecture is already correct in concept; the server fallback is the part that doesn't actually work. We should **stop pretending the edge function can rasterize PDFs** and make the browser path the only path.
 
 ---
 
-## 1. Triage that actually moves findings (biggest win)
+## The overhaul
 
-Right now the dashboard shows all 85 findings as a flat list. A reviewer has to read each one to decide what to do — there's no "start here" surface. Result: 81% untouched.
+### 1. Server `prepare_pages` becomes verify-only — never rasterizes
 
-**Build a Triage Inbox view** as the default landing tab on `ReviewDashboard`:
+Replace the chunked MuPDF rasterizer with a thin verifier:
 
-- **Priority queue ordering** — sort by: `requires_human_review` first, then `life_safety_flag`, then `permit_blocker`, then `confidence_score < 0.7`, then everything else. The 27 review-required items rise to the top.
-- **Keyboard-first triage** — `J/K` to move, `C` confirm, `R` reject (opens existing dialog), `M` modify, `S` skip. Already have `TriageShortcutsOverlay` — wire it into a real loop with focus management on a single "active" card.
-- **One-keypress confirm** — currently confirm needs a click + the optimistic update is silent. Add a brief inline checkmark animation + auto-advance to next card. The path from "AI surfaced this" to "reviewer agreed" should be ≤1 second.
-- **Bulk-confirm by sheet** — for sheets where ALL findings are >0.85 confidence and not flagged, a single "Confirm all 6 on A-101" button. Most reviewers trust the AI on routine items per-sheet.
+```text
+stagePreparePages(reviewId):
+  manifest = SELECT * FROM plan_review_page_assets WHERE plan_review_id=…
+  if manifest.length >= 1 and signed-URL spot-check on manifest[0] succeeds:
+      return { ok: true, prepared_pages: manifest.length }
+  else:
+      throw NEEDS_BROWSER_RASTERIZATION  // structured error class
+```
 
-Files: new `src/components/review-dashboard/TriageInbox.tsx`, extend `useTriageController.ts`, surface as default tab in `ReviewDashboard.tsx`.
+That's the entire stage. ~30 lines instead of ~250. No MuPDF import, no chunk loop, no DPI tiers, no `prepare_attempts` counter, no per-PDF watchdog, no `target_source` parameter, no `remaining_sources` fork logic. All of that machinery exists only to fight the CPU limit — once we remove the rasterizer from the edge function, it becomes dead code.
 
-## 2. Close the learning loop — confirmations must count
+### 2. Structured failure tells the client to take over
 
-`recordPatternConfirmation` exists in `DeficiencyActions.tsx` but the DB shows `confirm_count = 0` across all 8 patterns. Either it's silently failing (`.catch(() => {})` swallows it) or the matching logic isn't finding patterns to credit. Either way, **today the AI only ever learns it was wrong** — reliability score drifts down monotonically, eventually pruning patterns the reviewer actually agreed with.
+When the server throws `NEEDS_BROWSER_RASTERIZATION`:
+- Write a `pipeline_error_log` row with `error_class = 'needs_browser_rasterization'`.
+- Mark the stage `error` with a clear `error_message` ("This review needs to be re-uploaded so pages can be prepared in your browser.").
+- The dashboard already subscribes to errors — surface a toast with a **"Re-prepare in browser"** CTA that hands the existing files back through `uploadPlanReviewFiles()` (skipping the upload step since the PDFs are already in storage; just signs URLs, downloads them, runs `rasterizeAndUploadPages`, then re-invokes the pipeline at `prepare_pages`).
 
-Concrete actions:
+### 3. Recover the 9 stuck reviews
 
-- **Diagnose & fix `recordPatternConfirmation`** — replace the silent catch with a non-blocking toast + a row in a new `pattern_match_log` (or just `console.error` to Edge logs) so we can see why matches miss. Likely cause: discipline-name normalization mismatch (DB has "MEP" vs AI emits "Mechanical").
-- **Add `confirm_count` to the reliability score formula** — currently the prompt-injection picks patterns by `rejection_count DESC`. Switch to `(rejection_count - confirm_count) DESC, last_seen_at DESC` so a pattern reviewers later agreed with stops being injected as a warning.
-- **Surface "Reviewer Memory" in the dashboard** — small card on `ReviewDashboard` showing the top 3 active patterns the AI is currently trained on for this jurisdiction/discipline, with a "Disable" button. Trust comes from being able to see what the model has been told.
-- **Show pattern matches per finding** — when a finding is generated and a correction pattern fired during prompting, add a small "🧠 Trained on 3 prior rejections" badge on the deficiency card linking to the pattern.
+A new `src/lib/reprepare-in-browser.ts` helper does what the inline upload should have done: for a given review, list the source PDFs in `plan_review_files`, signed-URL each, fetch+blob them, run `rasterizeAndUploadPages`, mark `ai_run_progress.pre_rasterized = true`, then `startPipeline(reviewId, 'core')`. Wired into:
+- The Pipeline Activity error toast/CTA.
+- A small "Re-prepare pages" button on `PlanReviewDetail` next to the stuck file.
 
-Files: `src/hooks/useCorrectionPatterns.ts`, `src/components/review-dashboard/ReviewerMemoryCard.tsx` (already exists — wire it in), `supabase/functions/run-review-pipeline/stages/discipline-review.ts` (or current location of pattern injection).
+This unblocks every existing review without DB surgery.
 
-## 3. Pipeline observability — errors users can see and act on
+### 4. Make sure inline uploads always pre-rasterize
 
-The new retry helper masks transient errors but **stage-level failures still die silently** in `review_pipeline_status.error_message`. The Pipeline Activity page lists active runs but doesn't show *what failed and why*. 4-7 hard errors per stage in 7 days is too many to ignore.
+`uploadPlanReviewFiles()` already does this when `typeof window !== "undefined"` and `pdf.js` succeeds, but if `getPDFPageCount(file)` throws (corrupt magic bytes, password-protected PDF, etc.) the file is silently dropped from the rasterization pairs and the server fallback used to swallow it. With server rasterization gone, this becomes a hard error the user can see. Two changes:
+- Validate via `validatePDFHeader()` BEFORE accepting the file, so non-PDFs and corrupt PDFs are rejected with a clear toast at upload time.
+- If `rasterizeAndUploadPages()` returns 0 rows for a valid PDF, surface that as a hard error rather than continuing silently.
 
-- **Add an "Errors" tab to `PipelineActivity`** — last 24h of `status='error'` rows, with the truncated `error_message`, stage, retry count, and a **Retry from this stage** button (re-uses `resumePipelineForReview` we already updated).
-- **Stage-level error toasts on the detail page** — when realtime fires an `error` status for the currently-open review, show a toast with the stage name + Retry CTA. Right now you have to refresh to know.
-- **Lightweight error telemetry** — add a `pipeline_error_log` table written from the edge function on final failure (post-retries) with `{ stage, error_message, error_class, planReviewId, attempt_count }`. Then a simple `/admin/health` route reads it and groups by `error_class` so you can see "AI gateway 429: 12 occurrences this week" at a glance.
+### 5. Bonus simplifications enabled by removing server raster
 
-Files: `src/pages/PipelineActivity.tsx`, `src/hooks/usePlanReviewData.ts` (subscribe to status errors), one new migration for `pipeline_error_log`.
-
-## 4. Accuracy: stop the AI manufacturing findings on irrelevant sheets
-
-Spot-checking the 15 rejections: most are on the wrong discipline for the sheet (e.g., "structural" finding on an electrical sheet because both disciplines reviewed every sheet). The pipeline already has `sheet_coverage` with discipline tags — use it.
-
-- **Hard-filter sheet inputs per discipline call** — when running the Mechanical expert, only pass sheet images tagged `discipline IN ('Mechanical','MEP','General')`. Today the prompt says "ignore sheets outside your scope" but the AI gets shown all of them anyway, which is expensive and noisy.
-- **Confidence floor by discipline** — drop any finding with confidence <0.55 on a sheet not assigned to its discipline. Tiny addition in `stageDedupe`.
-
-Files: `supabase/functions/run-review-pipeline/index.ts` lines ~1430-1522 (`runDisciplineChecks`), and the dedupe stage.
-
-## 5. Smaller polish (parallel-safe)
-
-- **Drop legacy PNG render path in `pdf-utils.ts`** (still ~140 lines of dead-ish code; only `usePdfPageRender` and `ZoningAnalysisPanel` use it — both safe to migrate to JPEG/streaming). Carryover from last audit.
-- **`PlanReviewDetail.tsx` still has 20 `useState`s** — extract the filter group (`statusFilter`, `confidenceFilter`, `disciplineFilter`, `sheetFilter`) into a single reducer + serialize to URL search params so reload preserves the view.
-- **`as any` cleanup** — 36 occurrences. Knock out the 9 in the edge function with the small typed `PipelineRow` interface noted last time; the others are mostly Supabase type cast workarounds that can wait.
+- Delete `getMupdf()`, `rasterizePdfStreaming()`, `rasterizeNextChunk()`, `computeRemainingSources()`, the `RASTERIZE_*` / `RASTER_SCALE_*` / `LARGE_PDF_THRESHOLD` / `MAX_PAGES_PER_PDF` / `RASTER_UPLOAD_CONCURRENCY` constants, the `_pageManifestCache` (no longer needed since prepare is now O(1)), the `PREPARE_STALE_RUNNING_MS` watchdog block (~50 lines in the dispatcher), the `prepare_attempts` retry branch, and the `target_source` plumbing through `scheduleNextStage`.
+- `npm:mupdf@1.3.0` import goes away → faster cold starts for every other stage too.
+- Edge function drops from ~3,575 → ~2,950 lines.
 
 ---
 
-## Suggested execution order
+## Files changed
 
-1. **Triage Inbox + keyboard loop** — biggest UX delta, no schema changes. (~1 commit)
-2. **Pattern confirmation fix + Reviewer Memory card** — restores the learning loop. (~1 commit, no schema)
-3. **Pipeline error visibility** — small migration, big trust win. (~1 commit + migration)
-4. **Discipline-scoped sheet filtering** — improves precision, cuts AI cost. (edge function only)
-5. **PNG render path removal + URL filter state** — cleanup, no behavior change.
+```text
+supabase/functions/run-review-pipeline/index.ts
+  • Replace stagePreparePages with verify-only version (~30 lines)
+  • Delete rasterizer + helpers (~700 lines net removal)
+  • Delete prepare_pages watchdog block in dispatcher
+  • Replace prepare_pages catch branch with single error log + clear message
+  • Drop mupdf import
 
-No edge function contract changes. One small migration (`pipeline_error_log`). All changes are additive — nothing existing breaks.
+src/lib/reprepare-in-browser.ts                              [NEW]
+  • Re-runs browser rasterization for an already-uploaded review
 
+src/lib/plan-review-upload.ts
+  • validatePDFHeader gate before accepting files
+  • Hard error if a valid PDF yields 0 page assets
+
+src/components/review-dashboard/ReviewStatusBar.tsx
+  (or wherever the error toast is wired)
+  • Add "Re-prepare in browser" action when error_class = needs_browser_rasterization
+
+src/pages/PlanReviewDetail.tsx
+  • Add Re-prepare button next to file when prepare_pages errored
+
+src/hooks/usePipelineErrors.ts
+  • No change — already streams errors; the new error_class flows through
+```
+
+No DB schema changes. No edge function contract changes. The dispatcher still accepts `{ plan_review_id, stage?, mode? }`, just no longer accepts `target_source`
