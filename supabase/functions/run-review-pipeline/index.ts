@@ -2245,7 +2245,8 @@ async function stageVerify(
     "- 'cannot_locate' — you cannot verify either way from the supplied images. Will be routed to human review.\n" +
     "Be strict: 'overturned' requires positive evidence the finding is wrong, not absence of evidence.";
 
-  const BATCH = 5;
+  // Smaller batch reduces per-request image payload (was 5 → OOM risk on big sets).
+  const BATCH = 3;
   let upheld = 0;
   let overturned = 0;
   let modified = 0;
