@@ -1,91 +1,55 @@
 
 
-## Stop edge worker memory crashes by sharding the pipeline into self-invoking stages
+## Why prepare_pages is slow (and how to fix it)
 
-### Why it's still crashing
+### What's actually happening
 
-The previous fix moved work into `EdgeRuntime.waitUntil`, but **all 11 stages still execute inside one worker**. The first stage to call `signedSheetUrls()` (sheet_map) downloads every PDF, loads MuPDF WASM, and rasterizes every page (up to 80) before returning. Even at 110 DPI, MuPDF + page buffers + the loaded WASM module + the rest of the pipeline state pushes past the worker memory ceiling. The `RASTERIZE_CHUNK = 12` constant exists but is unused — the streaming function still loops the whole document in one call.
+The current `rasterizeNextChunk` design optimizes for memory safety, but it pays a steep latency tax on every chunk:
 
-Background tasks share the same memory limit as the request worker. So `waitUntil` doesn't help here.
+1. **Full PDF re-download per chunk.** Each `prepare_pages` invocation calls `admin.storage.from("documents").download(filePath)` and pulls the *entire* PDF — even though the worker will only rasterize 12 pages from it. A 100MB plan set gets downloaded 7+ times across chunks.
+2. **MuPDF document opened twice per chunk.** Once just to call `countPages()`, then destroyed, then re-opened to actually rasterize. The second open re-parses the whole PDF.
+3. **Serial uploads.** Each rendered page PNG is uploaded with `await` before the next page is rendered. Storage upload latency (~150-400ms each) stacks linearly: 12 pages × ~250ms ≈ 3s of pure upload wait per chunk.
+4. **Serial DB upserts.** A separate `plan_review_page_assets` upsert is awaited per page. Another 12 round-trips.
+5. **Cold-boot per chunk.** Every chunk is a brand-new edge worker invocation. Boot logs show ~40-60ms just to boot, plus auth check, plus DB lookups for `plan_reviews` and `plan_review_files` and the existing manifest — repeated for every 12 pages.
+6. **Tiny chunk size.** `RASTERIZE_CHUNK = 12` was set conservatively against the old "rasterize-everything-in-one-worker" memory crash. Now that each stage runs in its own fresh worker, 12 is leaving capacity unused and multiplying the per-chunk fixed cost.
+7. **Edge log evidence:** The most recent run shows `CPU Time exceeded` on `prepare_pages` (timestamp 1776949426904) — a chunk ran long enough to hit the CPU budget, which is consistent with serial uploads dominating wall-clock time.
 
-### The fix: one HTTP invocation = one stage
+### The fix
 
-Refactor the pipeline so each stage runs in its own fresh edge worker. When a stage finishes, it self-invokes the function for the next stage and returns. Memory resets between stages. MuPDF WASM only lives during the rasterization stage.
+Make each `prepare_pages` invocation do meaningfully more work, in parallel, without re-downloading or re-parsing.
 
-```text
-Client → POST run-review-pipeline {stage:"upload"}     → 202, schedules sheet_map
-        POST run-review-pipeline {stage:"sheet_map"}   → 202, schedules dna_extract
-        POST run-review-pipeline {stage:"dna_extract"} → 202, schedules discipline_review
-        ...
-```
+#### 1. Download the PDF once per chunk, parse once
+- Remove the throwaway `doc.openDocument` → `countPages` → `destroy` cycle. Open the PDF a single time, read `countPages()`, then rasterize from the same `doc` handle.
+- Net savings: ~1 PDF parse pass per chunk (multi-second on large sets).
 
-Each call:
-1. Reads the requested stage from the body (default `upload` for the first call).
-2. Marks that single stage `running`, runs it, marks `complete`/`error`.
-3. If more stages remain and not halted, fires a non-awaited `fetch` to its own URL with `{plan_review_id, stage: next}` and returns 202 immediately.
-4. The next worker boots clean — MuPDF, page buffers, AI response bodies from the previous stage are all gone.
+#### 2. Increase chunk size and parallelize uploads
+- Bump `RASTERIZE_CHUNK` from 12 to **24**. Each fresh worker has plenty of headroom now that stages are sharded.
+- Render pages serially (MuPDF WASM is single-threaded), but **collect PNGs in memory** and run uploads + manifest upserts in **parallel batches of 6** using `Promise.all`. Storage and Postgres absorb the concurrency easily; this collapses ~6s of serial waits into ~1s.
 
-Realtime UX is unchanged because the stepper subscribes to `review_pipeline_status`, not to the HTTP response.
+#### 3. Bulk-upsert the manifest rows
+- Replace 24 individual `plan_review_page_assets` upserts with a single bulk upsert at the end of the chunk. One round-trip instead of N.
 
-### Make rasterization actually chunked
+#### 4. Stay on the same PDF until it's fully done before scheduling the next worker
+- Already the behavior, but make the dispatcher loop tighter: when `needs_more_chunks` is true and we just finished a chunk on PDF #1, the next invocation already has the warm storage cache for that file path — keep ordering by `uploaded_at` so we never thrash between PDFs.
 
-`signedSheetUrls()` currently rasterizes every page of every PDF in one call. Split into a real prepare-pages loop:
+#### 5. Parallelize across PDFs when possible
+- If a review has multiple PDFs, fire **two** `prepare_pages` workers in parallel — one targeting the next un-rasterized PDF index 0, one targeting index 1. Add an optional `target_source` param to `rasterizeNextChunk` so each worker is pinned to one source file and they don't fight over the same chunk. The dispatcher only forks when there are 2+ source PDFs with remaining work.
 
-- New helper `rasterizeNextChunk(planReviewId, firmId)` reads the manifest, finds the first source PDF that still has missing pages, downloads only that PDF, rasterizes the next `RASTERIZE_CHUNK` (12) pages, uploads them, writes manifest rows, then returns `{ done: false }` if more pages remain.
-- New stage `prepare_pages` inserted after `upload`. It calls `rasterizeNextChunk` once, and if not done, schedules another `prepare_pages` invocation instead of advancing to `sheet_map`.
-- Result: each worker handles at most 12 pages of one PDF, then dies. MuPDF WASM never accumulates more than one chunk's worth of state.
-
-Downstream stages (sheet_map, discipline_review, verify, cross_check) read the manifest rows + sign URLs only — no rasterization in their workers.
-
-### Stage list update
-
-```text
-upload → prepare_pages (loops itself until manifest is full)
-       → sheet_map → dna_extract → discipline_review
-       → verify → dedupe → ground_citations → cross_check
-       → deferred_scope → prioritize → complete
-```
-
-`PipelineProgressStepper` and `useReviewDashboard` need the new `prepare_pages` stage in their stage list.
-
-### Self-invoke pattern (avoids a separate dispatcher function)
-
-```ts
-async function scheduleNextStage(planReviewId: string, nextStage: Stage) {
-  // Fire-and-forget POST to ourselves. Don't await the response.
-  fetch(`${SUPABASE_URL}/functions/v1/run-review-pipeline`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-    },
-    body: JSON.stringify({ plan_review_id: planReviewId, stage: nextStage }),
-  }).catch((e) => console.error("schedule next stage failed:", e));
-}
-```
-
-Wrapped in `EdgeRuntime.waitUntil` so the request can return 202 first without aborting the outbound fetch.
+#### 6. Skip the legacy fallback path on hot rasterization
+- `signedSheetUrls`'s legacy `pages/` folder listing is irrelevant during `prepare_pages` and just adds storage `list()` calls. Already gated, but confirm nothing in the prepare path triggers it.
 
 ### Files touched
 
 - `supabase/functions/run-review-pipeline/index.ts`
-  - Accept optional `stage` in request body (default `"upload"`).
-  - Run only that single stage per invocation.
-  - After the stage completes, schedule the next stage via self-fetch.
-  - Add `prepare_pages` to the `Stage` union and `STAGES` list.
-  - Add `stagePreparePages` that calls a new chunked rasterizer and self-loops while pages remain.
-  - Refactor `signedSheetUrls` to ONLY read the manifest / sign URLs (no rasterization fallback). The cold path is now exclusively in `stagePreparePages`.
-  - Use the existing `RASTERIZE_CHUNK = 12` constant.
-
-- `src/components/plan-review/PipelineProgressStepper.tsx`
-  - Add `prepare_pages` to the displayed stage labels.
-
-- `src/hooks/useReviewDashboard.ts`
-  - Add `prepare_pages` to the stage list / type.
+  - `rasterizeNextChunk`: open MuPDF once, parallelize uploads (Promise.all batched), bulk-upsert manifest rows, accept optional `targetSource` parameter.
+  - `RASTERIZE_CHUNK`: 12 → 24.
+  - `stagePreparePages`: when multiple PDFs have remaining work, schedule a second `prepare_pages` invocation in parallel pinned to the next source file.
 
 ### Expected result
 
-- `WORKER_RESOURCE_LIMIT` stops happening because no worker ever holds MuPDF + a full plan set simultaneously.
-- Each invocation runs ≤ ~5–15 seconds with a small memory footprint.
-- Realtime stepper UX is unchanged from the user's view — they still see stages tick over live.
+- **~3–5× faster** `prepare_pages` per chunk (one parse, parallel uploads, bulk DB writes).
+- **2× faster** for multi-PDF reviews (parallel workers per source).
+- **Fewer total invocations** (24 pages/chunk instead of 12), so less cold-boot and auth overhead.
+- No change to memory profile — still one PDF + ≤24 PNGs per worker, well under the limit.
+- No change to UI — the `prepare_pages` stepper still ticks live via realtime.
 
