@@ -1015,7 +1015,7 @@ async function stageDisciplineReview(
   const failed: string[] = [];
   let totalFindings = 0;
 
-  for (const discipline of DISCIPLINES) {
+  for (const discipline of disciplinesToRun) {
     try {
       const disciplineSheets = routed.filter((s) => s.discipline === discipline);
       const disciplineImageUrls = disciplineSheets
@@ -1049,6 +1049,7 @@ async function stageDisciplineReview(
         generalImageUrls,
         dna,
         jurisdiction,
+        useType,
       });
       totalFindings += inserted;
     } catch (err) {
@@ -1079,6 +1080,7 @@ interface DisciplineRunCtx {
   generalImageUrls: string[];
   dna: Record<string, unknown> | null;
   jurisdiction: Record<string, unknown> | null;
+  useType: string | null;
 }
 
 async function runDisciplineChecks(
@@ -1216,7 +1218,16 @@ async function runDisciplineChecks(
   // common failure modes + wording/evidence guidance + shared review rules.
   const systemPrompt = composeDisciplineSystemPrompt(ctx.discipline);
 
+  // Use-type prefix tells the expert which FBC code path applies before they
+  // start reading sheets — prevents commercial-coded findings on residential.
+  const useTypeLine = ctx.useType === "residential"
+    ? `## Project Use Type\nRESIDENTIAL — apply FBC Residential (FBCR), NOT FBC Building. Skip commercial accessibility (FBC Ch.11). Use IRC/FBCR-style code references.\n\n`
+    : ctx.useType === "commercial"
+      ? `## Project Use Type\nCOMMERCIAL — apply FBC Building (not FBCR). Accessibility (FBC Ch.11/ADA) and commercial life-safety apply.\n\n`
+      : ``;
+
   const userText =
+    useTypeLine +
     `## Project DNA\n${dnaSummary}\n\n` +
     `## Jurisdiction\n${jurSummary}\n\n` +
     `## Sheets routed to ${ctx.discipline}\n${sheetIndex || "(none)"}\n\n` +
