@@ -3060,7 +3060,11 @@ async function stageGroundCitations(
  * budget). MuPDF WASM, page buffers, and AI response state from the previous
  * stage never co-exist in one worker.
  */
-function scheduleNextStage(planReviewId: string, nextStage: Stage) {
+function scheduleNextStage(
+  planReviewId: string,
+  nextStage: Stage,
+  extra?: { target_source?: string | null },
+) {
   const url = `${SUPABASE_URL}/functions/v1/run-review-pipeline`;
   // Don't await — return immediately and let waitUntil keep this socket alive
   // long enough for the request to flush.
@@ -3074,6 +3078,7 @@ function scheduleNextStage(planReviewId: string, nextStage: Stage) {
     body: JSON.stringify({
       plan_review_id: planReviewId,
       stage: nextStage,
+      target_source: extra?.target_source ?? null,
       _internal: true,
     }),
   })
