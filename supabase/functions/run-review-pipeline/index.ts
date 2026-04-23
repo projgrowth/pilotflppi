@@ -1142,6 +1142,31 @@ async function stageDnaReevaluate(
   return { reevaluated: true, ...health };
 }
 
+/**
+ * Resolve the currently active prompt_versions.id for a given key. Stamped on
+ * every deficiency we insert so we can A/B prompt revisions later and filter
+ * quality metrics by prompt generation. Returns null if no row matches — the
+ * pipeline still inserts, just without a provenance pointer.
+ */
+async function getActivePromptVersionId(
+  admin: ReturnType<typeof createClient>,
+  promptKey: string,
+): Promise<string | null> {
+  const { data, error } = await admin
+    .from("prompt_versions")
+    .select("id")
+    .eq("prompt_key", promptKey)
+    .eq("is_active", true)
+    .order("effective_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error(`[prompt_versions] lookup failed for ${promptKey}:`, error);
+    return null;
+  }
+  return data?.id ?? null;
+}
+
 async function stageDisciplineReview(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
