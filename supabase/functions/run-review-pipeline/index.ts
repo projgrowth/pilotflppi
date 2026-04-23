@@ -2799,66 +2799,83 @@ Deno.serve(async (req) => {
       complete: () => stageComplete(admin, plan_review_id),
     };
 
-    const results: Record<string, unknown> = {};
-    let halted = false;
-    let haltReason: string | null = null;
+    // Heavy work (PDF rasterization via MuPDF WASM + many vision calls) blows
+    // past the request worker's CPU/memory budget if we await it inline. Run it
+    // as a background task and return immediately — the frontend already
+    // subscribes to `review_pipeline_status` via realtime to surface progress.
+    const runPipeline = async () => {
+      const results: Record<string, unknown> = {};
+      let halted = false;
+      let haltReason: string | null = null;
 
-    for (const stage of stagesToRun) {
-      if (halted) {
-        await setStage(admin, plan_review_id, firmId, stage, {
-          status: "error",
-          error_message: haltReason ?? "Skipped — earlier stage failed",
-        });
-        continue;
-      }
-      await setStage(admin, plan_review_id, firmId, stage, { status: "running" });
-      try {
-        // When re-running from a later stage, substitute a cheap re-evaluation
-        // for the expensive vision-based extract so the gate still runs.
-        const impl =
-          stage === "dna_extract" && effectiveStart > 0
-            ? () => stageDnaReevaluate(admin, plan_review_id)
-            : stageImpls[stage];
-        const meta = await withRetry(() => impl(), `stage:${stage}`);
-        results[stage] = meta;
-        await setStage(admin, plan_review_id, firmId, stage, {
-          status: "complete",
-          metadata: meta,
-        });
+      for (const stage of stagesToRun) {
+        if (halted) {
+          await setStage(admin, plan_review_id, firmId, stage, {
+            status: "error",
+            error_message: haltReason ?? "Skipped — earlier stage failed",
+          });
+          continue;
+        }
+        await setStage(admin, plan_review_id, firmId, stage, { status: "running" });
+        try {
+          const impl =
+            stage === "dna_extract" && effectiveStart > 0
+              ? () => stageDnaReevaluate(admin, plan_review_id)
+              : stageImpls[stage];
+          const meta = await withRetry(() => impl(), `stage:${stage}`);
+          results[stage] = meta;
+          await setStage(admin, plan_review_id, firmId, stage, {
+            status: "complete",
+            metadata: meta,
+          });
 
-        // DNA gate: block downstream stages if extraction is unreliable.
-        if (stage === "dna_extract") {
-          const m = meta as Partial<DnaHealth>;
-          if (m.blocking) {
+          if (stage === "dna_extract") {
+            const m = meta as Partial<DnaHealth>;
+            if (m.blocking) {
+              halted = true;
+              haltReason = `DNA gate: ${m.block_reason ?? "extraction blocked"}`;
+              await setStage(admin, plan_review_id, firmId, stage, {
+                status: "error",
+                error_message: haltReason,
+                metadata: meta as Record<string, unknown>,
+              });
+            }
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          results[stage] = { error: message };
+          await setStage(admin, plan_review_id, firmId, stage, {
+            status: "error",
+            error_message: message,
+          });
+          if (stage === "upload" || stage === "dna_extract") {
             halted = true;
-            haltReason = `DNA gate: ${m.block_reason ?? "extraction blocked"}`;
-            // Re-mark the dna_extract row with the block reason so the UI can surface it.
-            await setStage(admin, plan_review_id, firmId, stage, {
-              status: "error",
-              error_message: haltReason,
-              metadata: meta as Record<string, unknown>,
-            });
+            haltReason = `${stage} failed: ${message}`;
           }
         }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        results[stage] = { error: message };
-        await setStage(admin, plan_review_id, firmId, stage, {
-          status: "error",
-          error_message: message,
-        });
-        // 'upload' and 'dna_extract' are hard prerequisites — halt if they fail.
-        if (stage === "upload" || stage === "dna_extract") {
-          halted = true;
-          haltReason = `${stage} failed: ${message}`;
-        }
       }
+    };
+
+    // Fire-and-forget. EdgeRuntime.waitUntil keeps the worker alive past the
+    // response so the loop can finish even after we return 202.
+    const edgeRuntime = (globalThis as { EdgeRuntime?: { waitUntil(p: Promise<unknown>): void } })
+      .EdgeRuntime;
+    if (edgeRuntime?.waitUntil) {
+      edgeRuntime.waitUntil(
+        runPipeline().catch((e) => console.error("run-review-pipeline background error:", e)),
+      );
+    } else {
+      // Local dev fallback — still detached, but no waitUntil available.
+      runPipeline().catch((e) => console.error("run-review-pipeline background error:", e));
     }
 
-    return new Response(JSON.stringify({ ok: !halted, halt_reason: haltReason, results }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-      status: 200,
-    });
+    return new Response(
+      JSON.stringify({ ok: true, accepted: true, plan_review_id }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 202,
+      },
+    );
   } catch (e) {
     console.error("run-review-pipeline fatal:", e);
     const message = e instanceof Error ? e.message : "Unknown error";
