@@ -87,10 +87,9 @@ export async function uploadPlanReviewFiles(
   // 2. Browser-side pre-rasterization (best effort, partial success allowed).
   let pageAssetRows: PreparedPageAsset[] = [];
   let totalExpectedPages = 0;
+  let allFailures: Array<{ fileName: string; pageIndex: number; reason: string }> = [];
   if (typeof window !== "undefined") {
     try {
-      // Pair each accepted File with its uploaded path + page count for the
-      // shape rasterizeAndUploadPagesResilient expects.
       const pairs: Array<{
         name: string;
         file: File;
@@ -124,8 +123,12 @@ export async function uploadPlanReviewFiles(
         { startGlobalIndex: existingPageCount ?? 0, batchSize: 4 },
       );
       pageAssetRows = succeeded;
+      allFailures = failures.map((f) => ({
+        fileName: f.fileName,
+        pageIndex: f.pageIndex,
+        reason: f.reason ?? "unknown",
+      }));
       if (failures.length > 0) {
-        // Group by file for a tighter toast message.
         const byFile = new Map<string, number>();
         for (const f of failures) byFile.set(f.fileName, (byFile.get(f.fileName) ?? 0) + 1);
         for (const [fileName, count] of byFile) {
@@ -145,15 +148,17 @@ export async function uploadPlanReviewFiles(
     }
   }
 
-  // 3. plan_reviews.file_urls + ai_run_progress.
+  // 3. plan_reviews.file_urls + ai_run_progress (now also stamps expected_pages
+  //    so prepare_pages can reconcile the manifest).
   await supabase
     .from("plan_reviews")
     .update({
       file_urls: newUrls,
-      ai_run_progress:
-        pageAssetRows.length > 0
-          ? { pre_rasterized: true, pre_rasterized_pages: pageAssetRows.length }
-          : undefined,
+      ai_run_progress: {
+        pre_rasterized: pageAssetRows.length > 0,
+        pre_rasterized_pages: pageAssetRows.length,
+        expected_pages: (existingPageCount ?? 0) + totalExpectedPages,
+      },
     })
     .eq("id", reviewId);
 
