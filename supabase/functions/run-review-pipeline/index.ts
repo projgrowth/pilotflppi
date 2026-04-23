@@ -804,13 +804,16 @@ async function stagePreparePages(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
   firmId: string | null,
+  targetSource?: string | null,
 ) {
-  const result = await rasterizeNextChunk(admin, planReviewId, firmId);
+  const result = await rasterizeNextChunk(admin, planReviewId, firmId, targetSource);
   // Clear the per-invocation cache so the next worker re-reads from DB.
   _pageManifestCache.delete(planReviewId);
   return {
     rasterized: result.rasterized,
     source: result.source ?? null,
+    target_source: targetSource ?? null,
+    remaining_sources: result.remaining_sources ?? [],
     needs_more_chunks: !result.done,
   };
 }
