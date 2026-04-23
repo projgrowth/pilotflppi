@@ -4,30 +4,28 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { usePipelineStatus, PIPELINE_STAGES, type PipelineStage } from "@/hooks/useReviewDashboard";
+import {
+  usePipelineStatus,
+  PIPELINE_STAGES,
+  CORE_STAGE_KEYS,
+  DEEP_STAGE_KEYS,
+  type PipelineStage,
+  type PipelineMode,
+} from "@/hooks/useReviewDashboard";
 
 interface PipelineProgressStepperProps {
   planReviewId: string;
   className?: string;
-  /** Optional callback fired exactly once when the `complete` stage flips to status 'complete'. */
+  /** Optional callback fired exactly once when the terminal stage of the active mode lands. */
   onComplete?: () => void;
   /** Hide stages that aren't part of the typical user-facing flow (kept verbose by default). */
   compact?: boolean;
+  /**
+   * Which pipeline this stepper is rendering. Defaults to "core" — the fast
+   * first-pass path. Pass "deep" to render the optional QA chain instead.
+   */
+  mode?: PipelineMode;
 }
-
-// Stages we surface in the friendly stepper. Keeps "complete" as the terminator.
-const VISIBLE_STAGES: PipelineStage[] = [
-  "upload",
-  "prepare_pages",
-  "sheet_map",
-  "dna_extract",
-  "discipline_review",
-  "verify",
-  "ground_citations",
-  "dedupe",
-  "prioritize",
-  "complete",
-];
 
 const FRIENDLY_LABELS: Record<PipelineStage, string> = {
   upload: "Upload",
@@ -46,13 +44,15 @@ const FRIENDLY_LABELS: Record<PipelineStage, string> = {
 
 const FRIENDLY_HINTS: Partial<Record<PipelineStage, string>> = {
   upload: "Files received",
-  prepare_pages: "Rasterizing PDF pages in chunks",
+  prepare_pages: "Validating pre-rendered page manifest",
   sheet_map: "Indexing sheets",
   dna_extract: "Reading title block & code data",
   discipline_review: "Architectural, structural, MEP, life safety…",
   verify: "Cross-checking findings against evidence",
   ground_citations: "Matching FBC sections",
   dedupe: "Merging overlapping findings",
+  cross_check: "Looking for cross-sheet mismatches",
+  deferred_scope: "Detecting deferred submittals",
   prioritize: "Ranking by severity",
   complete: "Drafting comment letter",
 };
