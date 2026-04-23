@@ -74,6 +74,15 @@ const STEPS = [
 
 type UseType = "commercial" | "residential";
 
+// Aggregate upload guardrails. Each PDF page costs ~1.5–2s of MuPDF WASM
+// cold-start + encode time on a fresh edge worker. Cap totals so a review
+// never accidentally schedules a multi-hour pipeline run.
+const MAX_TOTAL_UPLOAD_MB = 80;
+const MAX_TOTAL_PAGES = 120;
+// AI title-block extraction is best-effort. If the `ai` edge function is
+// slow or failing, fall back to manual entry instead of hanging Step 1.
+const EXTRACTION_TIMEOUT_MS = 20_000;
+
 interface UploadedFile {
  name: string;
  url: string;
@@ -187,16 +196,39 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  newFiles.push({ name: file.name, url: "", file, pageCount });
  }
 
- if (newFiles.length > 0) {
- setUploadedFiles((prev) => [...prev, ...newFiles]);
- toast.success(`${newFiles.length} file(s) added`);
- }
+        if (newFiles.length > 0) {
+          // Aggregate guardrails: total bytes + total pages across the whole
+          // upload. Reject the *new batch* if adding it would exceed limits,
+          // so the user keeps whatever was already validated.
+          const existingBytes = uploadedFiles.reduce((s, f) => s + f.file.size, 0);
+          const existingPages = uploadedFiles.reduce((s, f) => s + f.pageCount, 0);
+          const newBytes = newFiles.reduce((s, f) => s + f.file.size, 0);
+          const newPages = newFiles.reduce((s, f) => s + f.pageCount, 0);
+          const totalMB = (existingBytes + newBytes) / 1024 / 1024;
+          const totalPages = existingPages + newPages;
+
+          if (totalMB > MAX_TOTAL_UPLOAD_MB) {
+            toast.error(
+              `Upload exceeds ${MAX_TOTAL_UPLOAD_MB}MB total (${totalMB.toFixed(1)}MB). Remove a file or split the submission.`,
+            );
+            return;
+          }
+          if (totalPages > MAX_TOTAL_PAGES) {
+            toast.error(
+              `Upload exceeds ${MAX_TOTAL_PAGES} total pages (${totalPages}). Split this submission into smaller batches.`,
+            );
+            return;
+          }
+
+          setUploadedFiles((prev) => [...prev, ...newFiles]);
+          toast.success(`${newFiles.length} file(s) added`);
+        }
  } catch (err) {
  toast.error(err instanceof Error ? err.message : "Failed to process files");
  } finally {
  setUploading(false);
  }
- }, []);
+ }, [uploadedFiles]);
 
  const removeFile = (index: number) => {
  setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
@@ -220,11 +252,21 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  return;
  }
 
- // Call AI to extract info
- const result = await callAI({
- action: "extract_project_info",
- payload: { images: [titleBlockBase64] },
- });
+      // Call AI to extract info. Wrap in a hard timeout so a slow/failing
+      // `ai` edge function can never strand the user on Step 1 — they can
+      // always fall through to manual entry.
+      const result = await Promise.race<string>([
+        callAI({
+          action: "extract_project_info",
+          payload: { images: [titleBlockBase64] },
+        }),
+        new Promise<string>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("AI extraction timed out")),
+            EXTRACTION_TIMEOUT_MS,
+          ),
+        ),
+      ]);
 
  setExtractProgress(90);
 
@@ -232,9 +274,10 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  try {
  extracted = JSON.parse(result);
  } catch {
- toast.error("Could not parse AI extraction result");
- setExtracting(false);
- return;
+        toast.error("Could not parse AI extraction result — please fill in manually");
+        setExtracting(false);
+        setStep(2);
+        return;
  }
 
  // Pre-fill fields
@@ -274,7 +317,11 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  toast.success(geocoded ? "Project details extracted & address geocoded" : "Project details extracted");
  setStep(2);
  } catch (err) {
- toast.error(err instanceof Error ? err.message : "AI extraction failed");
+        const msg = err instanceof Error ? err.message : "AI extraction failed";
+        // On timeout / AI errors, fall through to manual entry instead of
+        // stranding the user on Step 1 with no clear path forward.
+        toast.error(`${msg} — please fill in details manually`);
+        setStep(2);
  } finally {
  setExtracting(false);
  }
@@ -383,16 +430,19 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  // Move to step 3 BEFORE invoking — the realtime stepper subscribes immediately.
  setStep(3);
 
- // Fire and forget; the stepper subscription will reflect progress live.
- // We do NOT await — the function may take 30-90s and we want the dialog
- // responsive immediately. Errors get caught by the realtime stepper
- // (stage rows flip to status='error') and surfaced via pipelineError.
- invokePipeline(review.id).catch((err) => {
+ // Await the trigger so we can surface 401/500 startup failures (auth, missing
+ // service role, CORS preflight rejection) immediately as `pipelineError`
+ // instead of leaving the user staring at a "Pending" stepper forever.
+ // The function returns 202 quickly after kicking off background work, so
+ // awaiting here does not block the UI for the full pipeline duration.
+ try {
+   await invokePipeline(review.id);
+   toast.success("Review created — analysis started");
+ } catch (err) {
    const msg = err instanceof Error ? err.message : "Pipeline failed to start";
    setPipelineError(msg);
- });
-
- toast.success("Review created — analysis started");
+   toast.error(`Analysis failed to start: ${msg}`);
+ }
  } catch (err) {
  toast.error(err instanceof Error ? err.message : "Failed to create review");
  } finally {
