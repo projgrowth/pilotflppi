@@ -1310,6 +1310,12 @@ interface DisciplineRunCtx {
   dna: Record<string, unknown> | null;
   jurisdiction: Record<string, unknown> | null;
   useType: string | null;
+  /** Pre-formatted strings hoisted out of runDisciplineChecks. Built once
+   *  per stageDisciplineReview call so 10 chunks × 9 disciplines don't each
+   *  re-stringify the same DNA + jurisdiction blob. */
+  dnaSummary: string;
+  jurSummary: string;
+  useTypeLine: string;
 }
 
 async function runDisciplineChecks(
@@ -2373,10 +2379,13 @@ async function stageVerify(
   for (let start = 0; start < targets.length; start += BATCH) {
     const slice = targets.slice(start, start + BATCH);
 
-    // Aggregate page indices across the batch (capped to keep payload tight).
+    // Aggregate page indices across the batch. The cap is now derived from the
+    // findings themselves (each target carries ≤3 page_indices, batch of 3
+    // findings → ≤9 unique pages worst case, typically 1-4). The old fixed
+    // .slice(0, 5) silently dropped sheets a finding actually cited.
     const pageSet = new Set<number>();
     for (const t of slice) for (const p of t.page_indices) pageSet.add(p);
-    const pages = Array.from(pageSet).slice(0, 5);
+    const pages = Array.from(pageSet);
     const imageUrls = pages
       .map((p) => signed[p]?.signed_url)
       .filter(Boolean) as string[];
