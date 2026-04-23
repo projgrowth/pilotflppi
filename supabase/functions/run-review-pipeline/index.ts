@@ -250,8 +250,17 @@ function disciplineForSheetFallback(sheetRef: string): string | null {
  * Uses MuPDF WASM. Resolution is tuned for vision: ~150 DPI = 2.083x scale.
  * Pages over MAX_PAGES are skipped (vision cost guard for huge sets).
  */
-const RASTER_SCALE = 2.083; // ~150 DPI
-const MAX_PAGES_PER_PDF = 200;
+// Lower scale + page cap to reduce edge-worker memory pressure. Vision models
+// still read sheet titles and notes fine at ~110 DPI, and capping at 80 pages
+// per PDF keeps a single rasterization run inside the worker's budget. Larger
+// sets are still supported — the pipeline raster-prepares them in chunks across
+// stages instead of all at once.
+const RASTER_SCALE = 1.528; // ~110 DPI
+const MAX_PAGES_PER_PDF = 80;
+// Cap how many pages we rasterize per stage call. Subsequent stages reuse the
+// cached PNGs already in storage; only the first stage that touches each page
+// pays the rasterization cost.
+const RASTERIZE_CHUNK = 12;
 
 async function rasterizePdfStreaming(
   pdfBytes: Uint8Array,
