@@ -1222,6 +1222,47 @@ export type Database = {
           },
         ]
       }
+      plan_review_page_assets: {
+        Row: {
+          created_at: string
+          firm_id: string | null
+          id: string
+          page_index: number
+          plan_review_id: string
+          source_file_path: string
+          status: string
+          storage_path: string
+        }
+        Insert: {
+          created_at?: string
+          firm_id?: string | null
+          id?: string
+          page_index: number
+          plan_review_id: string
+          source_file_path: string
+          status?: string
+          storage_path: string
+        }
+        Update: {
+          created_at?: string
+          firm_id?: string | null
+          id?: string
+          page_index?: number
+          plan_review_id?: string
+          source_file_path?: string
+          status?: string
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "plan_review_page_assets_plan_review_id_fkey"
+            columns: ["plan_review_id"]
+            isOneToOne: false
+            referencedRelation: "plan_reviews"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       plan_reviews: {
         Row: {
           ai_check_status: string
