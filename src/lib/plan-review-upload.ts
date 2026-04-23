@@ -183,6 +183,25 @@ export async function uploadPlanReviewFiles(
     if (assetErr) warnings.push(`page_assets: ${assetErr.message}`);
   }
 
+  // 5b. Persist per-page rasterize failures so they survive the upload toast.
+  // The pipeline reads these to decide whether prepare_pages should re-render
+  // the gaps before the AI stage runs.
+  if (allFailures.length > 0) {
+    try {
+      await supabase.from("pipeline_error_log").insert(
+        allFailures.slice(0, 500).map((f) => ({
+          plan_review_id: reviewId,
+          stage: "upload",
+          error_class: "rasterize_partial",
+          error_message: `${f.fileName} page ${f.pageIndex}: ${f.reason}`.slice(0, 4000),
+          metadata: { file: f.fileName, page_index: f.pageIndex, reason: f.reason },
+        })),
+      );
+    } catch {
+      // Non-fatal — the warnings array still carries this info to the toast.
+    }
+  }
+
   // 6. Kick off the pipeline. This is the step previously swallowed by a
   // console.warn — surface it now so the user knows when nothing started.
   const pipeline = await startPipeline(reviewId, "core");
