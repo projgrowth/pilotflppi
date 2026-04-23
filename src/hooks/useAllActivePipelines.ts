@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useFirmId } from "@/hooks/useFirmId";
+import { subscribeShared } from "@/hooks/useReviewDashboard";
 
 export interface PipelineRowRich {
   id: string;
@@ -39,17 +40,20 @@ export interface ReviewActivity {
 const STUCK_THRESHOLD_MS = 120_000;
 
 /**
- * Returns every plan review that has at least one pipeline row from the last
- * 24 hours OR a currently active stage, plus a live realtime subscription.
+ * Returns every plan review with at least one pipeline row in the last 24h
+ * OR a currently active stage. RLS scopes rows to the user's firm.
  *
- * RLS already scopes rows to the user's firm.
+ * Realtime is the source of freshness — we share one channel per firm via
+ * `subscribeShared` so multiple components mounting this hook don't trigger
+ * Supabase Realtime's "cannot add postgres_changes after subscribe()" error.
+ * No polling — realtime is reliable for this table.
  */
 export function useAllActivePipelines() {
   const qc = useQueryClient();
   const { firmId } = useFirmId();
 
   const query = useQuery({
-    queryKey: ["pipeline-activity-all"],
+    queryKey: ["pipeline-activity-all", firmId],
     queryFn: async (): Promise<ReviewActivity[]> => {
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
@@ -86,8 +90,6 @@ export function useAllActivePipelines() {
 
       const activities: ReviewActivity[] = [];
       for (const [planReviewId, list] of grouped) {
-        // Newest first by created_at; current = first running, else first pending,
-        // else the most recent row.
         const running = list.find((r) => r.status === "running");
         const pending = list.find((r) => r.status === "pending");
         const current = running ?? pending ?? list[0] ?? null;
@@ -116,7 +118,6 @@ export function useAllActivePipelines() {
         });
       }
 
-      // Active first, then stuck rises to the top within active by oldest start.
       activities.sort((a, b) => {
         if (a.hasActive !== b.hasActive) return a.hasActive ? -1 : 1;
         const aStart = a.current?.started_at
@@ -130,30 +131,23 @@ export function useAllActivePipelines() {
 
       return activities;
     },
-    refetchInterval: 5_000,
+    // Short-circuit until firm membership resolves — prevents subscribing
+    // with a placeholder firm id and prevents an empty initial fetch.
+    enabled: !!firmId,
   });
 
-  // Realtime: invalidate on any change to review_pipeline_status for this firm.
+  // Single shared channel per firm. ref-counted in useReviewDashboard so
+  // mounting this hook in multiple components is safe.
   useEffect(() => {
     if (!firmId) return;
-    const channel = supabase
-      .channel(`pipeline-activity-all-${firmId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "review_pipeline_status",
-          filter: `firm_id=eq.${firmId}`,
-        },
-        () => {
-          qc.invalidateQueries({ queryKey: ["pipeline-activity-all"] });
-        },
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return subscribeShared(
+      `pipeline-activity-all:${firmId}`,
+      "review_pipeline_status",
+      `firm_id=eq.${firmId}`,
+      () => {
+        qc.invalidateQueries({ queryKey: ["pipeline-activity-all", firmId] });
+      },
+    );
   }, [firmId, qc]);
 
   return query;
