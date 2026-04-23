@@ -2,37 +2,20 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Activity, AlertTriangle, ExternalLink, Loader2, Play, Square, Trash2 } from "lucide-react";
+import { Activity, AlertTriangle, ExternalLink, Info, Loader2, Play, Square, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import FppEmptyState from "@/components/shared/FppEmptyState";
 import { useAllActivePipelines, type ReviewActivity } from "@/hooks/useAllActivePipelines";
 import { cancelPipelineForReview, clearOrphanedPipelineRows, resumePipelineForReview } from "@/lib/pipeline-cancel";
 import { useFirmId } from "@/hooks/useFirmId";
+import { CORE_STAGES, DEEP_STAGES, shortStageLabel } from "@/lib/pipeline-stages";
 import { cn } from "@/lib/utils";
 
-const CORE_STAGES = [
-  "upload",
-  "prepare_pages",
-  "sheet_map",
-  "dna_extract",
-  "discipline_review",
-  "dedupe",
-  "complete",
-];
-const DEEP_STAGES = [
-  "verify",
-  "ground_citations",
-  "cross_check",
-  "deferred_scope",
-  "prioritize",
-];
-
-function shortStage(s: string) {
-  return s.replace(/_/g, " ");
-}
+const shortStage = shortStageLabel;
 
 function elapsed(from: string | null): string {
   if (!from) return "—";
