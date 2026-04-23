@@ -2983,6 +2983,35 @@ async function stageGroundCitations(
 
 // ---------- main handler ----------
 
+/**
+ * Fire-and-forget self-invocation. Posts back to this same edge function with
+ * a single `stage` to run, so each stage gets a fresh worker (= fresh memory
+ * budget). MuPDF WASM, page buffers, and AI response state from the previous
+ * stage never co-exist in one worker.
+ */
+function scheduleNextStage(planReviewId: string, nextStage: Stage) {
+  const url = `${SUPABASE_URL}/functions/v1/run-review-pipeline`;
+  // Don't await — return immediately and let waitUntil keep this socket alive
+  // long enough for the request to flush.
+  return fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      "x-internal-self-invoke": "1",
+    },
+    body: JSON.stringify({
+      plan_review_id: planReviewId,
+      stage: nextStage,
+      _internal: true,
+    }),
+  })
+    .then((r) => {
+      if (!r.ok) console.error(`[schedule] ${nextStage} → HTTP ${r.status}`);
+    })
+    .catch((e) => console.error(`[schedule] ${nextStage} fetch failed:`, e));
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -2997,22 +3026,13 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Validate caller
-    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: claimsErr } = await userClient.auth.getClaims(token);
-    if (claimsErr || !claimsData?.claims) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
     const body = await req.json().catch(() => ({}));
     const plan_review_id = body?.plan_review_id;
+    const requestedStage: Stage | undefined = body?.stage;
     const startFrom: Stage | undefined = body?.start_from;
+    const isInternalSelfInvoke =
+      body?._internal === true || req.headers.get("x-internal-self-invoke") === "1";
+
     if (!plan_review_id || typeof plan_review_id !== "string") {
       return new Response(JSON.stringify({ error: "plan_review_id required" }), {
         status: 400,
@@ -3020,8 +3040,32 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Use service role for the orchestration so we can bypass RLS where needed
-    // (e.g. inserting pipeline_status for any firm member starting the run).
+    // Authenticate the caller. Internal self-invokes use the service role key
+    // as a bearer token, which getClaims() will reject — accept that case based
+    // on the marker header + matching service role secret.
+    if (!isInternalSelfInvoke) {
+      const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const token = authHeader.replace("Bearer ", "");
+      const { data: claimsData, error: claimsErr } = await userClient.auth.getClaims(token);
+      if (claimsErr || !claimsData?.claims) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    } else {
+      // Verify the self-invoke really came from us.
+      const expected = `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`;
+      if (authHeader !== expected) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     const { data: pr, error: prErr } = await admin
@@ -3035,31 +3079,38 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
     const firmId = (pr as { firm_id: string | null }).firm_id;
 
-    // Determine which stages to run. When `start_from` is supplied (e.g. after
-    // a manual DNA patch), we skip earlier stages but still substitute a cheap
-    // `dna_extract` re-evaluation so the gate runs on the patched values.
-    const startIdx = startFrom ? STAGES.indexOf(startFrom) : 0;
-    const effectiveStart = startIdx < 0 ? 0 : startIdx;
-    const stagesToRun = STAGES.slice(effectiveStart);
-
-    // Mark all stages pending up-front so the stepper renders immediately.
-    if (effectiveStart === 0) {
-      for (const s of STAGES) {
+    // Resolve which single stage this invocation runs.
+    // - First call (no `stage`, no `start_from`): seed pending rows for ALL
+    //   stages and run `upload` first.
+    // - First call with `start_from`: seed only the trailing stages, run `start_from`.
+    // - Self-invoke (`stage` set): run exactly that stage.
+    let stageToRun: Stage;
+    if (requestedStage) {
+      stageToRun = requestedStage;
+    } else if (startFrom) {
+      stageToRun = startFrom;
+      const idx = STAGES.indexOf(startFrom);
+      const tail = idx >= 0 ? STAGES.slice(idx) : STAGES;
+      for (const s of tail) {
         await setStage(admin, plan_review_id, firmId, s, { status: "pending" });
       }
     } else {
-      for (const s of stagesToRun) {
+      stageToRun = "upload";
+      for (const s of STAGES) {
         await setStage(admin, plan_review_id, firmId, s, { status: "pending" });
       }
     }
 
     const stageImpls: Record<Stage, () => Promise<Record<string, unknown>>> = {
       upload: () => stageUpload(admin, plan_review_id),
+      prepare_pages: () => stagePreparePages(admin, plan_review_id, firmId),
       sheet_map: () => stageSheetMap(admin, plan_review_id, firmId),
-      dna_extract: () => stageDnaExtract(admin, plan_review_id, firmId),
+      dna_extract: () =>
+        startFrom && STAGES.indexOf(startFrom) > 0 && stageToRun === "dna_extract"
+          ? stageDnaReevaluate(admin, plan_review_id)
+          : stageDnaExtract(admin, plan_review_id, firmId),
       discipline_review: () => stageDisciplineReview(admin, plan_review_id, firmId),
       verify: () => stageVerify(admin, plan_review_id),
       dedupe: () => stageDedupe(admin, plan_review_id),
@@ -3070,78 +3121,82 @@ Deno.serve(async (req) => {
       complete: () => stageComplete(admin, plan_review_id),
     };
 
-    // Heavy work (PDF rasterization via MuPDF WASM + many vision calls) blows
-    // past the request worker's CPU/memory budget if we await it inline. Run it
-    // as a background task and return immediately — the frontend already
-    // subscribes to `review_pipeline_status` via realtime to surface progress.
-    const runPipeline = async () => {
-      const results: Record<string, unknown> = {};
-      let halted = false;
-      let haltReason: string | null = null;
+    const runOneStage = async () => {
+      await setStage(admin, plan_review_id, firmId, stageToRun, { status: "running" });
+      try {
+        const meta = await withRetry(() => stageImpls[stageToRun](), `stage:${stageToRun}`);
 
-      for (const stage of stagesToRun) {
-        if (halted) {
-          await setStage(admin, plan_review_id, firmId, stage, {
-            status: "error",
-            error_message: haltReason ?? "Skipped — earlier stage failed",
-          });
-          continue;
+        // Special case: prepare_pages may need to loop itself for more chunks
+        // before advancing to sheet_map.
+        if (stageToRun === "prepare_pages") {
+          const m = meta as { needs_more_chunks?: boolean };
+          if (m.needs_more_chunks) {
+            // Stay on prepare_pages; mark complete-then-running cycle is noisy,
+            // so leave status as 'running' with metadata note and just schedule.
+            await setStage(admin, plan_review_id, firmId, stageToRun, {
+              status: "running",
+              metadata: meta,
+            });
+            scheduleNextStage(plan_review_id, "prepare_pages");
+            return;
+          }
         }
-        await setStage(admin, plan_review_id, firmId, stage, { status: "running" });
-        try {
-          const impl =
-            stage === "dna_extract" && effectiveStart > 0
-              ? () => stageDnaReevaluate(admin, plan_review_id)
-              : stageImpls[stage];
-          const meta = await withRetry(() => impl(), `stage:${stage}`);
-          results[stage] = meta;
-          await setStage(admin, plan_review_id, firmId, stage, {
-            status: "complete",
-            metadata: meta,
-          });
 
-          if (stage === "dna_extract") {
-            const m = meta as Partial<DnaHealth>;
-            if (m.blocking) {
-              halted = true;
-              haltReason = `DNA gate: ${m.block_reason ?? "extraction blocked"}`;
-              await setStage(admin, plan_review_id, firmId, stage, {
-                status: "error",
-                error_message: haltReason,
-                metadata: meta as Record<string, unknown>,
-              });
-            }
+        await setStage(admin, plan_review_id, firmId, stageToRun, {
+          status: "complete",
+          metadata: meta,
+        });
+
+        // DNA gate: a blocking DNA result halts the pipeline.
+        if (stageToRun === "dna_extract") {
+          const m = meta as Partial<DnaHealth>;
+          if (m.blocking) {
+            await setStage(admin, plan_review_id, firmId, stageToRun, {
+              status: "error",
+              error_message: `DNA gate: ${m.block_reason ?? "extraction blocked"}`,
+              metadata: meta as Record<string, unknown>,
+            });
+            return;
           }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          results[stage] = { error: message };
-          await setStage(admin, plan_review_id, firmId, stage, {
-            status: "error",
-            error_message: message,
-          });
-          if (stage === "upload" || stage === "dna_extract") {
-            halted = true;
-            haltReason = `${stage} failed: ${message}`;
-          }
+        }
+
+        // Advance to the next stage in the canonical order.
+        const idx = STAGES.indexOf(stageToRun);
+        const next = STAGES[idx + 1];
+        if (next) scheduleNextStage(plan_review_id, next);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await setStage(admin, plan_review_id, firmId, stageToRun, {
+          status: "error",
+          error_message: message,
+        });
+        // For non-fatal stages, still try to advance so the user gets partial
+        // results. `upload`, `prepare_pages`, and `dna_extract` halt the chain.
+        const isFatal =
+          stageToRun === "upload" ||
+          stageToRun === "prepare_pages" ||
+          stageToRun === "dna_extract";
+        if (!isFatal) {
+          const idx = STAGES.indexOf(stageToRun);
+          const next = STAGES[idx + 1];
+          if (next) scheduleNextStage(plan_review_id, next);
         }
       }
     };
 
-    // Fire-and-forget. EdgeRuntime.waitUntil keeps the worker alive past the
-    // response so the loop can finish even after we return 202.
+    // Run this single stage as a background task and return 202 immediately.
     const edgeRuntime = (globalThis as { EdgeRuntime?: { waitUntil(p: Promise<unknown>): void } })
       .EdgeRuntime;
     if (edgeRuntime?.waitUntil) {
       edgeRuntime.waitUntil(
-        runPipeline().catch((e) => console.error("run-review-pipeline background error:", e)),
+        runOneStage().catch((e) => console.error(`stage ${stageToRun} background error:`, e)),
       );
     } else {
-      // Local dev fallback — still detached, but no waitUntil available.
-      runPipeline().catch((e) => console.error("run-review-pipeline background error:", e));
+      runOneStage().catch((e) => console.error(`stage ${stageToRun} background error:`, e));
     }
 
     return new Response(
-      JSON.stringify({ ok: true, accepted: true, plan_review_id }),
+      JSON.stringify({ ok: true, accepted: true, plan_review_id, stage: stageToRun }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 202,
