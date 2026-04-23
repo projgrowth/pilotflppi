@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Activity,
   Brain,
@@ -6,6 +6,8 @@ import {
   AlertTriangle,
   ChevronDown,
   Layers,
+  FileWarning,
+  Loader2,
 } from "lucide-react";
 import {
   Popover,
@@ -13,6 +15,9 @@ import {
   PopoverContent,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+import { reprepareInBrowser } from "@/lib/reprepare-in-browser";
 import {
   usePipelineStatus,
   useDeficienciesV2,
@@ -67,6 +72,36 @@ export default function ReviewHealthStrip({
   const { data: defs = [] } = useDeficienciesV2(planReviewId);
   const { data: sheets = [] } = useSheetCoverage(planReviewId);
   const { data: applied = [] } = useAppliedCorrections(planReviewId);
+  const queryClient = useQueryClient();
+  const [repairing, setRepairing] = useState(false);
+
+  const handleRepairPages = async () => {
+    if (repairing) return;
+    setRepairing(true);
+    const t = toast.loading("Repairing missing pages…");
+    try {
+      const result = await reprepareInBrowser(planReviewId);
+      toast.dismiss(t);
+      if (result.ok) {
+        const repaired = result.repairedCount ?? result.pageAssetCount;
+        toast.success(
+          repaired === 0
+            ? "Pages already complete — pipeline restarted."
+            : `Repaired ${repaired} page${repaired === 1 ? "" : "s"} and restarted the pipeline.`,
+        );
+        queryClient.invalidateQueries({ queryKey: ["pipeline_status", planReviewId] });
+        queryClient.invalidateQueries({ queryKey: ["plan-review", planReviewId] });
+      } else {
+        toast.error(result.message);
+      }
+      for (const w of result.warnings) toast.warning(w);
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e instanceof Error ? e.message : "Repair failed");
+    } finally {
+      setRepairing(false);
+    }
+  };
 
   const currentStage = useMemo<PipelineStage | null>(() => {
     // Last stage that's complete or running, in pipeline order
@@ -128,6 +163,20 @@ export default function ReviewHealthStrip({
   const presentSheets = sheets.filter(
     (s) => s.expected && s.status === "present",
   ).length;
+
+  // Pages-ready signal: when prepare_pages stage metadata reports an
+  // expected_pages total and we have fewer manifest rows than expected,
+  // surface a repair chip. We approximate "manifest rows" with sheet_coverage
+  // count since they're written 1:1 by sheet_map. Prior to sheet_map the
+  // chip uses prepare_pages.metadata directly.
+  const preparePagesMeta = useMemo(() => {
+    const row = pipeRows.find((r) => r.stage === "prepare_pages");
+    return ((row as unknown as { metadata?: { expected_pages?: number; pre_rasterized_pages?: number } } | undefined)
+      ?.metadata ?? {}) as { expected_pages?: number; pre_rasterized_pages?: number };
+  }, [pipeRows]);
+  const expectedPages = preparePagesMeta.expected_pages ?? expectedSheets;
+  const readyPages = sheets.length > 0 ? sheets.length : (preparePagesMeta.pre_rasterized_pages ?? 0);
+  const hasPageGap = expectedPages > 0 && readyPages > 0 && readyPages < expectedPages;
 
   return (
     <div className="rounded-lg border bg-card shadow-sm">
@@ -233,6 +282,31 @@ export default function ReviewHealthStrip({
         </Chip>
 
         <CoverageChip planReviewId={planReviewId} />
+
+        {hasPageGap && (
+          <button
+            type="button"
+            onClick={handleRepairPages}
+            disabled={repairing}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors",
+              "border-amber-500/40 bg-amber-500/5 text-amber-700 hover:bg-amber-500/10 dark:text-amber-400",
+              "disabled:cursor-not-allowed disabled:opacity-60",
+            )}
+            title="Re-render only the missing pages without re-processing the rest."
+          >
+            {repairing ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <FileWarning className="h-3 w-3" />
+            )}
+            <span className="font-medium">Pages</span>
+            <span className="font-mono text-foreground">
+              {readyPages}/{expectedPages}
+            </span>
+            {!repairing && <span className="ml-0.5 text-2xs">repair</span>}
+          </button>
+        )}
 
         <span className="ml-auto text-2xs font-mono text-muted-foreground">
           Sheets {presentSheets}/{expectedSheets}

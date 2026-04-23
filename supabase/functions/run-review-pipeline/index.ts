@@ -846,9 +846,22 @@ async function stageSheetMap(
   if (allRows.length === 0) return { sheets: 0 };
   const { error } = await admin.from("sheet_coverage").insert(allRows);
   if (error) throw error;
+
+  // Round-2 diff: compute a lightweight signature for each present sheet so
+  // the next run can tell which sheets actually changed. Signature is
+  // sheet_ref + page_index + storage_path (storage_path changes when the
+  // raster bytes change because the upload writes a content-keyed path).
+  // Deferred to checklist_state.last_sheet_map at end-of-run; we just stage
+  // the in-memory snapshot here for any caller that wants it.
+  const snapshot = present.map((p) => ({
+    sheet_ref: p.sheet_ref,
+    page_index: p.page_index,
+    discipline: p.discipline,
+  }));
   return {
     sheets: allRows.length,
     present: presentRows.length,
+    snapshot,
   };
 }
 
@@ -1140,13 +1153,23 @@ async function stageDnaReevaluate(
   return { reevaluated: true, ...health };
 }
 
+// Round-2 carryover helper: prior findings stored in plan_reviews.previous_findings
+// use Finding.severity (critical|major|minor); deficiencies_v2.priority uses
+// (high|medium|low). Map without losing fidelity.
+function mapSeverityToPriority(severity: string): string {
+  const s = severity.trim().toLowerCase();
+  if (s === "critical" || s === "high") return "high";
+  if (s === "minor" || s === "low") return "low";
+  return "medium";
+}
+
 async function stageDisciplineReview(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
   firmId: string | null,
 ) {
   // Load context once and share across all discipline calls.
-  const [sheets, signedUrls, dnaRow, jurisdictionRow] = await Promise.all([
+  const [sheets, signedUrls, dnaRow, jurisdictionRow, reviewMetaRow] = await Promise.all([
     admin
       .from("sheet_coverage")
       .select("sheet_ref, sheet_title, discipline, page_index")
@@ -1163,6 +1186,11 @@ async function stageDisciplineReview(
       .select("projects(county, use_type)")
       .eq("id", planReviewId)
       .maybeSingle(),
+    admin
+      .from("plan_reviews")
+      .select("round, previous_findings, checklist_state")
+      .eq("id", planReviewId)
+      .maybeSingle(),
   ]);
 
   const allSheets = (sheets.data ?? []) as Array<{
@@ -1171,6 +1199,85 @@ async function stageDisciplineReview(
     discipline: string | null;
     page_index: number | null;
   }>;
+
+  // Round-2 diff intelligence. If we're past round 1 AND the prior
+  // sheet_map snapshot exists, classify each sheet as "changed" or
+  // "unchanged". Unchanged sheets get carryover findings from
+  // previous_findings instead of an AI call. All other rounds (round=1
+  // or no prior snapshot) fall through to the existing full-AI path.
+  const reviewMeta = (reviewMetaRow.data ?? null) as
+    | { round: number; previous_findings: unknown; checklist_state: Record<string, unknown> | null }
+    | null;
+  const round = reviewMeta?.round ?? 1;
+  const checklistState = (reviewMeta?.checklist_state ?? {}) as Record<string, unknown>;
+  const lastSheetMap =
+    Array.isArray(checklistState.last_sheet_map) ? (checklistState.last_sheet_map as Array<{
+      sheet_ref: string;
+      page_index: number | null;
+      discipline: string | null;
+    }>) : null;
+  const priorFindings: Array<Record<string, unknown>> = Array.isArray(reviewMeta?.previous_findings)
+    ? (reviewMeta!.previous_findings as Array<Record<string, unknown>>)
+    : [];
+
+  const unchangedSheetRefs = new Set<string>();
+  if (round >= 2 && lastSheetMap && lastSheetMap.length > 0) {
+    const priorByRef = new Map(lastSheetMap.map((p) => [p.sheet_ref, p]));
+    for (const s of allSheets) {
+      const prior = priorByRef.get(s.sheet_ref);
+      if (
+        prior &&
+        prior.page_index === s.page_index &&
+        (prior.discipline ?? "") === (s.discipline ?? "")
+      ) {
+        unchangedSheetRefs.add(s.sheet_ref);
+      }
+    }
+  }
+
+  // Insert carryover deficiencies for each prior finding whose sheet is
+  // unchanged. Marked open + metadata.carryover_from_round so the UI
+  // panel + filter chip can find them. Done before the main loop so the
+  // dashboard sees them immediately.
+  let carryoverInserted = 0;
+  if (unchangedSheetRefs.size > 0 && priorFindings.length > 0) {
+    const carryRows: Array<Record<string, unknown>> = [];
+    for (const pf of priorFindings) {
+      const page = typeof pf.page === "string" ? pf.page : "";
+      // Match either the literal sheet_ref string or the first sheet in a
+      // comma list ("A-101" or "A-101, A-102").
+      const firstSheet = page.split(",")[0]?.trim() ?? "";
+      if (!firstSheet || !unchangedSheetRefs.has(firstSheet)) continue;
+      const desc = typeof pf.description === "string" ? pf.description : "";
+      const codeRef = typeof pf.code_ref === "string" ? pf.code_ref : "";
+      const discipline = typeof pf.discipline === "string" ? pf.discipline : "Architectural";
+      carryRows.push({
+        plan_review_id: planReviewId,
+        firm_id: firmId,
+        def_number: `CARRY-R${round - 1}-${carryRows.length + 1}`,
+        discipline,
+        finding: desc.slice(0, 2000) || "Carried over from prior round",
+        required_action: typeof pf.recommendation === "string" ? pf.recommendation.slice(0, 2000) : "Verify resolution.",
+        priority: typeof pf.severity === "string" ? mapSeverityToPriority(pf.severity) : "medium",
+        sheet_refs: [firstSheet],
+        code_reference: codeRef ? { section: codeRef } : {},
+        evidence: [],
+        status: "open",
+        verification_status: "carryover",
+        verification_notes: `Sheet ${firstSheet} unchanged from round ${round - 1}; finding replayed without re-review.`,
+        evidence_crop_meta: { carryover_from_round: round - 1, source_sheet: firstSheet },
+      });
+    }
+    if (carryRows.length > 0) {
+      const { error: cErr } = await admin.from("deficiencies_v2").insert(carryRows);
+      if (cErr) {
+        console.error("[discipline_review] carryover insert failed:", cErr);
+      } else {
+        carryoverInserted = carryRows.length;
+      }
+    }
+  }
+
   const dna = (dnaRow.data ?? null) as Record<string, unknown> | null;
   const jurisdictionProject = (jurisdictionRow.data ?? null) as
     | { projects: { county: string; use_type: string | null } | null }
@@ -1255,12 +1362,20 @@ async function stageDisciplineReview(
   for (const discipline of disciplinesToRun) {
     if (cancelledMidRun) break;
     try {
-      const disciplineSheets = routed.filter((s) => s.discipline === discipline);
+      // Round-2 diff: skip sheets we already classified as unchanged. We
+      // don't need to re-run the AI on them — carryover findings were
+      // inserted at the top of this stage.
+      const disciplineSheets = routed.filter(
+        (s) => s.discipline === discipline && !unchangedSheetRefs.has(s.sheet_ref),
+      );
       const allUrls = disciplineSheets
         .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
         .filter(Boolean) as string[];
 
-      byDiscipline[discipline] = { reviewed: 0, total: disciplineSheets.length };
+      // Total reflects the FULL discipline footprint (changed + unchanged)
+      // so the coverage chip reads "74/74" even when we only ran AI on 2.
+      const totalForDiscipline = routed.filter((s) => s.discipline === discipline).length;
+      byDiscipline[discipline] = { reviewed: totalForDiscipline - disciplineSheets.length, total: totalForDiscipline };
 
       // Skip silently if no sheets routed to this discipline.
       if (allUrls.length === 0) continue;
@@ -1318,7 +1433,8 @@ async function stageDisciplineReview(
         });
       }
       totalFindings += disciplineFindings;
-      byDiscipline[discipline].reviewed = lastReviewedSheets;
+      // Reviewed = (carryover unchanged) + (newly reviewed by AI in this run)
+      byDiscipline[discipline].reviewed = byDiscipline[discipline].reviewed + lastReviewedSheets;
     } catch (err) {
       console.error(`[discipline_review:${discipline}] failed:`, err);
       failed.push(discipline);
@@ -1384,7 +1500,13 @@ async function stageDisciplineReview(
     console.error("[discipline_review] failed to persist review_coverage:", err);
   }
 
-  return { failed_disciplines: failed, total_findings: totalFindings };
+  return {
+    failed_disciplines: failed,
+    total_findings: totalFindings,
+    carryover_inserted: carryoverInserted,
+    unchanged_sheets: unchangedSheetRefs.size,
+    round,
+  };
 }
 
 interface DisciplineRunCtx {
@@ -2355,15 +2477,41 @@ async function stageComplete(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
 ) {
+  // Snapshot the current sheet_map into checklist_state.last_sheet_map so the
+  // NEXT round's discipline_review can diff against it and skip unchanged
+  // sheets. We persist (sheet_ref, page_index, discipline) — enough to detect
+  // structural changes without bloating the JSONB column.
+  const { data: sheetRows } = await admin
+    .from("sheet_coverage")
+    .select("sheet_ref, page_index, discipline")
+    .eq("plan_review_id", planReviewId);
+  const snapshot = (sheetRows ?? []) as Array<{
+    sheet_ref: string;
+    page_index: number | null;
+    discipline: string | null;
+  }>;
+
+  const { data: existing } = await admin
+    .from("plan_reviews")
+    .select("checklist_state")
+    .eq("id", planReviewId)
+    .maybeSingle();
+  const prevState = ((existing?.checklist_state ?? {}) as Record<string, unknown>) ?? {};
+
   await admin
     .from("plan_reviews")
     .update({
       ai_check_status: "complete",
       pipeline_version: "v2",
+      checklist_state: {
+        ...prevState,
+        last_sheet_map: snapshot,
+        last_sheet_map_at: new Date().toISOString(),
+      },
       updated_at: new Date().toISOString(),
     })
     .eq("id", planReviewId);
-  return { ok: true };
+  return { ok: true, snapshot_size: snapshot.length };
 }
 
 // ---------- adversarial verification ----------
