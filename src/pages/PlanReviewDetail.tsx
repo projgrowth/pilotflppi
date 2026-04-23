@@ -59,6 +59,7 @@ import { reprepareInBrowser } from "@/lib/reprepare-in-browser";
 import { StuckRecoveryBanner } from "@/components/plan-review/StuckRecoveryBanner";
 import { RoundCarryoverPanel } from "@/components/plan-review/RoundCarryoverPanel";
 import { UploadProgressBar } from "@/components/plan-review/UploadProgressBar";
+import { useReviewActions } from "@/hooks/plan-review/useReviewActions";
 import { Wand2, AlertTriangle, Loader2 } from "lucide-react";
 
 type RightPanelMode = "findings" | "checklist" | "completeness" | "letter" | "county";
