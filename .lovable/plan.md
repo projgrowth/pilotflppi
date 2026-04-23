@@ -1,185 +1,91 @@
 
-## Why upload + review feel slow and keep failing
 
-### What is actually happening today
+## Stop edge worker memory crashes by sharding the pipeline into self-invoking stages
 
-There are two separate slow parts, and both are expensive:
+### Why it's still crashing
 
-1. **Before analysis even starts, the browser does a lot of work**
-   - `NewPlanReviewWizard.tsx` validates each PDF, reads page counts for each file, renders the first page title block client-side, runs AI extraction, then geocodes the address.
-   - That makes the “upload” step feel slow even before the review pipeline begins.
+The previous fix moved work into `EdgeRuntime.waitUntil`, but **all 11 stages still execute inside one worker**. The first stage to call `signedSheetUrls()` (sheet_map) downloads every PDF, loads MuPDF WASM, and rasterizes every page (up to 80) before returning. Even at 110 DPI, MuPDF + page buffers + the loaded WASM module + the rest of the pipeline state pushes past the worker memory ceiling. The `RASTERIZE_CHUNK = 12` constant exists but is unused — the streaming function still loops the whole document in one call.
 
-2. **The review pipeline is doing edge-worker-unfriendly work**
-   - `run-review-pipeline/index.ts` eagerly rasterizes every uploaded PDF page into PNGs in the edge function during `upload`.
-   - It uses MuPDF WASM in-process, at ~150 DPI, up to **200 pages per PDF**.
-   - It then repeatedly calls `signedSheetUrls()` across many stages, which means repeated storage listing/signing and reloading of the same large page set.
-   - Several AI stages send lots of images at once:
-     - `sheet_map` processes the whole set in batches
-     - `discipline_review` can send all general pages plus all discipline pages for up to 8–9 disciplines
-     - `verify` and `cross_check` attach more page images again
-   - `EdgeRuntime.waitUntil` helps with request timeout, but it does **not** remove the CPU/memory ceiling. The logs already confirm the real failure mode: **Memory limit exceeded**.
+Background tasks share the same memory limit as the request worker. So `waitUntil` doesn't help here.
 
-### Root causes in this codebase
+### The fix: one HTTP invocation = one stage
 
-**Primary failure source**
-- `stageUpload()` calls `signedSheetUrls()`, which downloads PDFs and rasterizes all pages inside the edge worker.
-- That is the main reason for `WORKER_RESOURCE_LIMIT`.
-
-**Primary slowness sources**
-- Client-side pre-processing in the wizard before the review is even created.
-- Repeated `signedSheetUrls()` calls in multiple stages instead of one persisted page manifest.
-- Over-large multimodal AI payloads, especially in `discipline_review`, `verify`, and `cross_check`.
-
-**Secondary UX issue**
-- Some UI still assumes the pipeline finishes synchronously even though the function now returns `202 Accepted`.
-- That makes the app feel confusing because users get “started” or “complete” messaging that doesn’t fully match reality.
-
----
-
-## Plan to make it faster and stop edge-function crashes
-
-### 1. Move PDF rasterization out of the edge function hot path
-Replace eager full-set rasterization during `upload` with a lighter architecture:
-
-- Stop rasterizing every page in `stageUpload()`.
-- Persist a **page manifest / cached page registry** once pages are available, instead of recomputing via `signedSheetUrls()` in every stage.
-- Only rasterize pages when a later stage truly needs them, and only for the subset of pages that stage will inspect.
-
-Implementation direction:
-- Add a new table like `plan_review_page_assets` keyed by `plan_review_id + file_path + page_index` with:
-  - storage path
-  - signed-url source metadata
-  - rasterization status
-  - width/height if helpful
-- Populate this incrementally instead of all-at-once.
-
-### 2. Remove “rasterize everything” from the upload stage
-Change `stageUpload()` to become a cheap validation/index stage:
-
-- confirm files exist
-- maybe record file counts / source metadata
-- do not materialize all pages yet
-
-This will make the first visible pipeline step fast and avoid immediate memory spikes.
-
-### 3. Split page preparation from analysis and keep it incremental
-Introduce a dedicated page-prep phase before AI-heavy stages:
+Refactor the pipeline so each stage runs in its own fresh edge worker. When a stage finishes, it self-invokes the function for the next stage and returns. Memory resets between stages. MuPDF WASM only lives during the rasterization stage.
 
 ```text
-upload -> prepare_pages -> sheet_map -> dna_extract -> discipline_review -> verify -> ...
+Client → POST run-review-pipeline {stage:"upload"}     → 202, schedules sheet_map
+        POST run-review-pipeline {stage:"sheet_map"}   → 202, schedules dna_extract
+        POST run-review-pipeline {stage:"dna_extract"} → 202, schedules discipline_review
+        ...
 ```
 
-For `prepare_pages`:
-- process pages in very small chunks
-- persist progress in `review_pipeline_status.metadata`
-- skip already-prepared pages on retries / reruns
-- never hold the whole document set in memory at once
+Each call:
+1. Reads the requested stage from the body (default `upload` for the first call).
+2. Marks that single stage `running`, runs it, marks `complete`/`error`.
+3. If more stages remain and not halted, fires a non-awaited `fetch` to its own URL with `{plan_review_id, stage: next}` and returns 202 immediately.
+4. The next worker boots clean — MuPDF, page buffers, AI response bodies from the previous stage are all gone.
 
-### 4. Stop recomputing signed page URLs in every stage
-Refactor all uses of `signedSheetUrls()` so stages consume a cached manifest instead.
+Realtime UX is unchanged because the stepper subscribes to `review_pipeline_status`, not to the HTTP response.
 
-Current repeated consumers:
-- `stageUpload`
-- `stageSheetMap`
-- `stageDnaExtract`
-- `stageDisciplineReview`
-- `stageCrossCheck`
-- `stageDeferredScope`
-- `stageVerify`
+### Make rasterization actually chunked
 
-After the refactor:
-- one helper reads prepared page rows from the DB
-- only signs the exact pages needed for the current stage
-- avoids repeated folder listing and repeated whole-review page enumeration
+`signedSheetUrls()` currently rasterizes every page of every PDF in one call. Split into a real prepare-pages loop:
 
-### 5. Shrink AI image payloads aggressively
-Reduce how many images each AI call sees:
+- New helper `rasterizeNextChunk(planReviewId, firmId)` reads the manifest, finds the first source PDF that still has missing pages, downloads only that PDF, rasterizes the next `RASTERIZE_CHUNK` (12) pages, uploads them, writes manifest rows, then returns `{ done: false }` if more pages remain.
+- New stage `prepare_pages` inserted after `upload`. It calls `rasterizeNextChunk` once, and if not done, schedules another `prepare_pages` invocation instead of advancing to `sheet_map`.
+- Result: each worker handles at most 12 pages of one PDF, then dies. MuPDF WASM never accumulates more than one chunk's worth of state.
 
-- **Sheet map**: batch smaller than 8 when needed; cap pages for giant reviews and let the rest process incrementally.
-- **DNA extract**: keep to cover/code-summary pages only.
-- **Discipline review**:
-  - cap discipline pages per run
-  - run multiple smaller discipline chunks instead of “all discipline sheets at once”
-  - keep only 1–2 general context pages
-- **Cross-check**: lower the 12-sheet cap or make it targeted by discipline/sheet type.
-- **Verify**: verify in smaller batches and prefer only the explicitly cited pages.
+Downstream stages (sheet_map, discipline_review, verify, cross_check) read the manifest rows + sign URLs only — no rasterization in their workers.
 
-This reduces both AI latency and edge memory pressure.
+### Stage list update
 
-### 6. Trim client-side upload latency
-Make the wizard feel faster by reducing browser-side work before review creation:
+```text
+upload → prepare_pages (loops itself until manifest is full)
+       → sheet_map → dna_extract → discipline_review
+       → verify → dedupe → ground_citations → cross_check
+       → deferred_scope → prioritize → complete
+```
 
-- keep PDF magic-byte validation
-- stop counting every page up front for every file if it is only used for display
-- make title-block extraction optional/background after file registration
-- defer geocoding until after project/review creation if needed
+`PipelineProgressStepper` and `useReviewDashboard` need the new `prepare_pages` stage in their stage list.
 
-Goal: user reaches “Analyze” much faster.
+### Self-invoke pattern (avoids a separate dispatcher function)
 
-### 7. Make async pipeline UX honest everywhere
-Update places that still behave like the pipeline is synchronous:
+```ts
+async function scheduleNextStage(planReviewId: string, nextStage: Stage) {
+  // Fire-and-forget POST to ourselves. Don't await the response.
+  fetch(`${SUPABASE_URL}/functions/v1/run-review-pipeline`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+    body: JSON.stringify({ plan_review_id: planReviewId, stage: nextStage }),
+  }).catch((e) => console.error("schedule next stage failed:", e));
+}
+```
 
-- `ReviewDashboard.tsx` should no longer inspect `data.stages` from the function response, because the function now returns early with `202`.
-- `ProjectDNAViewer.tsx` should not toast “Pipeline re-run complete” immediately after invoke; it should say “re-run started” and let realtime status show completion.
-- Keep the wizard/topbar steppers as the source of truth for long-running progress.
+Wrapped in `EdgeRuntime.waitUntil` so the request can return 202 first without aborting the outbound fetch.
 
-### 8. Add guardrails for oversized reviews
-For very large submissions:
-- cap maximum pages analyzed per run
-- mark overflow as “needs staged review” in pipeline metadata
-- surface a clear message in the UI rather than letting the worker die
+### Files touched
 
-This prevents one huge plan set from crashing the whole review flow.
-
----
-
-## Files to change
-
-### Backend
 - `supabase/functions/run-review-pipeline/index.ts`
-  - remove eager full rasterization from `stageUpload`
-  - add incremental page-prep stage / cached asset lookup
-  - replace repeated `signedSheetUrls()` flow with manifest-based helpers
-  - reduce per-stage image payload sizes
-- New migration:
-  - add `plan_review_page_assets` (or equivalent cache table)
-  - enable RLS and indexes for `plan_review_id`, `page_index`, `status`
+  - Accept optional `stage` in request body (default `"upload"`).
+  - Run only that single stage per invocation.
+  - After the stage completes, schedule the next stage via self-fetch.
+  - Add `prepare_pages` to the `Stage` union and `STAGES` list.
+  - Add `stagePreparePages` that calls a new chunked rasterizer and self-loops while pages remain.
+  - Refactor `signedSheetUrls` to ONLY read the manifest / sign URLs (no rasterization fallback). The cold path is now exclusively in `stagePreparePages`.
+  - Use the existing `RASTERIZE_CHUNK = 12` constant.
 
-### Frontend
-- `src/components/NewPlanReviewWizard.tsx`
-  - reduce blocking pre-analysis work during upload/confirm
-- `src/pages/ReviewDashboard.tsx`
-  - stop expecting synchronous pipeline results
-- `src/components/review-dashboard/ProjectDNAViewer.tsx`
-  - change rerun messaging to async “started” flow
 - `src/components/plan-review/PipelineProgressStepper.tsx`
-  - include the new page-prep stage if added
+  - Add `prepare_pages` to the displayed stage labels.
+
 - `src/hooks/useReviewDashboard.ts`
-  - update stage list/types for the new pipeline stage
+  - Add `prepare_pages` to the stage list / type.
 
----
+### Expected result
 
-## Expected result after implementation
+- `WORKER_RESOURCE_LIMIT` stops happening because no worker ever holds MuPDF + a full plan set simultaneously.
+- Each invocation runs ≤ ~5–15 seconds with a small memory footprint.
+- Realtime stepper UX is unchanged from the user's view — they still see stages tick over live.
 
-### Upload feels faster
-Because the browser is no longer doing as much PDF work before creating the review.
-
-### Pipeline becomes much more reliable
-Because the edge function is no longer rasterizing entire plan sets up front in one worker and no longer re-processing the same pages across multiple stages.
-
-### Fewer edge-function failures
-Because memory-heavy work is chunked, cached, and limited per stage instead of all-at-once.
-
-### More predictable review times
-Because the runtime cost scales by the pages actually needed for each stage, not by repeatedly touching the full submission.
-
----
-
-## Technical notes
-
-- The current `waitUntil` pattern is not enough by itself. It solves request/response timing, but not the edge worker’s memory/CPU budget.
-- The log evidence points to the real bottleneck:
-  - boot succeeds
-  - then `Memory limit exceeded`
-  - then shutdown
-- The main architectural issue is not auth or routing; it is **PDF page preparation + repeated large multimodal payloads inside an edge worker**.
