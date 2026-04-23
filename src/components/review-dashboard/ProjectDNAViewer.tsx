@@ -158,16 +158,15 @@ export default function ProjectDNAViewer({
       qc.invalidateQueries({ queryKey: ["project_dna", planReviewId] });
 
       // Re-run pipeline starting at verify (skip extract) so the gate re-evaluates.
+      // The function returns 202 immediately and the realtime stepper surfaces
+      // progress — do NOT toast "complete" here.
       const { error } = await supabase.functions.invoke("run-review-pipeline", {
         body: { plan_review_id: planReviewId, start_from: "dna_extract" },
       });
       if (error) throw error;
 
-      toast.success("Pipeline re-run complete");
+      toast.success("Pipeline re-run started — watch the stepper for progress");
       qc.invalidateQueries({ queryKey: ["pipeline_status", planReviewId] });
-      qc.invalidateQueries({ queryKey: ["deficiencies_v2", planReviewId] });
-      qc.invalidateQueries({ queryKey: ["sheet_coverage", planReviewId] });
-      qc.invalidateQueries({ queryKey: ["project_dna", planReviewId] });
       setDrafts({});
       setEditing({});
       onAfterRerun?.();

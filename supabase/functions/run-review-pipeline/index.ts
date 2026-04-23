@@ -2259,7 +2259,7 @@ async function stageVerify(
     // Aggregate page indices across the batch (capped to keep payload tight).
     const pageSet = new Set<number>();
     for (const t of slice) for (const p of t.page_indices) pageSet.add(p);
-    const pages = Array.from(pageSet).slice(0, 8);
+    const pages = Array.from(pageSet).slice(0, 5);
     const imageUrls = pages
       .map((p) => signed[p]?.signed_url)
       .filter(Boolean) as string[];

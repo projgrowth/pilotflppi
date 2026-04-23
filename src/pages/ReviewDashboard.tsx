@@ -46,30 +46,18 @@ export default function ReviewDashboard() {
     if (!id) return;
     setRunning(true);
     try {
-      const { data, error } = await supabase.functions.invoke("run-review-pipeline", {
+      const { error } = await supabase.functions.invoke("run-review-pipeline", {
         body: { plan_review_id: id },
       });
       if (error) throw error;
 
-      // Inspect per-stage results so silent stage failures aren't reported as success.
-      const stages = (data as { stages?: Array<{ stage: string; status: string; error?: string }> } | null)?.stages;
-      const failed = Array.isArray(stages) ? stages.filter((s) => s.status === "error") : [];
-
-      if (failed.length > 0) {
-        const first = failed[0];
-        toast.error(
-          `Pipeline failed at "${first.stage}"${first.error ? `: ${first.error}` : ""}`,
-        );
-      } else {
-        toast.success("Pipeline run complete");
-      }
-
+      // Function returns 202 Accepted immediately and runs the pipeline in
+      // the background. Realtime status rows will drive the stepper UI; we
+      // just need to invalidate the query so the stepper subscribes.
+      toast.success("Analysis started — watch the stepper for live progress");
       qc.invalidateQueries({ queryKey: ["pipeline_status", id] });
-      qc.invalidateQueries({ queryKey: ["deficiencies_v2", id] });
-      qc.invalidateQueries({ queryKey: ["project_dna", id] });
-      qc.invalidateQueries({ queryKey: ["sheet_coverage", id] });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Pipeline failed";
+      const msg = e instanceof Error ? e.message : "Pipeline failed to start";
       toast.error(msg);
     } finally {
       setRunning(false);
