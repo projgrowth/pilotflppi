@@ -58,6 +58,7 @@ export function useFilteredDeficiencies(
     showSuperseded = false,
     onlyHumanReview = false,
     groupBy = "discipline",
+    chip,
   } = opts;
   const { data: defs = [], isLoading } = useDeficienciesV2(planReviewId);
 
@@ -72,6 +73,17 @@ export function useFilteredDeficiencies(
     }
     if (onlyHumanReview) {
       visible = visible.filter((d) => d.requires_human_review);
+    }
+    if (chip === "needs-eyes") {
+      visible = visible.filter((d) => d.requires_human_review);
+    } else if (chip === "life-safety") {
+      visible = visible.filter((d) => d.life_safety_flag || d.permit_blocker);
+    } else if (chip === "low-confidence") {
+      visible = visible.filter(
+        (d) => typeof d.confidence_score === "number" && d.confidence_score < 0.7,
+      );
+    } else if (chip === "deferred") {
+      visible = visible.filter((d) => d.status === "needs_info");
     }
     const sorted = [...visible].sort(compareDefs);
 
