@@ -1153,6 +1153,16 @@ async function stageDnaReevaluate(
   return { reevaluated: true, ...health };
 }
 
+// Round-2 carryover helper: prior findings stored in plan_reviews.previous_findings
+// use Finding.severity (critical|major|minor); deficiencies_v2.priority uses
+// (high|medium|low). Map without losing fidelity.
+function mapSeverityToPriority(severity: string): string {
+  const s = severity.trim().toLowerCase();
+  if (s === "critical" || s === "high") return "high";
+  if (s === "minor" || s === "low") return "low";
+  return "medium";
+}
+
 async function stageDisciplineReview(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
@@ -1352,12 +1362,20 @@ async function stageDisciplineReview(
   for (const discipline of disciplinesToRun) {
     if (cancelledMidRun) break;
     try {
-      const disciplineSheets = routed.filter((s) => s.discipline === discipline);
+      // Round-2 diff: skip sheets we already classified as unchanged. We
+      // don't need to re-run the AI on them — carryover findings were
+      // inserted at the top of this stage.
+      const disciplineSheets = routed.filter(
+        (s) => s.discipline === discipline && !unchangedSheetRefs.has(s.sheet_ref),
+      );
       const allUrls = disciplineSheets
         .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
         .filter(Boolean) as string[];
 
-      byDiscipline[discipline] = { reviewed: 0, total: disciplineSheets.length };
+      // Total reflects the FULL discipline footprint (changed + unchanged)
+      // so the coverage chip reads "74/74" even when we only ran AI on 2.
+      const totalForDiscipline = routed.filter((s) => s.discipline === discipline).length;
+      byDiscipline[discipline] = { reviewed: totalForDiscipline - disciplineSheets.length, total: totalForDiscipline };
 
       // Skip silently if no sheets routed to this discipline.
       if (allUrls.length === 0) continue;
@@ -1415,7 +1433,8 @@ async function stageDisciplineReview(
         });
       }
       totalFindings += disciplineFindings;
-      byDiscipline[discipline].reviewed = lastReviewedSheets;
+      // Reviewed = (carryover unchanged) + (newly reviewed by AI in this run)
+      byDiscipline[discipline].reviewed = byDiscipline[discipline].reviewed + lastReviewedSheets;
     } catch (err) {
       console.error(`[discipline_review:${discipline}] failed:`, err);
       failed.push(discipline);
