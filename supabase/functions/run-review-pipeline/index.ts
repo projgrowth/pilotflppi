@@ -1251,6 +1251,9 @@ async function stageDisciplineReview(
   const failed: string[] = [];
   let totalFindings = 0;
 
+  // Resolve once per stage; passed to every chunk so all rows share provenance.
+  const promptVersionId = await getActivePromptVersionId(admin, "discipline_review");
+
   // Per-discipline batching replaces the old MAX_DISCIPLINE_PAGES = 10 cap.
   // Architectural with 74 sheets becomes ~10 calls of 8 sheets each so every
   // sheet is reviewed exactly once. Hard ceiling per discipline keeps a
@@ -1288,6 +1291,7 @@ async function stageDisciplineReview(
           dna,
           jurisdiction,
           useType,
+          promptVersionId,
         });
         totalFindings += inserted;
         byDiscipline[discipline].reviewed += chunk.length;
