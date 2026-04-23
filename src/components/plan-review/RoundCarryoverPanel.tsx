@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { Finding } from "@/components/FindingCard";
+import type { Finding } from "@/types";
 
 interface Props {
   findings: Finding[];
@@ -43,11 +43,11 @@ export function RoundCarryoverPanel({ findings, currentRound, onJumpTo }: Props)
   if (carryovers.length === 0) return null;
 
   return (
-    <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+    <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs">
       <Collapsible defaultOpen={false}>
         <CollapsibleTrigger className="flex w-full items-center gap-2 text-left">
-          <History className="h-3.5 w-3.5 text-amber-700 dark:text-amber-400" />
-          <span className="font-medium text-amber-700 dark:text-amber-300">
+          <History className="h-3.5 w-3.5 text-warning" />
+          <span className="font-medium text-warning">
             {carryovers.length} carried over from prior round{carryovers.length === 1 ? "" : "s"}
           </span>
           <ChevronRight className="ml-auto h-3 w-3 opacity-50 transition-transform data-[state=open]:rotate-90" />
@@ -66,14 +66,14 @@ export function RoundCarryoverPanel({ findings, currentRound, onJumpTo }: Props)
                   onClick={() => onJumpTo?.(index)}
                   className={cn(
                     "flex w-full items-start gap-2 rounded border border-border/40 bg-background/60 px-2 py-1.5 text-left",
-                    "hover:border-amber-500/40 hover:bg-amber-500/10",
+                    "hover:border-warning/40 hover:bg-warning/10",
                   )}
                 >
                   <Badge variant="outline" className="mt-0.5 px-1 py-0 text-2xs font-mono">
                     R{f.metadata?.carryover_from_round ?? "?"}
                   </Badge>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-xs">{f.finding ?? "Untitled finding"}</div>
+                    <div className="truncate text-xs">{f.description ?? "Untitled finding"}</div>
                     {f.code_ref && (
                       <div className="mt-0.5 truncate font-mono text-2xs text-muted-foreground">
                         {f.code_ref}
