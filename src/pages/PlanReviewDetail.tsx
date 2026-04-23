@@ -683,9 +683,10 @@ export default function PlanReviewDetail() {
         phase={uploadProgress?.phase}
       />
 
-
+      {preparePagesErrored && (
         <div className="shrink-0 border-b border-destructive/30 bg-destructive/5 px-4 py-2 flex items-center gap-3">
           <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
+
           <div className="flex-1 min-w-0">
             <span className="text-2xs font-semibold text-destructive uppercase tracking-wide mr-2">
               Pages not prepared
