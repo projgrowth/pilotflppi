@@ -667,7 +667,12 @@ async function rasterizeNextChunk(
           .from("plan_review_page_assets")
           .upsert(manifestRows, { onConflict: "plan_review_id,page_index" });
         if (insErr) console.error(`[prepare_pages] bulk manifest upsert failed:`, insErr);
-        else rasterized = manifestRows.length;
+        else {
+          rasterized = manifestRows.length;
+          for (const rp of rendered) {
+            if (uploadOk.has(rp.globalIndex)) doneSet.add(rp.localIndex);
+          }
+        }
       }
 
       // Determine if this PDF still has more pages to do after this chunk.
