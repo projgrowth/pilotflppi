@@ -1,5 +1,9 @@
 import { supabase } from "@/integrations/supabase/client";
-import { rasterizeAndUploadPages, type PreparedPageAsset } from "@/lib/pdf-utils";
+import {
+  getPDFPageCount,
+  rasterizeAndUploadPages,
+  type PreparedPageAsset,
+} from "@/lib/pdf-utils";
 import { startPipeline } from "@/lib/pipeline-run";
 
 /**
@@ -69,9 +73,31 @@ export async function uploadPlanReviewFiles(
   let pageAssetRows: PreparedPageAsset[] = [];
   if (typeof window !== "undefined") {
     try {
+      // Pair each accepted File with its uploaded path + page count for the
+      // shape rasterizeAndUploadPages expects.
+      const pairs: Array<{
+        name: string;
+        file: File;
+        storagePath: string;
+        pageCount: number;
+      }> = [];
+      for (let i = 0; i < acceptedFiles.length; i++) {
+        const file = acceptedFiles[i];
+        const storagePath = newFilePaths.find((p) => p.endsWith(`/${file.name}`));
+        if (!storagePath) continue;
+        let pageCount = 0;
+        try {
+          pageCount = await getPDFPageCount(file);
+        } catch {
+          continue;
+        }
+        if (pageCount > 0) {
+          pairs.push({ name: file.name, file, storagePath, pageCount });
+        }
+      }
       pageAssetRows = await rasterizeAndUploadPages(
         reviewId,
-        acceptedFiles,
+        pairs,
         async (path, blob) => {
           const res = await supabase.storage
             .from("documents")
@@ -126,6 +152,7 @@ export async function uploadPlanReviewFiles(
   // 6. Kick off the pipeline. This is the step previously swallowed by a
   // console.warn — surface it now so the user knows when nothing started.
   const pipeline = await startPipeline(reviewId, "core");
+  const pipelineStarted = pipeline.ok;
   if (!pipeline.ok) {
     warnings.push(`Pipeline did not start: ${pipeline.message}`);
   }
@@ -133,7 +160,7 @@ export async function uploadPlanReviewFiles(
   return {
     acceptedCount: newFilePaths.length,
     pageAssetCount: pageAssetRows.length,
-    pipelineStarted: pipeline.ok,
+    pipelineStarted,
     warnings,
   };
 }
