@@ -25,6 +25,7 @@ import { generateCountyReport } from "@/lib/county-report";
 import { determineReviewStatus } from "@/lib/review-status";
 import { cancelPipelineForReview } from "@/lib/pipeline-cancel";
 import { usePipelineErrorStream } from "@/hooks/usePipelineErrors";
+import { reprepareInBrowser } from "@/lib/reprepare-in-browser";
 
 interface ReviewWithProject {
   id: string;
@@ -46,14 +47,50 @@ export default function ReviewDashboard() {
   const [running, setRunning] = useState(false);
   const [runningDeep, setRunningDeep] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [reprepping, setReprepping] = useState(false);
   // Triage is now the default landing tab — surfaces priority items first.
   const [activeTab, setActiveTab] = useState("triage");
 
+  // One-click re-prepare for the needs_browser_rasterization error class.
+  // The server can't rasterize PDFs (CPU budget); the browser does it via
+  // pdf.js, writes the manifest, and restarts the pipeline.
+  const handleReprepareInBrowser = async () => {
+    if (!id || reprepping) return;
+    setReprepping(true);
+    const t = toast.loading("Re-preparing pages in your browser…");
+    try {
+      const result = await reprepareInBrowser(id);
+      toast.dismiss(t);
+      if (result.ok) {
+        toast.success(result.message);
+        qc.invalidateQueries({ queryKey: ["pipeline_status", id] });
+      } else {
+        toast.error(result.message);
+      }
+      for (const w of result.warnings) toast.warning(w);
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e instanceof Error ? e.message : "Re-prepare failed");
+    } finally {
+      setReprepping(false);
+    }
+  };
+
   // Toast on pipeline error so reviewers don't have to refresh to find out.
+  // For NEEDS_BROWSER_RASTERIZATION, attach a one-click recovery action.
   usePipelineErrorStream(id, (err) => {
+    const isNeedsBrowser = err.error_class === "needs_browser_rasterization";
     toast.error(`${err.stage.replace(/_/g, " ")} failed`, {
-      description: err.error_message?.slice(0, 140) ?? "Unknown error",
-      duration: 8000,
+      description: isNeedsBrowser
+        ? "Pages haven't been prepared. Click Re-prepare to render them in your browser."
+        : err.error_message?.slice(0, 140) ?? "Unknown error",
+      duration: isNeedsBrowser ? 15000 : 8000,
+      action: isNeedsBrowser
+        ? {
+            label: "Re-prepare in browser",
+            onClick: () => void handleReprepareInBrowser(),
+          }
+        : undefined,
     });
   });
 
