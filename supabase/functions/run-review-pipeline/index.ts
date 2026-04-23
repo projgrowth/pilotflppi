@@ -3402,7 +3402,21 @@ Deno.serve(async (req) => {
         if (await isCancelled()) return;
         const idx = activeChain.indexOf(stageToRun);
         const next = idx >= 0 ? activeChain[idx + 1] : undefined;
-        if (next) scheduleNextStage(plan_review_id, next, { mode });
+        if (next) {
+          // Don't double-schedule: if a recovery worker raced us to advance
+          // the chain, the next stage may already be running or complete.
+          const { data: nextRow } = await admin
+            .from("review_pipeline_status")
+            .select("status")
+            .eq("plan_review_id", plan_review_id)
+            .eq("stage", next)
+            .maybeSingle();
+          const ns = (nextRow as { status?: string } | null)?.status;
+          if (ns !== "running" && ns !== "complete") {
+            scheduleNextStage(plan_review_id, next, { mode });
+          }
+        }
+        void prepareRecoveryScheduled;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         await setStage(admin, plan_review_id, firmId, stageToRun, {
