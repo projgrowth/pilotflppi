@@ -76,9 +76,6 @@ export default function PlanReviewDetail() {
   const { findingStatuses, updateFindingStatus } = useFindingStatuses(review, user?.id, refetchHistory);
 
   // ── PDF rendering ──────────────────────────────────────────────────────
-  // pageCapInfo banner is gone — coverage is reported truthfully via the
-  // dashboard's CoverageChip (which reads from review_coverage). The viewer
-  // now renders all pages (eager first 10 + idle-callback background).
   const { pageImages, renderingPages, renderProgress, renderDocumentPages, resetPages } =
     usePdfPageRender();
 
@@ -629,8 +626,8 @@ export default function PlanReviewDetail() {
         </div>
       )}
 
-      {/* Page-cap banner removed — see CoverageChip on the dashboard for the
-          truthful per-discipline AI coverage breakdown. */}
+      {/* Page-cap banner removed — coverage is now tracked truthfully via the
+          review_coverage row and surfaced as a chip in ReviewHealthStrip. */}
 
       {isMobile ? (
         <div className="flex-1 flex flex-col overflow-hidden">

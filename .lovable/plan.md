@@ -1,123 +1,103 @@
 
 
-# Why the Porsche review still shows 10 pages — and the fix
+# Audit & Cleanup — Wire-Up Verification + Dead Code Removal
 
-## Root cause: the "lift the 10-page cap" implementation never actually landed
+After the dashboard overhaul shipped, several components became orphaned, the unified shortcut contract was created but never adopted, and the workspace still has the `R`-key collision the plan was supposed to eliminate. Here's the surgical cleanup.
 
-I just confirmed against the live code and the database. Three caps are still in place, **none** of the changes from the previous turn shipped:
+## What's wired correctly
 
-| Layer | Where | Status |
+- `ReviewDashboard` → `DashboardAlertStack`, `NextStepBar`, `FilterChips`, `AuditCoveragePanel`, `TriageInbox` ✅
+- `useFilteredDeficiencies` chip filter is plumbed from page → list ✅
+- `DeficiencyCard` collapse-when-inactive is honored by `DeficiencyList` and `TriageInbox` (both pass `isActive`) ✅
+- `recordPatternConfirmation` confirmed wired into `DeficiencyActions` confirm path ✅
+- `usePipelineErrorStream` + `reprepareInBrowser` recovery flow wired ✅
+
+## What's broken or orphaned
+
+### 1. Orphaned components (no remaining importers)
+
+```text
+src/components/review-dashboard/HumanReviewQueue.tsx       — DELETE
+src/components/review-dashboard/DeferredScopePanel.tsx     — DELETE
+src/components/review-dashboard/CitationDbBanner.tsx       — DELETE
+src/components/review-dashboard/LetterQualityGate.tsx      — DELETE
+src/components/plan-review/KeyboardShortcutsOverlay.tsx    — DELETE
+```
+
+Verified via grep: zero `import` sites for each. They were the four banners + queue surfaces collapsed into `DashboardAlertStack` and the chip-filter view, plus a workspace overlay that has no caller.
+
+### 2. `DnaHealthBanner` — extract the constant, drop the component
+
+`ReviewDashboard` still imports `CRITICAL_DNA_FIELDS` from `DnaHealthBanner.tsx` but the banner component itself is unused. Move `CRITICAL_DNA_FIELDS` into a tiny `src/lib/dna-fields.ts` and delete `DnaHealthBanner.tsx`.
+
+### 3. Unused option in `useFilteredDeficiencies`
+
+`onlyHumanReview` was used by the now-deleted `HumanReviewQueue`. Drop the option, the branch in the filter, and the `humanReview` count return field (no remaining consumers — chip filter `needs-eyes` does the same job).
+
+### 4. Unified keyboard contract was created but never adopted
+
+`src/lib/review-shortcuts.ts` exists and exports `REVIEW_SHORTCUTS`, `isTypingTarget`, `isRejectShortcut` — but nothing imports it. Both keyboard handlers still hard-code their own maps:
+
+| Surface | Current behavior | Problem |
 |---|---|---|
-| Browser viewer cap | `usePdfPageRender.ts` line 47, 52 — `Math.min(total, 10)` and `renderPDFPagesToImages(file, 10, 150)` | ❌ Still capped at 10 |
-| Display banner | `PlanReviewDetail.tsx` line 630 — "Limited review — first 10 of 78" | ❌ Still rendering |
-| Server AI cap | `run-review-pipeline/index.ts` line 1191 — `MAX_DISCIPLINE_PAGES = 10` | ❌ Still capped at 10 |
-| Vision rasterizer | `rasterizeAndUploadVisionPages` referenced in plan | ❌ Function does not exist in `pdf-utils.ts` |
-| `review_coverage` table | Migration referenced in plan | ❌ No table created |
-| `CoverageChip` | Component referenced in plan | ❌ Not in repo |
+| `useTriageController` (dashboard) | bare `R` → reject | per the plan, must be `Shift+R` |
+| `PlanReviewDetail` (workspace) | bare `R` → reposition pin | per the plan, drop entirely (toasts an error in v2) |
+| `TriageShortcutsOverlay` legend | shows `R` for reject | stale, misleads users |
 
-On top of that, the database tells me a fourth, separate problem on this specific review:
+Fixes:
+- `useTriageController.ts` line 174: replace `k === "r"` branch with `isRejectShortcut(e)`.
+- `PlanReviewDetail.tsx` lines 337-343: delete the `case "r"` reposition branch and the now-unused `setRepositioningIndex` call from this handler. Also delete the `case "x"` (deferred) and `case "o"` (open) blocks — they have no equivalent in the unified contract and only exist on this page.
+- `TriageShortcutsOverlay.tsx`: rebuild the legend from `REVIEW_SHORTCUTS` so the displayed map is the source-of-truth map (replaces the hard-coded `SHORTCUTS` array).
+- `PlanReviewDetail.tsx` keyboard handler: replace inline `isTyping` check with `isTypingTarget(e.target)` for consistency.
 
-```text
-plan_review eb8df5a0-… (Porsche)
-  ai_check_status      : pending  (cancelled)
-  file_urls count      : 1        (78-page PDF)
-  page_assets rows     : 1        ← rasterizer made only 1 of 78 page JPEGs
-  deficiencies_v2 rows : 0
-  review_coverage row  : missing
-```
+### 5. Stale state in `PlanReviewDetail`
 
-`rasterizeAndUploadPages` quietly produced 1 image instead of 78. Even if we lift every cap, the AI has nothing to read because the per-page JPEGs the manifest points to don't exist. The browser viewer shows you 10 because 10 is the cap *and* it's rendering directly from the original PDF — independent of the broken manifest.
+With the workspace `KeyboardShortcutsOverlay` removed, drop `showShortcuts`/`setShowShortcuts` state (lines 138, 365-376) and the `?`/`Escape` cases in the workspace handler. Workspace shortcuts will surface through the dashboard's `TriageShortcutsOverlay` after the merge — the workspace doesn't need its own.
 
-## The fix, in three concrete pieces
+### 6. `animate-pulse` on the Run AI button
 
-### 1. Actually remove the caps (the work the prior turn skipped)
+`ReviewTopBar.tsx` line 51 still pulses the "Run AI Check" button when there are no findings. Per project memory ("Use static accent borders for urgent notifications, never animations"), replace `animate-pulse` with a static `border border-primary/60 ring-1 ring-primary/20`.
 
-```text
-src/hooks/plan-review/usePdfPageRender.ts
-  • Drop `Math.min(total, 10)` (line 47)
-  • Drop the `, 10, 150)` cap arg (line 52) → call renderPDFPagesToImages(file, total, 150)
-  • Eager-render first 10, queue the rest via requestIdleCallback to keep UI responsive
-  • Replace pageCapInfo state with phase: 'eager' | 'background' | 'done'
+### 7. `ReviewerMemoryCard` duplication note (verify only)
 
-src/pages/PlanReviewDetail.tsx
-  • Delete the "Limited review" banner block (lines 629-637)
-  • Read coverage from new review_coverage row instead
-
-supabase/functions/run-review-pipeline/index.ts
-  • Delete `MAX_DISCIPLINE_PAGES = 10` (line 1191)
-  • Replace the `.slice(0, 10)` with chunked batches of 8 + general-sheet seed
-  • Loop runDisciplineChecks per chunk, sum findings, dedupe by def_number
-  • Add safety ceiling MAX_SHEETS_PER_DISCIPLINE = 40
-
-src/lib/pdf-utils.ts
-  • renderPDFPagesToImages: change default cap from 10 → totalPages so callers
-    that don't pass a value get every page
-```
-
-### 2. Repair the rasterizer so all 78 pages actually upload
-
-`rasterizeAndUploadPages` is producing 1 row instead of 78 on the Porsche set. Two likely causes — fix both defensively:
-
-- **Per-page upload failure being swallowed**: each page JPEG upload error currently aborts silently with `continue`. Switch to `Promise.allSettled` per page, log each failure to `pipeline_error_log`, and surface "rasterized X of Y" in the upload toast so the user sees when only 1 of 78 pages made it.
-- **Browser memory pressure on big PDFs**: 78 pages × 150 DPI rendered all at once will OOM mid-PDF in some browsers. Render in batches of 4, releasing canvas memory between batches via explicit `canvas.width = 0; canvas.height = 0;` cleanup. This is the same chunking pattern `extractPagesTextItems` already uses.
-
-Add a one-time **manifest reconciliation** call at the start of `prepare_pages`: if `page_assets count < pdf.numPages` for any file, re-rasterize the missing indices in the browser before the AI stage runs. This recovers Porsche-style reviews where the original upload partially failed without making the user re-upload.
-
-### 3. Persist coverage truthfully
-
-```sql
--- new migration
-CREATE TABLE public.review_coverage (
-  plan_review_id uuid PRIMARY KEY REFERENCES plan_reviews(id) ON DELETE CASCADE,
-  firm_id uuid,
-  sheets_total int NOT NULL,
-  sheets_reviewed int NOT NULL,
-  by_discipline jsonb NOT NULL DEFAULT '{}'::jsonb,
-  -- shape: { "Architectural": {reviewed: 74, total: 74}, "Structural": {reviewed: 0, total: 0} }
-  capped_at int,  -- if any discipline hit MAX_SHEETS_PER_DISCIPLINE
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-ALTER TABLE public.review_coverage ENABLE ROW LEVEL SECURITY;
--- RLS: matches plan_reviews firm scoping (same policies pattern as deficiencies_v2)
-```
-
-`stageDisciplineReview` writes one row at the end of each run. The workspace reads it instead of the cosmetic `pageCapInfo`. New `<CoverageChip />` in `ReviewHealthStrip.tsx` shows `78/78` (or `40/74` if a giant set was bounded) with a per-discipline popover.
+The plan called for removing the duplicate `ReviewerMemoryCard` from `ReviewDashboard`. Confirmed: `ReviewDashboard.tsx` no longer imports it directly — it's only rendered inside the Memory chip popover in `ReviewHealthStrip`. ✅ No action needed.
 
 ---
 
 ## Files changed
 
 ```text
-EDIT
-  src/hooks/plan-review/usePdfPageRender.ts        — remove 10-page cap, add eager+background phases
-  src/lib/pdf-utils.ts                             — default cap → totalPages, batch+release for big PDFs
-  src/lib/plan-review-upload.ts                    — Promise.allSettled per-page, surface partial-success
-  src/pages/PlanReviewDetail.tsx                   — drop pageCapInfo banner, read review_coverage
-  src/components/review-dashboard/ReviewHealthStrip.tsx  — Coverage chip
-  supabase/functions/run-review-pipeline/index.ts
-    • runDisciplineChecks: chunk by DISCIPLINE_BATCH = 8, dedupe findings,
-      respect MAX_SHEETS_PER_DISCIPLINE = 40
-    • stagePreparePages: if page_assets < pdf.numPages, re-rasterize gaps
-    • stageDisciplineReview: write review_coverage row at end
-    • signedSheetUrls: optional pageIndices filter (sign only what stage needs)
+DELETE
+  src/components/review-dashboard/HumanReviewQueue.tsx
+  src/components/review-dashboard/DeferredScopePanel.tsx
+  src/components/review-dashboard/CitationDbBanner.tsx
+  src/components/review-dashboard/LetterQualityGate.tsx
+  src/components/review-dashboard/DnaHealthBanner.tsx
+  src/components/plan-review/KeyboardShortcutsOverlay.tsx
 
 CREATE
-  src/components/review-dashboard/CoverageChip.tsx
-  supabase/migrations/<ts>_review_coverage.sql
+  src/lib/dna-fields.ts             // 1 export: CRITICAL_DNA_FIELDS
 
-DELETE
-  • The "Limited review" banner JSX in PlanReviewDetail
-  • pageCapInfo state in usePdfPageRender
+EDIT
+  src/pages/ReviewDashboard.tsx     // import CRITICAL_DNA_FIELDS from new path
+  src/hooks/useFilteredDeficiencies.ts
+                                    // drop onlyHumanReview branch + humanReview count
+  src/hooks/useTriageController.ts  // bare R → isRejectShortcut(e); use isTypingTarget
+  src/components/review-dashboard/TriageShortcutsOverlay.tsx
+                                    // render from REVIEW_SHORTCUTS
+  src/pages/PlanReviewDetail.tsx    // delete R/X/O/?/Escape branches + showShortcuts state
+                                    // use isTypingTarget for consistency
+  src/components/plan-review/ReviewTopBar.tsx
+                                    // animate-pulse → static accent border
 ```
 
-## Verification on Porsche after these edits
+## Verification after edits
 
-- Workspace viewer shows all 78 pages (first 10 instant, rest stream in via idle callback).
-- `plan_review_page_assets` row count = 78 for the Porsche review (re-rasterize fills the 77 gap on next pipeline kick).
-- Rerun the pipeline → `review_coverage.by_discipline.Architectural = {reviewed: 74, total: 74}`.
-- Edge logs show ~9 chunked `discipline_review` calls for Architectural, not 1.
-- "Limited review" banner gone; replaced by `78/78 sheets reviewed` chip in the health strip.
-- Toast on partial upload now reads e.g. "Rasterized 77 of 78 pages — 1 failed" instead of silent loss.
+- `grep -r "HumanReviewQueue\|DeferredScopePanel\|CitationDbBanner\|LetterQualityGate\|KeyboardShortcutsOverlay\|DnaHealthBanner"` should return zero hits.
+- `grep -r "onlyHumanReview"` should return zero hits.
+- Both surfaces share `isRejectShortcut` / `isTypingTarget` from `review-shortcuts.ts`.
+- `Shift+R` rejects on both pages; bare `R` does nothing on either.
+- No `animate-pulse` in `ReviewTopBar.tsx`.
 
-No keyboard or other UX regressions. The dashboard changes are purely additive (new chip in existing strip).
+No DB schema changes. No edge function changes. Pure dead-code removal + unification of the keyboard contract that already exists in `review-shortcuts.ts`.
 

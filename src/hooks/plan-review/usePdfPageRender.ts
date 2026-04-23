@@ -1,43 +1,53 @@
 /**
  * PDF rendering pipeline for the plan-review viewer.
  *
- * Two-phase render:
- *   1. EAGER  — render the first 10 pages immediately so the viewer is usable
- *      within ~1s on a typical plan set.
- *   2. BACKGROUND — render the remaining pages via requestIdleCallback so the
- *      UI thread stays responsive while the rest of the document streams in.
+ * Renders ALL pages of every uploaded PDF with no artificial cap. To keep the
+ * UI responsive on big sets (78+ sheets), we run two passes:
  *
- * The 10-page cap that historically made the workspace banner read
- * "first 10 of N sheets" is gone — the AI pipeline reviews every sheet
- * (chunked per-discipline). The viewer renders every page too; this hook
- * just controls *when* each page paints so 78-page sets don't freeze
- * triage for 8 seconds.
+ *   1. EAGER pass — render the first `EAGER_LIMIT` pages immediately so the
+ *      reviewer can scroll right away. State.phase = "eager" while this runs.
+ *   2. BACKGROUND pass — schedule the remaining pages via `requestIdleCallback`
+ *      (falling back to `setTimeout`) so they stream in without blocking
+ *      paint or interaction. State.phase = "background" while this runs,
+ *      flips to "done" when complete.
  */
 import { useCallback, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { renderPDFPagesToImages, getPDFPageCount, type PDFPageImage } from "@/lib/pdf-utils";
 import type { PlanReviewRow } from "@/types";
 
-const EAGER_PAGE_BUDGET = 10;
+const EAGER_LIMIT = 10;
 
-export type RenderPhase = "idle" | "eager" | "background" | "done";
+type Phase = "idle" | "eager" | "background" | "done";
+
+interface PreparedSource {
+  fileIndex: number;
+  fileName: string;
+  file: File;
+  pageCount: number;
+}
 
 function scheduleIdle(cb: () => void) {
-  const w = window as unknown as {
-    requestIdleCallback?: (fn: () => void, opts?: { timeout: number }) => number;
+  if (typeof window === "undefined") {
+    cb();
+    return;
+  }
+  const w = window as typeof window & {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void;
   };
   if (typeof w.requestIdleCallback === "function") {
-    w.requestIdleCallback(cb, { timeout: 250 });
+    w.requestIdleCallback(cb, { timeout: 1500 });
   } else {
-    setTimeout(cb, 16);
+    setTimeout(cb, 50);
   }
 }
 
 export function usePdfPageRender() {
   const [pageImages, setPageImages] = useState<PDFPageImage[]>([]);
+  const [phase, setPhase] = useState<Phase>("idle");
   const [renderingPages, setRenderingPages] = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);
-  const [phase, setPhase] = useState<RenderPhase>("idle");
+  const [totalPages, setTotalPages] = useState(0);
 
   const renderDocumentPages = useCallback(async (r: PlanReviewRow): Promise<PDFPageImage[]> => {
     if (!r.file_urls || r.file_urls.length === 0) return [];
@@ -45,143 +55,143 @@ export function usePdfPageRender() {
     setRenderProgress(0);
     setPhase("eager");
 
-    // Fetch + decode every PDF first so we know total page count, then render.
-    type LoadedFile = { fi: number; file: File; fileName: string; pageCount: number };
-    const loaded: LoadedFile[] = [];
-    for (let fi = 0; fi < r.file_urls.length; fi++) {
-      const storedPath = r.file_urls[fi];
-      if (!storedPath) continue;
-      const filePath = storedPath.includes("/storage/v1/")
-        ? storedPath.split("/documents/").pop() || storedPath
-        : storedPath;
-      const { data: signedData, error: signError } = await supabase.storage
-        .from("documents")
-        .createSignedUrl(filePath, 3600);
-      if (signError || !signedData?.signedUrl) continue;
-      const response = await fetch(signedData.signedUrl);
-      const blob = await response.blob();
-      const fileName = decodeURIComponent(filePath.split("/").pop() || `doc-${fi}.pdf`);
-      const file = new File([blob], fileName, { type: "application/pdf" });
-      let pageCount = 0;
-      try {
-        pageCount = await getPDFPageCount(file);
-      } catch {
-        pageCount = 0;
-      }
-      if (pageCount > 0) loaded.push({ fi, file, fileName, pageCount });
-    }
-
-    const totalPages = loaded.reduce((acc, l) => acc + l.pageCount, 0);
-    if (totalPages === 0) {
-      setRenderingPages(false);
-      setPhase("done");
-      return [];
-    }
-
-    const allImages: PDFPageImage[] = [];
-    let renderedSoFar = 0;
-    let baseGlobalIndex = 0;
-
-    // Phase 1: eager — render the first EAGER_PAGE_BUDGET pages globally so
-    // reviewers see something almost immediately.
-    let eagerBudget = EAGER_PAGE_BUDGET;
-    const deferredQueue: Array<{ load: LoadedFile; startPage: number; budget: number; baseGlobalIndex: number }> = [];
-
-    for (const load of loaded) {
-      const renderNow = Math.min(eagerBudget, load.pageCount);
-      if (renderNow > 0) {
+    try {
+      // 1. Sign + fetch every PDF, count pages.
+      const sources: PreparedSource[] = [];
+      let total = 0;
+      for (let fi = 0; fi < r.file_urls.length; fi++) {
+        const storedPath = r.file_urls[fi];
+        if (!storedPath) continue;
+        const filePath = storedPath.includes("/storage/v1/")
+          ? storedPath.split("/documents/").pop() || storedPath
+          : storedPath;
+        const { data: signedData, error: signError } = await supabase.storage
+          .from("documents")
+          .createSignedUrl(filePath, 3600);
+        if (signError || !signedData?.signedUrl) continue;
+        const response = await fetch(signedData.signedUrl);
+        const blob = await response.blob();
+        const fileName = decodeURIComponent(filePath.split("/").pop() || `doc-${fi}.pdf`);
+        const file = new File([blob], fileName, { type: "application/pdf" });
+        let pageCount = 0;
         try {
-          const images = await renderPDFPagesToImages(load.file, renderNow, 150);
-          for (let idx = 0; idx < images.length; idx++) {
-            const img = images[idx];
-            allImages.push({
-              ...img,
-              pageIndex: baseGlobalIndex + idx,
-              fileIndex: load.fi,
-              fileName: load.fileName,
-              pageInFile: idx + 1,
-            });
-          }
-          renderedSoFar += images.length;
-          setPageImages([...allImages]);
-          setRenderProgress(Math.min(100, (renderedSoFar / totalPages) * 100));
+          pageCount = await getPDFPageCount(file);
         } catch {
-          // If page count fails, fall through; render still attempts.
+          pageCount = 0;
+        }
+        if (pageCount > 0) {
+          sources.push({ fileIndex: fi, fileName, file, pageCount });
+          total += pageCount;
         }
       }
-      // Anything past the eager budget for this file goes to the background pass.
-      if (load.pageCount > renderNow) {
-        deferredQueue.push({
-          load,
-          startPage: renderNow,
-          budget: load.pageCount - renderNow,
-          baseGlobalIndex: baseGlobalIndex + renderNow,
-        });
+      setTotalPages(total);
+
+      // 2. EAGER pass — render the first EAGER_LIMIT pages across files.
+      const eagerImages: PDFPageImage[] = [];
+      let renderedSoFar = 0;
+      let baseGlobal = 0;
+      for (const src of sources) {
+        if (renderedSoFar >= EAGER_LIMIT) {
+          baseGlobal += src.pageCount;
+          continue;
+        }
+        const want = Math.min(EAGER_LIMIT - renderedSoFar, src.pageCount);
+        const imgs = await renderPDFPagesToImages(src.file, want, 150);
+        eagerImages.push(
+          ...imgs.map((img, idx) => ({
+            ...img,
+            pageIndex: baseGlobal + idx,
+            fileIndex: src.fileIndex,
+            fileName: src.fileName,
+            pageInFile: idx + 1,
+          })),
+        );
+        renderedSoFar += imgs.length;
+        baseGlobal += src.pageCount;
+        setRenderProgress(total > 0 ? (renderedSoFar / total) * 100 : 0);
       }
-      baseGlobalIndex += load.pageCount;
-      eagerBudget = Math.max(0, eagerBudget - renderNow);
-    }
+      setPageImages(eagerImages);
 
-    if (deferredQueue.length === 0) {
-      setRenderingPages(false);
-      setPhase("done");
-      return allImages;
-    }
+      // 3. BACKGROUND pass — render remaining pages, append in order, idle-scheduled.
+      if (renderedSoFar < total) {
+        setPhase("background");
+        let bgRenderedSoFar = renderedSoFar;
+        let bgBaseGlobal = 0;
+        let leftToSkip = renderedSoFar;
 
-    // Phase 2: background — kick the rest off without blocking the UI thread.
-    setPhase("background");
-    setRenderingPages(false); // viewer is interactive; banner shows progress only
+        // Build per-file work descriptors (startPage, count).
+        const work: Array<{ src: PreparedSource; startPage: number; count: number; baseGlobal: number }> = [];
+        for (const src of sources) {
+          if (leftToSkip >= src.pageCount) {
+            // Whole file already rendered eagerly.
+            leftToSkip -= src.pageCount;
+            bgBaseGlobal += src.pageCount;
+            continue;
+          }
+          const startPage = leftToSkip;
+          const count = src.pageCount - startPage;
+          work.push({ src, startPage, count, baseGlobal: bgBaseGlobal });
+          bgBaseGlobal += src.pageCount;
+          leftToSkip = 0;
+        }
 
-    // We render full files per task to amortize PDF parse cost. Each file is
-    // scheduled via idle callback so triage stays smooth.
-    const runDeferred = async () => {
-      for (const job of deferredQueue) {
-        await new Promise<void>((resolve) => {
-          scheduleIdle(async () => {
+        // Run sequentially, idle-scheduled between files.
+        const runBackground = async () => {
+          for (const w of work) {
+            await new Promise<void>((resolve) => scheduleIdle(resolve));
             try {
-              // Render the WHOLE file (cheap — already parsed once for page count
-              // but not for raster). renderPDFPagesToImages re-parses; for files
-              // that already had eager pages we re-render those eager ones too
-              // but discard the ones we already pushed.
-              const images = await renderPDFPagesToImages(job.load.file, job.load.pageCount, 150);
-              const tail = images.slice(job.startPage);
-              for (let idx = 0; idx < tail.length; idx++) {
-                const img = tail[idx];
-                allImages.push({
-                  ...img,
-                  pageIndex: job.baseGlobalIndex + idx,
-                  fileIndex: job.load.fi,
-                  fileName: job.load.fileName,
-                  pageInFile: job.startPage + idx + 1,
-                });
-              }
-              renderedSoFar += tail.length;
-              setPageImages([...allImages]);
-              setRenderProgress(Math.min(100, (renderedSoFar / totalPages) * 100));
+              const imgs = await renderPDFPagesToImages(w.src.file, w.count, 150, {
+                startPage: w.startPage,
+              });
+              const tagged = imgs.map((img, idx) => ({
+                ...img,
+                pageIndex: w.baseGlobal + w.startPage + idx,
+                fileIndex: w.src.fileIndex,
+                fileName: w.src.fileName,
+                pageInFile: w.startPage + idx + 1,
+              }));
+              setPageImages((prev) => {
+                const next = [...prev, ...tagged];
+                next.sort((a, b) => a.pageIndex - b.pageIndex);
+                return next;
+              });
+              bgRenderedSoFar += imgs.length;
+              setRenderProgress(total > 0 ? (bgRenderedSoFar / total) * 100 : 0);
             } catch {
-              /* swallow — partial coverage is better than none */
+              // Swallow per-file failures so one bad PDF doesn't stop the rest.
             }
-            resolve();
-          });
-        });
+          }
+          setPhase("done");
+        };
+        // Fire and forget.
+        void runBackground();
+      } else {
+        setPhase("done");
       }
-      setPhase("done");
-    };
-    // Fire-and-forget — caller already has the eager pages.
-    runDeferred();
 
-    return allImages;
+      return eagerImages;
+    } catch {
+      setPhase("done");
+      return [];
+    } finally {
+      setRenderingPages(false);
+    }
   }, []);
 
   return {
     pageImages,
+    phase,
+    totalPages,
+    /** Kept for backward compatibility with callers reading the cap-info banner.
+     *  Always returns null now (no cap). */
+    pageCapInfo: null as { total: number; rendered: number } | null,
     renderingPages,
     renderProgress,
-    phase,
     renderDocumentPages,
     resetPages: useCallback(() => {
       setPageImages([]);
       setPhase("idle");
+      setTotalPages(0);
       setRenderProgress(0);
     }, []),
   };

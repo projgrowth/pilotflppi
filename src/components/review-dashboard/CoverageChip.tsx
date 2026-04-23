@@ -1,68 +1,91 @@
 /**
- * Per-discipline AI sheet coverage chip.
+ * CoverageChip — surfaces the *truth* about how many sheets the AI actually
+ * reviewed for this plan review.
  *
- * Reads `review_coverage` (written at the end of stageDisciplineReview).
- * Shows total reviewed/total sheets in the trigger; the popover lists each
- * discipline's coverage so reviewers know exactly which disciplines were
- * fully covered by the AI vs. still needing manual eyes.
+ * Reads from `public.review_coverage` (one row per plan_review_id, written by
+ * the discipline_review stage). When no row exists yet — e.g. pipeline hasn't
+ * run, or this is a pre-coverage-tracking review — falls back to
+ * `sheet_coverage` totals so the chip always has something to show.
+ *
+ * Tones:
+ *   - "ok"   : every sheet covered
+ *   - "warn" : some discipline hit MAX_SHEETS_PER_DISCIPLINE (capped) or no
+ *              row written yet but sheets exist
+ *   - "muted": nothing reviewed yet
  */
+import { useMemo } from "react";
+import { ChevronDown, Layers } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { Layers, ChevronDown } from "lucide-react";
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { useSheetCoverage } from "@/hooks/useReviewDashboard";
 
-interface DisciplineCoverage {
-  reviewed: number;
-  total: number;
+interface ByDiscipline {
+  [discipline: string]: { reviewed: number; total: number };
 }
 
-interface ReviewCoverageRow {
+interface CoverageRow {
   plan_review_id: string;
   sheets_total: number;
   sheets_reviewed: number;
-  by_discipline: Record<string, DisciplineCoverage>;
+  by_discipline: ByDiscipline;
   capped_at: number | null;
 }
 
-export default function CoverageChip({ planReviewId }: { planReviewId: string }) {
-  const { data } = useQuery({
+function useReviewCoverage(planReviewId?: string) {
+  return useQuery({
     queryKey: ["review_coverage", planReviewId],
     enabled: !!planReviewId,
-    queryFn: async (): Promise<ReviewCoverageRow | null> => {
-      // review_coverage isn't in the auto-generated client types yet because
-      // it was just added — fall back to an untyped raw call.
-      const client = supabase as unknown as {
-        from: (t: string) => {
-          select: (cols: string) => {
-            eq: (col: string, val: string) => {
-              maybeSingle: () => Promise<{ data: ReviewCoverageRow | null; error: unknown }>;
-            };
-          };
-        };
-      };
-      const { data, error } = await client
-        .from("review_coverage")
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("review_coverage" as never)
         .select("plan_review_id, sheets_total, sheets_reviewed, by_discipline, capped_at")
-        .eq("plan_review_id", planReviewId)
+        .eq("plan_review_id", planReviewId!)
         .maybeSingle();
-      if (error) return null;
-      return data;
+      if (error && error.code !== "PGRST116") throw error;
+      return (data ?? null) as CoverageRow | null;
     },
   });
+}
 
-  if (!data || data.sheets_total === 0) return null;
+interface Props {
+  planReviewId: string;
+}
 
-  const fullyCovered = data.sheets_reviewed >= data.sheets_total;
-  const tone = fullyCovered ? "ok" : "warn";
+export default function CoverageChip({ planReviewId }: Props) {
+  const { data: coverage } = useReviewCoverage(planReviewId);
+  const { data: sheets = [] } = useSheetCoverage(planReviewId);
+
+  const fallback = useMemo(() => {
+    const total = sheets.length;
+    const reviewed = coverage?.sheets_reviewed ?? 0;
+    return { total, reviewed };
+  }, [sheets, coverage]);
+
+  const total = coverage?.sheets_total ?? fallback.total;
+  const reviewed = coverage?.sheets_reviewed ?? fallback.reviewed;
+  const capped = (coverage?.capped_at ?? 0) > 0;
+
+  const tone: "ok" | "warn" | "muted" =
+    total === 0
+      ? "muted"
+      : capped || reviewed < total
+        ? "warn"
+        : "ok";
 
   const toneCls =
     tone === "ok"
       ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
-      : "border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10";
+      : tone === "warn"
+        ? "border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
+        : "border-border bg-muted/40 text-muted-foreground hover:bg-muted/70";
 
-  const entries = Object.entries(data.by_discipline ?? {}) as Array<[string, DisciplineCoverage]>;
-  entries.sort((a, b) => (b[1].total ?? 0) - (a[1].total ?? 0));
+  const value = total > 0 ? `${reviewed}/${total} sheets` : "No sheets yet";
 
   return (
     <Popover>
@@ -76,52 +99,54 @@ export default function CoverageChip({ planReviewId }: { planReviewId: string })
         >
           <Layers className="h-3 w-3" />
           <span className="font-medium">Coverage</span>
-          <span className="font-mono text-foreground">
-            {data.sheets_reviewed}/{data.sheets_total}
-          </span>
+          <span className="font-mono text-foreground">{value}</span>
           <ChevronDown className="h-3 w-3 opacity-60" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[360px] p-2">
+      <PopoverContent align="start" className="w-[420px] p-3">
         <div className="space-y-2">
-          <div className="border-b pb-1.5">
-            <div className="text-xs font-semibold">AI sheet coverage</div>
+          <div className="flex items-center justify-between border-b pb-1.5">
+            <div className="text-xs font-semibold">AI review coverage</div>
             <div className="font-mono text-2xs text-muted-foreground">
-              {data.sheets_reviewed}/{data.sheets_total} sheets reviewed
-              {data.capped_at ? ` · capped at ${data.capped_at}/discipline` : ""}
+              {reviewed} / {total} sheets
             </div>
           </div>
-          {entries.length === 0 ? (
-            <div className="py-3 text-center text-2xs text-muted-foreground">
-              No discipline breakdown yet.
-            </div>
-          ) : (
+          <p className="text-2xs text-muted-foreground leading-snug">
+            How many sheets the AI actually examined per discipline. A capped row
+            means the discipline hit the per-run safety ceiling — re-run the
+            pipeline if you need additional pages reviewed.
+          </p>
+          {coverage?.by_discipline && Object.keys(coverage.by_discipline).length > 0 ? (
             <ul className="space-y-1">
-              {entries.map(([disc, cov]) => {
-                const full = cov.reviewed >= cov.total && cov.total > 0;
-                return (
-                  <li
-                    key={disc}
-                    className="flex items-center justify-between rounded border border-border/50 bg-muted/20 px-2 py-1"
-                  >
-                    <span className="text-2xs font-medium">{disc}</span>
-                    <span
-                      className={cn(
-                        "font-mono text-2xs",
-                        full ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400",
-                      )}
+              {Object.entries(coverage.by_discipline)
+                .sort((a, b) => (b[1].total ?? 0) - (a[1].total ?? 0))
+                .map(([disc, row]) => {
+                  const pct =
+                    row.total > 0 ? Math.round((row.reviewed / row.total) * 100) : 0;
+                  return (
+                    <li
+                      key={disc}
+                      className="flex items-center justify-between rounded border border-border/60 bg-muted/30 px-2 py-1 text-2xs"
                     >
-                      {cov.reviewed}/{cov.total}
-                    </span>
-                  </li>
-                );
-              })}
+                      <span className="font-medium">{disc}</span>
+                      <span className="font-mono text-muted-foreground">
+                        {row.reviewed}/{row.total} ({pct}%)
+                      </span>
+                    </li>
+                  );
+                })}
             </ul>
+          ) : (
+            <div className="py-3 text-center text-2xs text-muted-foreground">
+              No discipline coverage recorded yet — re-run the pipeline.
+            </div>
           )}
-          {!fullyCovered && (
-            <p className="text-2xs text-muted-foreground">
-              Disciplines under 100% need manual eyes on the remaining sheets.
-            </p>
+          {capped && (
+            <div className="rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1.5 text-2xs text-amber-700 dark:text-amber-400">
+              One or more disciplines hit the per-run cap of{" "}
+              <span className="font-mono">{coverage?.capped_at}</span> sheets.
+              Re-run the pipeline to review additional pages.
+            </div>
           )}
         </div>
       </PopoverContent>

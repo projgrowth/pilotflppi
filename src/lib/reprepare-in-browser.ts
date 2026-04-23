@@ -1,10 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import {
-  getPDFPageCount,
-  rasterizeAndUploadPages,
-  rasterizeAndUploadVisionPages,
-  validatePDFHeader,
-} from "@/lib/pdf-utils";
+import { getPDFPageCount, rasterizeAndUploadPages, validatePDFHeader } from "@/lib/pdf-utils";
 import { startPipeline } from "@/lib/pipeline-run";
 
 /**
@@ -96,8 +91,8 @@ export async function reprepareInBrowser(reviewId: string): Promise<ReprepareRes
     };
   }
 
-  // 3. Rasterize + upload + collect manifest rows (display + vision).
-  let pageAssetRows = await rasterizeAndUploadPages(
+  // 3. Rasterize + upload + collect manifest rows.
+  const pageAssetRows = await rasterizeAndUploadPages(
     reviewId,
     pairs,
     async (path, blob) => {
@@ -117,31 +112,6 @@ export async function reprepareInBrowser(reviewId: string): Promise<ReprepareRes
       pipelineStarted: false,
       warnings,
     };
-  }
-
-  // 3b. Vision-quality raster — best effort.
-  try {
-    const visionPaths = await rasterizeAndUploadVisionPages(
-      reviewId,
-      pairs,
-      async (path, blob) => {
-        const res = await supabase.storage
-          .from("documents")
-          .upload(path, blob, { upsert: true, contentType: "image/jpeg" });
-        return { error: res.error ? { message: res.error.message } : null };
-      },
-      { startGlobalIndex: 0 },
-    );
-    if (visionPaths.size > 0) {
-      pageAssetRows = pageAssetRows.map((r) => ({
-        ...r,
-        vision_storage_path: visionPaths.get(r.page_index) ?? null,
-      }));
-    }
-  } catch (err) {
-    warnings.push(
-      `Vision-quality pages skipped (display pages OK): ${err instanceof Error ? err.message : String(err)}`,
-    );
   }
 
   // 4. Replace the manifest. Delete-then-insert is safer than upsert here

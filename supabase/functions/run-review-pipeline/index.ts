@@ -349,59 +349,22 @@ async function readSignedManifest(
 ): Promise<Array<{ file_path: string; signed_url: string }> | null> {
   const { data: rows } = await admin
     .from("plan_review_page_assets")
-    .select("page_index, storage_path, vision_storage_path, status, cached_signed_url, cached_until")
+    .select("page_index, storage_path, status")
     .eq("plan_review_id", planReviewId)
     .eq("status", "ready")
     .order("page_index", { ascending: true });
   const ready = (rows ?? []) as Array<{
     page_index: number;
     storage_path: string;
-    vision_storage_path: string | null;
     status: string;
-    cached_signed_url: string | null;
-    cached_until: string | null;
   }>;
   if (ready.length === 0) return null;
   const out: Array<{ file_path: string; signed_url: string }> = [];
-  const now = Date.now();
-  // 6h TTL — the pipeline finishes well within this window, and re-runs reuse
-  // the same URLs without paying the ~75-call signing cost on big sets.
-  const TTL_SEC = 60 * 60 * 6;
-  const refreshUpdates: Array<{ page_index: number; cached_signed_url: string; cached_until: string }> = [];
   for (const r of ready) {
-    // Prefer the higher-DPI vision asset for AI calls when present.
-    const sourcePath = r.vision_storage_path ?? r.storage_path;
-    const cachedValid =
-      r.cached_signed_url &&
-      r.cached_until &&
-      new Date(r.cached_until).getTime() > now + 5 * 60 * 1000; // ≥5min remaining
-    if (cachedValid) {
-      out.push({ file_path: sourcePath, signed_url: r.cached_signed_url! });
-      continue;
-    }
     const { data: signed } = await admin.storage
       .from("documents")
-      .createSignedUrl(sourcePath, TTL_SEC);
-    if (signed) {
-      out.push({ file_path: sourcePath, signed_url: signed.signedUrl });
-      refreshUpdates.push({
-        page_index: r.page_index,
-        cached_signed_url: signed.signedUrl,
-        cached_until: new Date(now + TTL_SEC * 1000).toISOString(),
-      });
-    }
-  }
-  // Best-effort cache write — never block the pipeline on it.
-  if (refreshUpdates.length > 0) {
-    Promise.all(
-      refreshUpdates.map((u) =>
-        admin
-          .from("plan_review_page_assets")
-          .update({ cached_signed_url: u.cached_signed_url, cached_until: u.cached_until })
-          .eq("plan_review_id", planReviewId)
-          .eq("page_index", u.page_index),
-      ),
-    ).catch((err) => console.error("[manifest-cache] refresh failed:", err));
+      .createSignedUrl(r.storage_path, 60 * 60);
+    if (signed) out.push({ file_path: r.storage_path, signed_url: signed.signedUrl });
   }
   return out;
 }
@@ -1090,24 +1053,17 @@ function evaluateDnaHealth(
   const jurisdictionMismatch =
     !!dnaCounty && !!projCounty && dnaCounty !== projCounty;
 
-  // Hard-block if ANY of the truly load-bearing fields are missing.
-  // These three drive: which code edition to apply (fbc_edition), which chapters
-  // are relevant (occupancy_classification), and which jurisdictional amendments
-  // load (county). Without them every downstream finding is guess-work, so the
-  // old "≥50% complete" threshold let too many bad runs through.
-  const HARD_REQUIRED: readonly string[] = ["county", "occupancy_classification", "fbc_edition"];
-  const hardMissing = HARD_REQUIRED.filter((f) => criticalMissing.includes(f));
-
   let blocking = false;
   let block_reason: string | null = null;
-  if (hardMissing.length > 0) {
+  if (criticalMissing.includes("county")) {
     blocking = true;
-    block_reason = `Required DNA field${hardMissing.length > 1 ? "s" : ""} missing: ${hardMissing.join(
-      ", ",
-    )} — findings would be unreliable without these.`;
+    block_reason = "County missing from extracted DNA — cannot apply jurisdiction-specific code.";
   } else if (jurisdictionMismatch) {
     blocking = true;
     block_reason = `Extracted county (${dna.county}) does not match project county (${projectCounty}) — wrong code edition would be applied.`;
+  } else if (completeness < 0.5) {
+    blocking = true;
+    block_reason = `Only ${Math.round(completeness * 100)}% of critical DNA fields populated — findings would be unreliable.`;
   }
 
   return {
@@ -1140,31 +1096,6 @@ async function stageDnaReevaluate(
       .plan_reviews?.projects?.county) ?? null;
   const health = evaluateDnaHealth(dna as Record<string, unknown>, projectCounty);
   return { reevaluated: true, ...health };
-}
-
-/**
- * Resolve the currently active prompt_versions.id for a given key. Stamped on
- * every deficiency we insert so we can A/B prompt revisions later and filter
- * quality metrics by prompt generation. Returns null if no row matches — the
- * pipeline still inserts, just without a provenance pointer.
- */
-async function getActivePromptVersionId(
-  admin: ReturnType<typeof createClient>,
-  promptKey: string,
-): Promise<string | null> {
-  const { data, error } = await admin
-    .from("prompt_versions")
-    .select("id")
-    .eq("prompt_key", promptKey)
-    .eq("is_active", true)
-    .order("effective_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) {
-    console.error(`[prompt_versions] lookup failed for ${promptKey}:`, error);
-    return null;
-  }
-  return data?.id ?? null;
 }
 
 async function stageDisciplineReview(
@@ -1251,51 +1182,51 @@ async function stageDisciplineReview(
   const failed: string[] = [];
   let totalFindings = 0;
 
-  // Resolve once per stage; passed to every chunk so all rows share provenance.
-  const promptVersionId = await getActivePromptVersionId(admin, "discipline_review");
-
-  // Per-discipline batching replaces the old MAX_DISCIPLINE_PAGES = 10 cap.
-  // Architectural with 74 sheets becomes ~10 calls of 8 sheets each so every
-  // sheet is reviewed exactly once. Hard ceiling per discipline keeps a
-  // 500-sheet outlier from running away — capped runs are reported in
-  // review_coverage.capped_at so the UI shows the truth.
+  // Per-discipline cap: keep payload + memory bounded. Within a discipline
+  // we still chunk into batches of DISCIPLINE_BATCH so all sheets get reviewed.
   const DISCIPLINE_BATCH = 8;
   const MAX_SHEETS_PER_DISCIPLINE = 40;
+
+  // Track coverage so we can persist a truthful review_coverage row.
   const byDiscipline: Record<string, { reviewed: number; total: number }> = {};
   let cappedAt: number | null = null;
 
   for (const discipline of disciplinesToRun) {
-    const disciplineSheets = routed.filter((s) => s.discipline === discipline);
-    const totalForDiscipline = disciplineSheets.length;
-    byDiscipline[discipline] = { reviewed: 0, total: totalForDiscipline };
-    if (totalForDiscipline === 0) continue;
-
-    const sheetsToReview = disciplineSheets.slice(0, MAX_SHEETS_PER_DISCIPLINE);
-    if (totalForDiscipline > MAX_SHEETS_PER_DISCIPLINE) {
-      cappedAt = MAX_SHEETS_PER_DISCIPLINE;
-    }
-
     try {
-      for (let start = 0; start < sheetsToReview.length; start += DISCIPLINE_BATCH) {
-        const chunk = sheetsToReview.slice(start, start + DISCIPLINE_BATCH);
-        const disciplineImageUrls = chunk
-          .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
-          .filter(Boolean) as string[];
-        if (disciplineImageUrls.length === 0) continue;
+      const disciplineSheets = routed.filter((s) => s.discipline === discipline);
+      const allUrls = disciplineSheets
+        .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
+        .filter(Boolean) as string[];
 
+      byDiscipline[discipline] = { reviewed: 0, total: disciplineSheets.length };
+
+      // Skip silently if no sheets routed to this discipline.
+      if (allUrls.length === 0) continue;
+
+      const cappedUrls = allUrls.slice(0, MAX_SHEETS_PER_DISCIPLINE);
+      if (allUrls.length > MAX_SHEETS_PER_DISCIPLINE) {
+        cappedAt = MAX_SHEETS_PER_DISCIPLINE;
+      }
+
+      // Chunk by DISCIPLINE_BATCH so a 74-sheet Architectural set runs ~10
+      // calls instead of 1 oversized call that the model can't handle.
+      let disciplineFindings = 0;
+      for (let cs = 0; cs < cappedUrls.length; cs += DISCIPLINE_BATCH) {
+        const chunkUrls = cappedUrls.slice(cs, cs + DISCIPLINE_BATCH);
+        const chunkSheets = disciplineSheets.slice(cs, cs + DISCIPLINE_BATCH);
         const inserted = await runDisciplineChecks(admin, planReviewId, firmId, {
           discipline,
-          disciplineSheets: chunk,
-          disciplineImageUrls,
+          disciplineSheets: chunkSheets,
+          disciplineImageUrls: chunkUrls,
           generalImageUrls,
           dna,
           jurisdiction,
           useType,
-          promptVersionId,
         });
-        totalFindings += inserted;
-        byDiscipline[discipline].reviewed += chunk.length;
+        disciplineFindings += inserted;
       }
+      totalFindings += disciplineFindings;
+      byDiscipline[discipline].reviewed = cappedUrls.length;
     } catch (err) {
       console.error(`[discipline_review:${discipline}] failed:`, err);
       failed.push(discipline);
@@ -1315,24 +1246,26 @@ async function stageDisciplineReview(
     }
   }
 
-  // Persist a truthful coverage row for the dashboard CoverageChip.
-  const sheetsTotal = routed.length;
-  const sheetsReviewed = Object.values(byDiscipline).reduce((acc, v) => acc + v.reviewed, 0);
+  // Persist truthful coverage so the workspace chip can show e.g. 78/78.
+  const sheetsTotal = Object.values(byDiscipline).reduce((s, v) => s + v.total, 0);
+  const sheetsReviewed = Object.values(byDiscipline).reduce((s, v) => s + v.reviewed, 0);
   try {
-    await admin.from("review_coverage").upsert(
-      {
-        plan_review_id: planReviewId,
-        firm_id: firmId,
-        sheets_total: sheetsTotal,
-        sheets_reviewed: sheetsReviewed,
-        by_discipline: byDiscipline,
-        capped_at: cappedAt,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "plan_review_id" },
-    );
+    await admin
+      .from("review_coverage")
+      .upsert(
+        {
+          plan_review_id: planReviewId,
+          firm_id: firmId,
+          sheets_total: sheetsTotal,
+          sheets_reviewed: sheetsReviewed,
+          by_discipline: byDiscipline,
+          capped_at: cappedAt,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "plan_review_id" },
+      );
   } catch (err) {
-    console.error("[review_coverage] upsert failed:", err);
+    console.error("[discipline_review] failed to persist review_coverage:", err);
   }
 
   return { failed_disciplines: failed, total_findings: totalFindings };
@@ -1346,9 +1279,6 @@ interface DisciplineRunCtx {
   dna: Record<string, unknown> | null;
   jurisdiction: Record<string, unknown> | null;
   useType: string | null;
-  /** Active prompt_versions.id for `discipline_review`, stamped on every insert
-   *  so we can A/B prompt revisions and filter quality metrics by generation. */
-  promptVersionId: string | null;
 }
 
 async function runDisciplineChecks(
@@ -1588,7 +1518,6 @@ async function runDisciplineChecks(
     confidence_score: Math.max(0, Math.min(1, f.confidence_score ?? 0.5)),
     confidence_basis: f.confidence_basis ?? "Vision-extracted",
     model_version: "google/gemini-2.5-flash",
-    prompt_version_id: ctx.promptVersionId,
     status: "open",
   }));
 
@@ -2960,13 +2889,7 @@ async function stageGroundCitations(
         );
         const aiBlob = `${def.finding} ${def.required_action}`;
         score = citationOverlapScore(aiBlob, hit.requirement_text);
-        // Tighter grounding: 0.30 Jaccard AND the AI's text must literally
-        // mention the section number. Old 0.18 let generic findings ("provide
-        // smoke detectors") pass against unrelated sections that happened to
-        // share a few common words. Section-number presence is the cheapest
-        // honest check that the AI was actually citing what it claims.
-        const sectionMentioned = aiBlob.toLowerCase().includes(hit.section.toLowerCase());
-        status = score >= 0.30 && sectionMentioned ? "verified" : "mismatch";
+        status = score >= 0.18 ? "verified" : "mismatch";
       }
     }
     counts[status]++;

@@ -1,8 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import {
   getPDFPageCount,
-  rasterizeAndUploadPages,
-  rasterizeAndUploadVisionPages,
+  rasterizeAndUploadPagesResilient,
   validatePDFHeader,
   type PreparedPageAsset,
 } from "@/lib/pdf-utils";
@@ -85,11 +84,13 @@ export async function uploadPlanReviewFiles(
 
   const newUrls = Array.from(new Set([...existingFileUrls, ...newFilePaths]));
 
-  // 2. Browser-side pre-rasterization (best effort).
+  // 2. Browser-side pre-rasterization (best effort, partial success allowed).
   let pageAssetRows: PreparedPageAsset[] = [];
-  let visionPaths = new Map<number, string>();
+  let totalExpectedPages = 0;
   if (typeof window !== "undefined") {
     try {
+      // Pair each accepted File with its uploaded path + page count for the
+      // shape rasterizeAndUploadPagesResilient expects.
       const pairs: Array<{
         name: string;
         file: File;
@@ -108,9 +109,10 @@ export async function uploadPlanReviewFiles(
         }
         if (pageCount > 0) {
           pairs.push({ name: file.name, file, storagePath, pageCount });
+          totalExpectedPages += pageCount;
         }
       }
-      pageAssetRows = await rasterizeAndUploadPages(
+      const { succeeded, failures } = await rasterizeAndUploadPagesResilient(
         reviewId,
         pairs,
         async (path, blob) => {
@@ -119,27 +121,18 @@ export async function uploadPlanReviewFiles(
             .upload(path, blob, { upsert: true, contentType: "image/jpeg" });
           return { error: res.error ? { message: res.error.message } : null };
         },
-        { startGlobalIndex: existingPageCount ?? 0 },
+        { startGlobalIndex: existingPageCount ?? 0, batchSize: 4 },
       );
-      // Vision raster (150 DPI / 0.85) — best-effort, AI falls back to the
-      // 96 DPI display asset for any page that fails here.
-      try {
-        visionPaths = await rasterizeAndUploadVisionPages(
-          reviewId,
-          pairs,
-          async (path, blob) => {
-            const res = await supabase.storage
-              .from("documents")
-              .upload(path, blob, { upsert: true, contentType: "image/jpeg" });
-            return { error: res.error ? { message: res.error.message } : null };
-          },
-          { startGlobalIndex: existingPageCount ?? 0 },
-        );
-      } catch (visionErr) {
+      pageAssetRows = succeeded;
+      if (failures.length > 0) {
+        // Group by file for a tighter toast message.
+        const byFile = new Map<string, number>();
+        for (const f of failures) byFile.set(f.fileName, (byFile.get(f.fileName) ?? 0) + 1);
+        for (const [fileName, count] of byFile) {
+          warnings.push(`${fileName}: ${count} of its pages failed to rasterize.`);
+        }
         warnings.push(
-          `Vision-quality pages skipped (display pages OK): ${
-            visionErr instanceof Error ? visionErr.message : String(visionErr)
-          }`,
+          `Rasterized ${succeeded.length} of ${totalExpectedPages} page${totalExpectedPages === 1 ? "" : "s"} — ${failures.length} failed.`,
         );
       }
     } catch (err) {
@@ -150,14 +143,6 @@ export async function uploadPlanReviewFiles(
       );
       pageAssetRows = [];
     }
-  }
-
-  // Attach vision paths onto the manifest rows we're about to upsert.
-  if (visionPaths.size > 0 && pageAssetRows.length > 0) {
-    pageAssetRows = pageAssetRows.map((r) => ({
-      ...r,
-      vision_storage_path: visionPaths.get(r.page_index) ?? null,
-    }));
   }
 
   // 3. plan_reviews.file_urls + ai_run_progress.

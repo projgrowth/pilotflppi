@@ -114,20 +114,27 @@ export function snapToNearestText(
 /**
  * Render specific pages of a PDF file to base64 PNG images.
  * @param file - The PDF File object
- * @param maxPages - Maximum number of pages to render (default 10)
+ * @param maxPages - Maximum number of pages to render. Pass `Infinity` (default)
+ *                   to render every page in the document — callers that need a
+ *                   cap (e.g. vision payload size) can still pass a number.
  * @param dpi - Resolution in DPI (default 150)
+ * @param opts.startPage - 0-based index of the first page to render (default 0).
+ *                         Useful for chunked / background rendering where the
+ *                         eager pass already produced [0..startPage-1].
  */
 export async function renderPDFPagesToImages(
   file: File,
-  maxPages = 10,
-  dpi = 150
+  maxPages: number = Infinity,
+  dpi = 150,
+  opts: { startPage?: number } = {},
 ): Promise<PDFPageImage[]> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const totalPages = Math.min(pdf.numPages, maxPages);
+  const startPage = Math.max(0, opts.startPage ?? 0);
+  const endExclusive = Math.min(pdf.numPages, startPage + (Number.isFinite(maxPages) ? maxPages : pdf.numPages));
   const images: PDFPageImage[] = [];
 
-  for (let i = 0; i < totalPages; i++) {
+  for (let i = startPage; i < endExclusive; i++) {
     const page = await pdf.getPage(i + 1);
     const viewport = page.getViewport({ scale: dpi / 72 });
     const canvas = document.createElement("canvas");
@@ -144,7 +151,9 @@ export async function renderPDFPagesToImages(
       height: viewport.height,
     });
 
-    // Cleanup
+    // Cleanup — explicitly release canvas memory between pages so big PDFs
+    // (78+ pages at 150 DPI) don't OOM mid-render in browsers without
+    // aggressive GC.
     canvas.width = 0;
     canvas.height = 0;
   }
@@ -154,16 +163,18 @@ export async function renderPDFPagesToImages(
 
 export async function renderPDFPagesToJpegs(
   file: File,
-  maxPages = 10,
+  maxPages: number = Infinity,
   dpi = 110,
   quality = 0.75,
+  opts: { startPage?: number; onPage?: (pageIndex: number, total: number) => void } = {},
 ): Promise<Array<{ pageIndex: number; blob: Blob }>> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const totalPages = Math.min(pdf.numPages, maxPages);
+  const startPage = Math.max(0, opts.startPage ?? 0);
+  const endExclusive = Math.min(pdf.numPages, startPage + (Number.isFinite(maxPages) ? maxPages : pdf.numPages));
   const pages: Array<{ pageIndex: number; blob: Blob }> = [];
 
-  for (let i = 0; i < totalPages; i++) {
+  for (let i = startPage; i < endExclusive; i++) {
     const page = await pdf.getPage(i + 1);
     const viewport = page.getViewport({ scale: dpi / 72 });
     const canvas = document.createElement("canvas");
@@ -181,8 +192,10 @@ export async function renderPDFPagesToJpegs(
     });
 
     pages.push({ pageIndex: i, blob });
+    // Release canvas memory before the next page.
     canvas.width = 0;
     canvas.height = 0;
+    opts.onPage?.(i, pdf.numPages);
   }
 
   return pages;
@@ -209,91 +222,122 @@ export interface PreparedPageAsset {
   source_file_path: string;
   page_index: number;
   storage_path: string;
-  /** Optional path to a higher-DPI vision JPEG used by the AI pipeline. */
-  vision_storage_path?: string | null;
   status: "ready";
+}
+
+/**
+ * Result of a resilient rasterize+upload pass. `succeeded` always reflects the
+ * rows that uploaded cleanly; `failures` lists per-page reasons so the caller
+ * can surface "Rasterized 77 of 78 — 1 failed" instead of dropping the whole
+ * batch on a single hiccup.
+ */
+export interface RasterizeResult {
+  succeeded: PreparedPageAsset[];
+  failures: Array<{ fileName: string; pageIndex: number; reason: string }>;
 }
 
 export async function rasterizeAndUploadPages(
   reviewId: string,
   files: Array<{ name: string; file: File; storagePath: string; pageCount: number }>,
   uploadFn: (path: string, blob: Blob) => Promise<{ error: { message: string } | null }>,
-  opts: { dpi?: number; quality?: number; startGlobalIndex?: number } = {},
+  opts: {
+    dpi?: number;
+    quality?: number;
+    startGlobalIndex?: number;
+    /** Render in chunks of this many pages, releasing memory between chunks. */
+    batchSize?: number;
+  } = {},
 ): Promise<PreparedPageAsset[]> {
-  const dpi = opts.dpi ?? 96;
-  const quality = opts.quality ?? 0.72;
-  let nextGlobalPageIndex = opts.startGlobalIndex ?? 0;
-  const pageAssetRows: PreparedPageAsset[] = [];
-
-  for (const uf of files) {
-    const isPdf = uf.file.type === "application/pdf" || uf.name.toLowerCase().endsWith(".pdf");
-    if (!isPdf) continue;
-    const pageJpegs = await renderPDFPagesToJpegs(uf.file, uf.pageCount, dpi, quality);
-    for (const page of pageJpegs) {
-      const baseName = uf.name.replace(/\.pdf$/i, "");
-      const pagePath = `plan-reviews/${reviewId}/pages/${baseName}/p-${String(page.pageIndex).padStart(3, "0")}.jpg`;
-      const { error: pageUploadError } = await uploadFn(pagePath, page.blob);
-      if (pageUploadError) {
-        throw new Error(`Failed to upload page ${page.pageIndex + 1} for ${uf.name}: ${pageUploadError.message}`);
-      }
-      pageAssetRows.push({
-        plan_review_id: reviewId,
-        source_file_path: uf.storagePath,
-        page_index: nextGlobalPageIndex,
-        storage_path: pagePath,
-        status: "ready",
-      });
-      nextGlobalPageIndex += 1;
-    }
-  }
-
-  return pageAssetRows;
+  const result = await rasterizeAndUploadPagesResilient(reviewId, files, uploadFn, opts);
+  return result.succeeded;
 }
 
 /**
- * Higher-DPI raster for the AI vision pipeline.
- *
- * The display path uses 96 DPI / 0.72 quality for fast in-browser viewing,
- * but Gemini does noticeably better OCR on title blocks + small notes when
- * the image is closer to a real scan resolution. 150 DPI / 0.85 quality
- * is the sweet spot — about 3× the byte size, but small text in code
- * summaries and product approvals becomes legible to the model.
- *
- * Returns a `pageIndex → storage_path` map so the caller can patch
- * `plan_review_page_assets.vision_storage_path` on the matching manifest
- * rows. Best-effort: if rasterization or upload fails for any page, that
- * page is simply skipped (the AI falls back to the 96 DPI display asset).
+ * Resilient variant — returns BOTH the successful rows and per-page failures.
+ * Prefer this in new callers; the legacy `rasterizeAndUploadPages` returns
+ * only `succeeded` for backward compatibility with the upload toast.
  */
-export async function rasterizeAndUploadVisionPages(
+export async function rasterizeAndUploadPagesResilient(
   reviewId: string,
   files: Array<{ name: string; file: File; storagePath: string; pageCount: number }>,
   uploadFn: (path: string, blob: Blob) => Promise<{ error: { message: string } | null }>,
-  opts: { startGlobalIndex?: number; dpi?: number; quality?: number } = {},
-): Promise<Map<number, string>> {
-  const dpi = opts.dpi ?? 150;
-  const quality = opts.quality ?? 0.85;
+  opts: {
+    dpi?: number;
+    quality?: number;
+    startGlobalIndex?: number;
+    batchSize?: number;
+  } = {},
+): Promise<RasterizeResult> {
+  const dpi = opts.dpi ?? 96;
+  const quality = opts.quality ?? 0.72;
+  const batchSize = Math.max(1, opts.batchSize ?? 4);
   let nextGlobalPageIndex = opts.startGlobalIndex ?? 0;
-  const out = new Map<number, string>();
+  const succeeded: PreparedPageAsset[] = [];
+  const failures: Array<{ fileName: string; pageIndex: number; reason: string }> = [];
 
   for (const uf of files) {
     const isPdf = uf.file.type === "application/pdf" || uf.name.toLowerCase().endsWith(".pdf");
     if (!isPdf) continue;
-    let pages: Array<{ pageIndex: number; blob: Blob }> = [];
-    try {
-      pages = await renderPDFPagesToJpegs(uf.file, uf.pageCount, dpi, quality);
-    } catch {
-      nextGlobalPageIndex += uf.pageCount;
-      continue;
-    }
-    for (const page of pages) {
+
+    // Render in batches of `batchSize` so a 78-page PDF doesn't try to keep
+    // every canvas alive simultaneously. Browsers without aggressive GC will
+    // OOM mid-PDF if we render all pages first then upload.
+    for (let chunkStart = 0; chunkStart < uf.pageCount; chunkStart += batchSize) {
+      const chunkLen = Math.min(batchSize, uf.pageCount - chunkStart);
+      let pageJpegs: Array<{ pageIndex: number; blob: Blob }> = [];
+      try {
+        pageJpegs = await renderPDFPagesToJpegs(uf.file, chunkLen, dpi, quality, {
+          startPage: chunkStart,
+        });
+      } catch (err) {
+        // Whole chunk failed to render — record one failure per page and move on.
+        for (let p = chunkStart; p < chunkStart + chunkLen; p++) {
+          failures.push({
+            fileName: uf.name,
+            pageIndex: p,
+            reason: `render: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          nextGlobalPageIndex += 1;
+        }
+        continue;
+      }
+
+      // Upload all pages in this chunk in parallel; settle so a single failure
+      // doesn't take down the rest.
       const baseName = uf.name.replace(/\.pdf$/i, "");
-      const pagePath = `plan-reviews/${reviewId}/pages-vision/${baseName}/p-${String(page.pageIndex).padStart(3, "0")}.jpg`;
-      const { error } = await uploadFn(pagePath, page.blob);
-      if (!error) out.set(nextGlobalPageIndex, pagePath);
-      nextGlobalPageIndex += 1;
+      const settled = await Promise.allSettled(
+        pageJpegs.map(async (page) => {
+          const pagePath = `plan-reviews/${reviewId}/pages/${baseName}/p-${String(page.pageIndex).padStart(3, "0")}.jpg`;
+          const { error: pageUploadError } = await uploadFn(pagePath, page.blob);
+          if (pageUploadError) throw new Error(pageUploadError.message);
+          return { page, pagePath };
+        }),
+      );
+
+      for (let i = 0; i < settled.length; i++) {
+        const s = settled[i];
+        const page = pageJpegs[i];
+        if (s.status === "fulfilled") {
+          succeeded.push({
+            plan_review_id: reviewId,
+            source_file_path: uf.storagePath,
+            page_index: nextGlobalPageIndex,
+            storage_path: s.value.pagePath,
+            status: "ready",
+          });
+        } else {
+          failures.push({
+            fileName: uf.name,
+            pageIndex: page.pageIndex,
+            reason: `upload: ${s.reason instanceof Error ? s.reason.message : String(s.reason)}`,
+          });
+        }
+        nextGlobalPageIndex += 1;
+      }
     }
   }
-  return out;
+
+  return { succeeded, failures };
 }
 
 /**
