@@ -3347,6 +3347,7 @@ Deno.serve(async (req) => {
                 : remaining[0] ?? null;
             scheduleNextStage(plan_review_id, "prepare_pages", {
               target_source: nextTarget,
+              mode,
             });
             return;
           }
@@ -3370,10 +3371,13 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Advance to the next stage in the canonical order.
-        const idx = STAGES.indexOf(stageToRun);
-        const next = STAGES[idx + 1];
-        if (next) scheduleNextStage(plan_review_id, next);
+        // Advance within the active mode chain (Core or Deep). When a
+        // self-invoke for a single stage finishes, we still advance using
+        // the mode the caller passed — so re-running an arbitrary stage
+        // never accidentally drags the user back into the old long pipeline.
+        const idx = activeChain.indexOf(stageToRun);
+        const next = idx >= 0 ? activeChain[idx + 1] : undefined;
+        if (next) scheduleNextStage(plan_review_id, next, { mode });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         await setStage(admin, plan_review_id, firmId, stageToRun, {
@@ -3387,9 +3391,9 @@ Deno.serve(async (req) => {
           stageToRun === "prepare_pages" ||
           stageToRun === "dna_extract";
         if (!isFatal) {
-          const idx = STAGES.indexOf(stageToRun);
-          const next = STAGES[idx + 1];
-          if (next) scheduleNextStage(plan_review_id, next);
+          const idx = activeChain.indexOf(stageToRun);
+          const next = idx >= 0 ? activeChain[idx + 1] : undefined;
+          if (next) scheduleNextStage(plan_review_id, next, { mode });
         }
       }
     };
