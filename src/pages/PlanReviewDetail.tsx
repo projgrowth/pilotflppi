@@ -40,6 +40,7 @@ import { useConfirm } from "@/hooks/useConfirm";
 import { useLetterAutosave } from "@/hooks/useLetterAutosave";
 import { lintCommentLetter, hasBlockingIssues, type LintIssue } from "@/lib/letter-linter";
 import { cn } from "@/lib/utils";
+import { isTypingTarget } from "@/lib/review-shortcuts";
 import { type Finding } from "@/components/FindingCard";
 import { SeverityDonut } from "@/components/SeverityDonut";
 import { FindingStatusFilter, type FindingStatus } from "@/components/FindingStatusFilter";
