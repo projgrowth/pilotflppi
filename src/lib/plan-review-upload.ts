@@ -1,7 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import {
   getPDFPageCount,
-  rasterizeAndUploadPages,
+  rasterizeAndUploadPagesResilient,
   validatePDFHeader,
   type PreparedPageAsset,
 } from "@/lib/pdf-utils";
@@ -84,12 +84,13 @@ export async function uploadPlanReviewFiles(
 
   const newUrls = Array.from(new Set([...existingFileUrls, ...newFilePaths]));
 
-  // 2. Browser-side pre-rasterization (best effort).
+  // 2. Browser-side pre-rasterization (best effort, partial success allowed).
   let pageAssetRows: PreparedPageAsset[] = [];
+  let totalExpectedPages = 0;
   if (typeof window !== "undefined") {
     try {
       // Pair each accepted File with its uploaded path + page count for the
-      // shape rasterizeAndUploadPages expects.
+      // shape rasterizeAndUploadPagesResilient expects.
       const pairs: Array<{
         name: string;
         file: File;
@@ -108,9 +109,10 @@ export async function uploadPlanReviewFiles(
         }
         if (pageCount > 0) {
           pairs.push({ name: file.name, file, storagePath, pageCount });
+          totalExpectedPages += pageCount;
         }
       }
-      pageAssetRows = await rasterizeAndUploadPages(
+      const { succeeded, failures } = await rasterizeAndUploadPagesResilient(
         reviewId,
         pairs,
         async (path, blob) => {
@@ -119,8 +121,20 @@ export async function uploadPlanReviewFiles(
             .upload(path, blob, { upsert: true, contentType: "image/jpeg" });
           return { error: res.error ? { message: res.error.message } : null };
         },
-        { startGlobalIndex: existingPageCount ?? 0 },
+        { startGlobalIndex: existingPageCount ?? 0, batchSize: 4 },
       );
+      pageAssetRows = succeeded;
+      if (failures.length > 0) {
+        // Group by file for a tighter toast message.
+        const byFile = new Map<string, number>();
+        for (const f of failures) byFile.set(f.fileName, (byFile.get(f.fileName) ?? 0) + 1);
+        for (const [fileName, count] of byFile) {
+          warnings.push(`${fileName}: ${count} of its pages failed to rasterize.`);
+        }
+        warnings.push(
+          `Rasterized ${succeeded.length} of ${totalExpectedPages} page${totalExpectedPages === 1 ? "" : "s"} — ${failures.length} failed.`,
+        );
+      }
     } catch (err) {
       warnings.push(
         `Browser rasterization failed; server will fall back: ${

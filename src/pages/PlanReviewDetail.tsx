@@ -626,16 +626,8 @@ export default function PlanReviewDetail() {
         </div>
       )}
 
-      {/* Page-cap banner: surface silent 10-page truncation honestly */}
-      {pageCapInfo && pageCapInfo.total > pageCapInfo.rendered && (
-        <div className="shrink-0 border-b bg-warning/10 px-4 py-1.5 flex items-center gap-2">
-          <span className="text-2xs font-semibold text-warning uppercase tracking-wide">Limited review</span>
-          <span className="text-xs text-foreground/80">
-            Reviewing the first <strong>{pageCapInfo.rendered}</strong> of <strong>{pageCapInfo.total}</strong> sheet
-            {pageCapInfo.total !== 1 ? "s" : ""}. Findings on later sheets cannot be detected by AI in this round.
-          </span>
-        </div>
-      )}
+      {/* Page-cap banner removed — coverage is now tracked truthfully via the
+          review_coverage row and surfaced as a chip in ReviewHealthStrip. */}
 
       {isMobile ? (
         <div className="flex-1 flex flex-col overflow-hidden">
