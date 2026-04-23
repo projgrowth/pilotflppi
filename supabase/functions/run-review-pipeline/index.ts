@@ -257,31 +257,42 @@ function disciplineForSheetFallback(sheetRef: string): string | null {
 // per PDF keeps a single rasterization run inside the worker's budget. Larger
 // sets are still supported — the pipeline raster-prepares them in chunks across
 // stages instead of all at once.
-const RASTER_SCALE = 1.528; // ~110 DPI
+const RASTER_SCALE = 1.528; // ~110 DPI — small/medium PDFs
+const RASTER_SCALE_LARGE = 1.111; // ~80 DPI — used when a PDF has > LARGE_PDF_THRESHOLD pages
+const LARGE_PDF_THRESHOLD = 40;
 const MAX_PAGES_PER_PDF = 80;
-// Cap how many pages we rasterize per stage call. Subsequent stages reuse the
-// cached PNGs already in storage; only the first stage that touches each page
-// pays the rasterization cost.
-const RASTERIZE_CHUNK = 24;
+// JPEG quality used by asJPEG(). 75 is plenty for vision models reading
+// title blocks / dimension callouts and keeps CPU/encode time tiny.
+const RASTER_JPEG_QUALITY = 75;
+// Cap how many pages we rasterize per stage call. Edge workers have a hard
+// CPU-time budget (~2s pure CPU per invocation). 8 JPEG pages ≈ ~0.5–1s CPU,
+// well under budget. Subsequent stages reuse the cached images already in
+// storage; only the first stage that touches each page pays the encode cost.
+const RASTERIZE_CHUNK = 8;
 // Parallel concurrency for storage uploads + manifest writes within a chunk.
 // MuPDF rasterization itself stays serial (single-threaded WASM).
 const RASTER_UPLOAD_CONCURRENCY = 6;
+// Match either legacy .png or current .jpg page assets when scanning storage
+// or storage_path strings, so older runs are still recognized.
+const PAGE_ASSET_RE = /^p-\d{3,}\.(png|jpe?g)$/;
+const PAGE_ASSET_INDEX_RE = /p-(\d{3,})\.(png|jpe?g)$/;
 
 async function rasterizePdfStreaming(
   pdfBytes: Uint8Array,
-  onPage: (pageIndex: number, pngBytes: Uint8Array) => Promise<void>,
+  onPage: (pageIndex: number, jpegBytes: Uint8Array) => Promise<void>,
 ): Promise<number> {
   const doc = mupdf.Document.openDocument(pdfBytes, "application/pdf");
   try {
     const pageCount = Math.min(doc.countPages(), MAX_PAGES_PER_PDF);
-    const matrix = mupdf.Matrix.scale(RASTER_SCALE, RASTER_SCALE);
+    const scale = pageCount > LARGE_PDF_THRESHOLD ? RASTER_SCALE_LARGE : RASTER_SCALE;
+    const matrix = mupdf.Matrix.scale(scale, scale);
     for (let i = 0; i < pageCount; i++) {
       const page = doc.loadPage(i);
       try {
         const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false);
         try {
-          const png = pixmap.asPNG();
-          await onPage(i, png);
+          const jpeg = pixmap.asJPEG(RASTER_JPEG_QUALITY);
+          await onPage(i, jpeg);
         } finally {
           pixmap.destroy();
         }
@@ -408,7 +419,7 @@ async function signedSheetUrls(
       .from("documents")
       .list(pagesDir, { limit: 1000, sortBy: { column: "name", order: "asc" } });
     const pagePaths = (existing ?? [])
-      .filter((o: { name: string }) => /^p-\d{3,}\.png$/.test(o.name))
+      .filter((o: { name: string }) => PAGE_ASSET_RE.test(o.name))
       .map((o: { name: string }) => `${pagesDir}/${o.name}`)
       .sort();
     for (const p of pagePaths) {
@@ -480,8 +491,8 @@ async function rasterizeNextChunk(
       doneBySource.set(r.source_file_path, s);
     }
     // page_index here is the GLOBAL index, but we need per-source. We re-derive
-    // local index from storage_path's `p-NNN.png` suffix when present.
-    const m = r.storage_path.match(/p-(\d{3,})\.png$/);
+    // local index from storage_path's `p-NNN.{png|jpg}` suffix when present.
+    const m = r.storage_path.match(PAGE_ASSET_INDEX_RE);
     if (m) s.add(parseInt(m[1], 10));
     else s.add(r.page_index);
   }
@@ -573,26 +584,28 @@ async function rasterizeNextChunk(
       const dir = lastSlash >= 0 ? filePath.slice(0, lastSlash) : "";
       const pagesDir = `${dir}/pages`;
 
-      const matrix = mupdf.Matrix.scale(RASTER_SCALE, RASTER_SCALE);
+      // Adaptive DPI: large PDFs render at ~80 DPI to keep per-page CPU low.
+      const scale = totalPages > LARGE_PDF_THRESHOLD ? RASTER_SCALE_LARGE : RASTER_SCALE;
+      const matrix = mupdf.Matrix.scale(scale, scale);
 
-      // Render serially (MuPDF is single-threaded), buffer PNGs in memory,
-      // then upload + manifest in parallel batches. Storage and Postgres
-      // absorb the concurrency easily and this collapses ~6s of serial waits
-      // into ~1s for a 24-page chunk.
-      type RenderedPage = { localIndex: number; globalIndex: number; png: Uint8Array; storagePath: string };
+      // Render serially (MuPDF is single-threaded), buffer JPEGs in memory,
+      // then upload + manifest in parallel batches. JPEG encoding is ~5–8×
+      // faster CPU-wise than PNG and produces ~3–5× smaller files, so the
+      // chunk fits comfortably under the edge worker's CPU-time budget.
+      type RenderedPage = { localIndex: number; globalIndex: number; bytes: Uint8Array; storagePath: string };
       const rendered: RenderedPage[] = [];
       for (const i of targets) {
         const page = doc.loadPage(i);
         try {
           const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false);
           try {
-            const png = pixmap.asPNG();
-            const pageName = `p-${String(i).padStart(3, "0")}.png`;
+            const jpeg = pixmap.asJPEG(RASTER_JPEG_QUALITY);
+            const pageName = `p-${String(i).padStart(3, "0")}.jpg`;
             const fullPath = `${pagesDir}/${pageName}`;
             rendered.push({
               localIndex: i,
               globalIndex: nextGlobal,
-              png,
+              bytes: jpeg,
               storagePath: fullPath,
             });
             nextGlobal++;
@@ -612,7 +625,7 @@ async function rasterizeNextChunk(
           batch.map(async (rp) => {
             const { error: upErr } = await admin.storage
               .from("documents")
-              .upload(rp.storagePath, rp.png, { contentType: "image/png", upsert: true });
+              .upload(rp.storagePath, rp.bytes, { contentType: "image/jpeg", upsert: true });
             if (upErr) {
               console.error(`[prepare_pages] upload failed for ${rp.storagePath}:`, upErr);
               return;
