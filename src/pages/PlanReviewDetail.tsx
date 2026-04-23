@@ -98,6 +98,23 @@ export default function PlanReviewDetail() {
       msg.includes("haven't been prepared")
     );
   })();
+
+  // Live page-asset count drives the "needs preparation" banner — when files
+  // are uploaded but no rasterized pages exist yet, the pipeline cannot run
+  // and we need to nudge the user to prepare before they hit "Re-Analyze".
+  const { data: pageAssetCount = 0 } = useQuery({
+    queryKey: ["plan-review-page-asset-count", id],
+    queryFn: async () => {
+      if (!id) return 0;
+      const { count } = await supabase
+        .from("plan_review_page_assets")
+        .select("id", { count: "exact", head: true })
+        .eq("plan_review_id", id);
+      return count ?? 0;
+    },
+    enabled: !!id,
+    refetchInterval: 5000,
+  });
   const handleReprepareInBrowser = useCallback(async () => {
     if (!id || reprepping) return;
     setReprepping(true);
