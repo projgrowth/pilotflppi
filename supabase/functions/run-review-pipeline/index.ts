@@ -1424,10 +1424,46 @@ async function stageDisciplineReview(
       let chunksRun = 0;
       let lastReviewedSheets = 0;
       const totalChunks = Math.ceil(cappedUrls.length / DISCIPLINE_BATCH);
+      // Resume support: skip every chunk index up to the last persisted one.
+      const resumeFrom = disciplineCheckpoints[discipline] ?? -1;
+      if (resumeFrom >= 0) {
+        await recordPipelineError(admin, {
+          planReviewId,
+          firmId,
+          stage: "discipline_review",
+          errorClass: "chunk_resume",
+          errorMessage: `${discipline}: resuming after chunk ${resumeFrom + 1}/${totalChunks} (skipping prior chunks).`,
+          metadata: { discipline, resume_after_chunk: resumeFrom + 1, total_chunks: totalChunks },
+        });
+      }
       for (let cs = 0; cs < cappedUrls.length; cs += DISCIPLINE_BATCH) {
+        const chunkIdx = Math.floor(cs / DISCIPLINE_BATCH);
+        // Skip already-completed chunks from a prior failed run.
+        if (chunkIdx <= resumeFrom) {
+          chunksRun++;
+          lastReviewedSheets = Math.min(cs + DISCIPLINE_BATCH, cappedUrls.length);
+          continue;
+        }
         if (await checkCancelled()) {
           cancelledMidRun = true;
           break;
+        }
+        // Soft timeout safety net: if we're approaching the edge function's
+        // hard 150s wall, persist the checkpoint and bail out cleanly so the
+        // dispatcher / cron recovery can re-invoke and resume from here.
+        if (Date.now() - stageStartedAt > STAGE_SOFT_TIMEOUT_MS) {
+          await recordPipelineError(admin, {
+            planReviewId,
+            firmId,
+            stage: "discipline_review",
+            errorClass: "soft_timeout",
+            errorMessage: `${discipline}: paused at chunk ${chunkIdx}/${totalChunks} after ${Math.round((Date.now() - stageStartedAt) / 1000)}s — will resume on next dispatcher tick.`,
+            metadata: { discipline, paused_at_chunk: chunkIdx, total_chunks: totalChunks, elapsed_ms: Date.now() - stageStartedAt },
+          });
+          // Throw so the outer dispatcher's withRetry / status writer flips
+          // the stage back to a retryable state. The persisted checkpoint
+          // ensures the next attempt starts at the right chunk.
+          throw new Error(`SOFT_TIMEOUT: discipline_review paused at ${discipline} chunk ${chunkIdx}/${totalChunks}`);
         }
         if (chunksRun >= MAX_CHUNKS_PER_DISCIPLINE) {
           cappedAt = lastReviewedSheets;
@@ -1455,6 +1491,9 @@ async function stageDisciplineReview(
         disciplineFindings += inserted;
         chunksRun++;
         lastReviewedSheets = cs + chunkSheets.length;
+        // Persist checkpoint after each successful chunk so a failure on the
+        // next one is cheap to retry.
+        await persistDisciplineCheckpoint(discipline, chunkIdx);
         // Per-chunk audit row so the dashboard error tab shows progress.
         await recordPipelineError(admin, {
           planReviewId,
