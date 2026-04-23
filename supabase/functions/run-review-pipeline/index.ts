@@ -349,22 +349,59 @@ async function readSignedManifest(
 ): Promise<Array<{ file_path: string; signed_url: string }> | null> {
   const { data: rows } = await admin
     .from("plan_review_page_assets")
-    .select("page_index, storage_path, status")
+    .select("page_index, storage_path, vision_storage_path, status, cached_signed_url, cached_until")
     .eq("plan_review_id", planReviewId)
     .eq("status", "ready")
     .order("page_index", { ascending: true });
   const ready = (rows ?? []) as Array<{
     page_index: number;
     storage_path: string;
+    vision_storage_path: string | null;
     status: string;
+    cached_signed_url: string | null;
+    cached_until: string | null;
   }>;
   if (ready.length === 0) return null;
   const out: Array<{ file_path: string; signed_url: string }> = [];
+  const now = Date.now();
+  // 6h TTL — the pipeline finishes well within this window, and re-runs reuse
+  // the same URLs without paying the ~75-call signing cost on big sets.
+  const TTL_SEC = 60 * 60 * 6;
+  const refreshUpdates: Array<{ page_index: number; cached_signed_url: string; cached_until: string }> = [];
   for (const r of ready) {
+    // Prefer the higher-DPI vision asset for AI calls when present.
+    const sourcePath = r.vision_storage_path ?? r.storage_path;
+    const cachedValid =
+      r.cached_signed_url &&
+      r.cached_until &&
+      new Date(r.cached_until).getTime() > now + 5 * 60 * 1000; // ≥5min remaining
+    if (cachedValid) {
+      out.push({ file_path: sourcePath, signed_url: r.cached_signed_url! });
+      continue;
+    }
     const { data: signed } = await admin.storage
       .from("documents")
-      .createSignedUrl(r.storage_path, 60 * 60);
-    if (signed) out.push({ file_path: r.storage_path, signed_url: signed.signedUrl });
+      .createSignedUrl(sourcePath, TTL_SEC);
+    if (signed) {
+      out.push({ file_path: sourcePath, signed_url: signed.signedUrl });
+      refreshUpdates.push({
+        page_index: r.page_index,
+        cached_signed_url: signed.signedUrl,
+        cached_until: new Date(now + TTL_SEC * 1000).toISOString(),
+      });
+    }
+  }
+  // Best-effort cache write — never block the pipeline on it.
+  if (refreshUpdates.length > 0) {
+    Promise.all(
+      refreshUpdates.map((u) =>
+        admin
+          .from("plan_review_page_assets")
+          .update({ cached_signed_url: u.cached_signed_url, cached_until: u.cached_until })
+          .eq("plan_review_id", planReviewId)
+          .eq("page_index", u.page_index),
+      ),
+    ).catch((err) => console.error("[manifest-cache] refresh failed:", err));
   }
   return out;
 }
@@ -1182,36 +1219,47 @@ async function stageDisciplineReview(
   const failed: string[] = [];
   let totalFindings = 0;
 
+  // Per-discipline batching replaces the old MAX_DISCIPLINE_PAGES = 10 cap.
+  // Architectural with 74 sheets becomes ~10 calls of 8 sheets each so every
+  // sheet is reviewed exactly once. Hard ceiling per discipline keeps a
+  // 500-sheet outlier from running away — capped runs are reported in
+  // review_coverage.capped_at so the UI shows the truth.
+  const DISCIPLINE_BATCH = 8;
+  const MAX_SHEETS_PER_DISCIPLINE = 40;
+  const byDiscipline: Record<string, { reviewed: number; total: number }> = {};
+  let cappedAt: number | null = null;
+
   for (const discipline of disciplinesToRun) {
+    const disciplineSheets = routed.filter((s) => s.discipline === discipline);
+    const totalForDiscipline = disciplineSheets.length;
+    byDiscipline[discipline] = { reviewed: 0, total: totalForDiscipline };
+    if (totalForDiscipline === 0) continue;
+
+    const sheetsToReview = disciplineSheets.slice(0, MAX_SHEETS_PER_DISCIPLINE);
+    if (totalForDiscipline > MAX_SHEETS_PER_DISCIPLINE) {
+      cappedAt = MAX_SHEETS_PER_DISCIPLINE;
+    }
+
     try {
-      const disciplineSheets = routed.filter((s) => s.discipline === discipline);
-      // Cap discipline image payload to keep AI request body and edge worker
-      // memory under control. ~10 pages per discipline still gives the model
-      // plenty of context for finding-grade review.
-      const MAX_DISCIPLINE_PAGES = 10;
-      const disciplineImageUrls = (disciplineSheets
-        .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
-        .filter(Boolean) as string[]).slice(0, MAX_DISCIPLINE_PAGES);
+      for (let start = 0; start < sheetsToReview.length; start += DISCIPLINE_BATCH) {
+        const chunk = sheetsToReview.slice(start, start + DISCIPLINE_BATCH);
+        const disciplineImageUrls = chunk
+          .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
+          .filter(Boolean) as string[];
+        if (disciplineImageUrls.length === 0) continue;
 
-      // No sheets routed → skip silently in core mode (the dashboard's
-      // discipline filter already shows the discipline as untouched).
-      // Reduces DB churn and removes noise findings that the user
-      // historically had to dismiss for every project that didn't include
-      // every discipline.
-      if (disciplineImageUrls.length === 0) {
-        continue;
+        const inserted = await runDisciplineChecks(admin, planReviewId, firmId, {
+          discipline,
+          disciplineSheets: chunk,
+          disciplineImageUrls,
+          generalImageUrls,
+          dna,
+          jurisdiction,
+          useType,
+        });
+        totalFindings += inserted;
+        byDiscipline[discipline].reviewed += chunk.length;
       }
-
-      const inserted = await runDisciplineChecks(admin, planReviewId, firmId, {
-        discipline,
-        disciplineSheets,
-        disciplineImageUrls,
-        generalImageUrls,
-        dna,
-        jurisdiction,
-        useType,
-      });
-      totalFindings += inserted;
     } catch (err) {
       console.error(`[discipline_review:${discipline}] failed:`, err);
       failed.push(discipline);
@@ -1230,6 +1278,27 @@ async function stageDisciplineReview(
       });
     }
   }
+
+  // Persist a truthful coverage row for the dashboard CoverageChip.
+  const sheetsTotal = routed.length;
+  const sheetsReviewed = Object.values(byDiscipline).reduce((acc, v) => acc + v.reviewed, 0);
+  try {
+    await admin.from("review_coverage").upsert(
+      {
+        plan_review_id: planReviewId,
+        firm_id: firmId,
+        sheets_total: sheetsTotal,
+        sheets_reviewed: sheetsReviewed,
+        by_discipline: byDiscipline,
+        capped_at: cappedAt,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "plan_review_id" },
+    );
+  } catch (err) {
+    console.error("[review_coverage] upsert failed:", err);
+  }
+
   return { failed_disciplines: failed, total_findings: totalFindings };
 }
 

@@ -2,6 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   getPDFPageCount,
   rasterizeAndUploadPages,
+  rasterizeAndUploadVisionPages,
   validatePDFHeader,
   type PreparedPageAsset,
 } from "@/lib/pdf-utils";
@@ -86,10 +87,9 @@ export async function uploadPlanReviewFiles(
 
   // 2. Browser-side pre-rasterization (best effort).
   let pageAssetRows: PreparedPageAsset[] = [];
+  let visionPaths = new Map<number, string>();
   if (typeof window !== "undefined") {
     try {
-      // Pair each accepted File with its uploaded path + page count for the
-      // shape rasterizeAndUploadPages expects.
       const pairs: Array<{
         name: string;
         file: File;
@@ -121,6 +121,27 @@ export async function uploadPlanReviewFiles(
         },
         { startGlobalIndex: existingPageCount ?? 0 },
       );
+      // Vision raster (150 DPI / 0.85) — best-effort, AI falls back to the
+      // 96 DPI display asset for any page that fails here.
+      try {
+        visionPaths = await rasterizeAndUploadVisionPages(
+          reviewId,
+          pairs,
+          async (path, blob) => {
+            const res = await supabase.storage
+              .from("documents")
+              .upload(path, blob, { upsert: true, contentType: "image/jpeg" });
+            return { error: res.error ? { message: res.error.message } : null };
+          },
+          { startGlobalIndex: existingPageCount ?? 0 },
+        );
+      } catch (visionErr) {
+        warnings.push(
+          `Vision-quality pages skipped (display pages OK): ${
+            visionErr instanceof Error ? visionErr.message : String(visionErr)
+          }`,
+        );
+      }
     } catch (err) {
       warnings.push(
         `Browser rasterization failed; server will fall back: ${
@@ -129,6 +150,14 @@ export async function uploadPlanReviewFiles(
       );
       pageAssetRows = [];
     }
+  }
+
+  // Attach vision paths onto the manifest rows we're about to upsert.
+  if (visionPaths.size > 0 && pageAssetRows.length > 0) {
+    pageAssetRows = pageAssetRows.map((r) => ({
+      ...r,
+      vision_storage_path: visionPaths.get(r.page_index) ?? null,
+    }));
   }
 
   // 3. plan_reviews.file_urls + ai_run_progress.
