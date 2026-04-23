@@ -3288,6 +3288,35 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ── prepare_pages watchdog (per planReviewId, scoped) ─────────────────
+    // If this review's prepare_pages row is `running` but hasn't been touched
+    // in PREPARE_STALE_RUNNING_MS, treat it as dead. Two outcomes:
+    //   - If we're already trying to run prepare_pages → fall through and
+    //     resume the chunk loop (the row will be updated by setStage(running)).
+    //   - If we're trying to run any OTHER stage → redirect this invocation
+    //     to prepare_pages so the dead worker gets revived. The other stage
+    //     will be re-scheduled when prepare_pages finishes.
+    {
+      const { data: prepareRow } = await admin
+        .from("review_pipeline_status")
+        .select("status, updated_at, metadata")
+        .eq("plan_review_id", plan_review_id)
+        .eq("stage", "prepare_pages")
+        .maybeSingle();
+      const r = prepareRow as
+        | { status?: string; updated_at?: string; metadata?: Record<string, unknown> | null }
+        | null;
+      const ageMs = r?.updated_at ? Date.now() - new Date(r.updated_at).getTime() : 0;
+      const isStaleRunning = r?.status === "running" && ageMs > PREPARE_STALE_RUNNING_MS;
+      if (isStaleRunning && stageToRun !== "prepare_pages") {
+        console.log(
+          `[watchdog] prepare_pages stale-running (${Math.round(ageMs / 1000)}s) — redirecting ${stageToRun} → prepare_pages`,
+        );
+        stageToRun = "prepare_pages";
+        await setStage(admin, plan_review_id, firmId, "prepare_pages", { status: "pending" });
+      }
+    }
+
     const stageImpls: Record<Stage, () => Promise<Record<string, unknown>>> = {
       upload: () => stageUpload(admin, plan_review_id),
       prepare_pages: () => stagePreparePages(admin, plan_review_id, firmId, targetSource),
