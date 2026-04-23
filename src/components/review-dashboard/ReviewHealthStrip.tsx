@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Activity,
   Brain,
@@ -6,6 +6,8 @@ import {
   AlertTriangle,
   ChevronDown,
   Layers,
+  FileWarning,
+  Loader2,
 } from "lucide-react";
 import {
   Popover,
@@ -13,6 +15,9 @@ import {
   PopoverContent,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+import { reprepareInBrowser } from "@/lib/reprepare-in-browser";
 import {
   usePipelineStatus,
   useDeficienciesV2,
@@ -67,6 +72,36 @@ export default function ReviewHealthStrip({
   const { data: defs = [] } = useDeficienciesV2(planReviewId);
   const { data: sheets = [] } = useSheetCoverage(planReviewId);
   const { data: applied = [] } = useAppliedCorrections(planReviewId);
+  const queryClient = useQueryClient();
+  const [repairing, setRepairing] = useState(false);
+
+  const handleRepairPages = async () => {
+    if (repairing) return;
+    setRepairing(true);
+    const t = toast.loading("Repairing missing pages…");
+    try {
+      const result = await reprepareInBrowser(planReviewId);
+      toast.dismiss(t);
+      if (result.ok) {
+        const repaired = result.repairedCount ?? result.pageAssetCount;
+        toast.success(
+          repaired === 0
+            ? "Pages already complete — pipeline restarted."
+            : `Repaired ${repaired} page${repaired === 1 ? "" : "s"} and restarted the pipeline.`,
+        );
+        queryClient.invalidateQueries({ queryKey: ["pipeline_status", planReviewId] });
+        queryClient.invalidateQueries({ queryKey: ["plan-review", planReviewId] });
+      } else {
+        toast.error(result.message);
+      }
+      for (const w of result.warnings) toast.warning(w);
+    } catch (e) {
+      toast.dismiss(t);
+      toast.error(e instanceof Error ? e.message : "Repair failed");
+    } finally {
+      setRepairing(false);
+    }
+  };
 
   const currentStage = useMemo<PipelineStage | null>(() => {
     // Last stage that's complete or running, in pipeline order
