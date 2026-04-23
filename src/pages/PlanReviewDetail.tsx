@@ -437,13 +437,13 @@ export default function PlanReviewDetail() {
     }
   };
 
-  const handlePipelineComplete = useCallback(() => {
+  const handlePipelineComplete = () => {
     queryClient.invalidateQueries({ queryKey: ["plan-review-findings-v2", review?.id] });
     queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
     setAiRunning(false);
     setAiCompleteFlash(findings.length);
     setTimeout(() => setAiCompleteFlash(null), 3000);
-  }, [queryClient, review?.id, id, findings.length]);
+  };
 
   const findingsListProps = {
     findings,
