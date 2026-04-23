@@ -2,6 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   getPDFPageCount,
   rasterizeAndUploadPages,
+  rasterizeAndUploadVisionPages,
   validatePDFHeader,
   type PreparedPageAsset,
 } from "@/lib/pdf-utils";
