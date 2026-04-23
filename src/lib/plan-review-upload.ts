@@ -50,9 +50,11 @@ const MIN_RASTERIZE_RATIO = 0.8;
 export async function uploadPlanReviewFiles(
   args: UploadPlanReviewArgs,
 ): Promise<UploadPlanReviewResult> {
-  const { reviewId, round, existingFileUrls, existingPageCount, files, userId } =
+  const { reviewId, round, existingFileUrls, existingPageCount, files, userId, onProgress } =
     args;
   const warnings: string[] = [];
+
+  onProgress?.({ phase: "Validating PDFs…", prepared: 0, expected: 0 });
 
   const acceptedFiles: File[] = [];
   for (const f of files) {
@@ -74,6 +76,7 @@ export async function uploadPlanReviewFiles(
   }
 
   // 1. Upload PDFs.
+  onProgress?.({ phase: "Uploading PDFs…", prepared: 0, expected: 0 });
   const newFilePaths: string[] = [];
   for (const file of acceptedFiles) {
     const path = `plan-reviews/${reviewId}/round-${round}/${file.name}`;
