@@ -262,7 +262,10 @@ const MAX_PAGES_PER_PDF = 80;
 // Cap how many pages we rasterize per stage call. Subsequent stages reuse the
 // cached PNGs already in storage; only the first stage that touches each page
 // pays the rasterization cost.
-const RASTERIZE_CHUNK = 12;
+const RASTERIZE_CHUNK = 24;
+// Parallel concurrency for storage uploads + manifest writes within a chunk.
+// MuPDF rasterization itself stays serial (single-threaded WASM).
+const RASTER_UPLOAD_CONCURRENCY = 6;
 
 async function rasterizePdfStreaming(
   pdfBytes: Uint8Array,
