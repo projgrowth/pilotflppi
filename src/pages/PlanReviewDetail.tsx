@@ -360,6 +360,19 @@ export default function PlanReviewDetail() {
   const previousFindings = (review?.previous_findings as Finding[] | undefined) || [];
   const diff = useRoundDiff(findings, previousFindings, review?.round ?? 1);
 
+  // Pipeline completion handler — declared as a hook here (above the early
+  // returns) so React's hook-order invariant holds. Idempotent: only flips
+  // state when a run is actually in flight, so a stray re-fire from the
+  // stepper can't loop us into a render storm (which crashed mobile).
+  const handlePipelineComplete = useCallback(() => {
+    if (!aiRunning) return;
+    queryClient.invalidateQueries({ queryKey: ["plan-review-findings-v2", review?.id] });
+    queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+    setAiRunning(false);
+    setAiCompleteFlash(findings.length);
+    setTimeout(() => setAiCompleteFlash(null), 3000);
+  }, [aiRunning, queryClient, review?.id, id, findings.length]);
+
   if (isLoading) {
     return (
       <div className="flex flex-col h-[calc(100vh-0px)]">
@@ -448,16 +461,8 @@ export default function PlanReviewDetail() {
     }
   };
 
-  const handlePipelineComplete = useCallback(() => {
-    // Idempotent: if we're not currently running, ignore. Defends against any
-    // future regression of the stepper firing onComplete more than once.
-    if (!aiRunning) return;
-    queryClient.invalidateQueries({ queryKey: ["plan-review-findings-v2", review?.id] });
-    queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
-    setAiRunning(false);
-    setAiCompleteFlash(findings.length);
-    setTimeout(() => setAiCompleteFlash(null), 3000);
-  }, [aiRunning, queryClient, review?.id, id, findings.length]);
+  // handlePipelineComplete is declared as a hook above the early returns
+  // (see useCallback near useFindingFilters) — referenced here for clarity.
 
   const findingsListProps = {
     findings,
