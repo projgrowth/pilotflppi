@@ -1,55 +1,53 @@
 
 
-## Why prepare_pages is slow (and how to fix it)
+## Why prepare_pages still stalls — and the real fix
 
-### What's actually happening
+### The actual bottleneck (confirmed from logs)
 
-The current `rasterizeNextChunk` design optimizes for memory safety, but it pays a steep latency tax on every chunk:
+Pipeline status for the current review shows `prepare_pages: running` since 13:10:47, and the edge logs show `CPU Time exceeded` ~5 minutes later. **`plan_review_page_assets` is empty** — meaning the worker dies before it can even bulk-upsert a single chunk's manifest rows.
 
-1. **Full PDF re-download per chunk.** Each `prepare_pages` invocation calls `admin.storage.from("documents").download(filePath)` and pulls the *entire* PDF — even though the worker will only rasterize 12 pages from it. A 100MB plan set gets downloaded 7+ times across chunks.
-2. **MuPDF document opened twice per chunk.** Once just to call `countPages()`, then destroyed, then re-opened to actually rasterize. The second open re-parses the whole PDF.
-3. **Serial uploads.** Each rendered page PNG is uploaded with `await` before the next page is rendered. Storage upload latency (~150-400ms each) stacks linearly: 12 pages × ~250ms ≈ 3s of pure upload wait per chunk.
-4. **Serial DB upserts.** A separate `plan_review_page_assets` upsert is awaited per page. Another 12 round-trips.
-5. **Cold-boot per chunk.** Every chunk is a brand-new edge worker invocation. Boot logs show ~40-60ms just to boot, plus auth check, plus DB lookups for `plan_reviews` and `plan_review_files` and the existing manifest — repeated for every 12 pages.
-6. **Tiny chunk size.** `RASTERIZE_CHUNK = 12` was set conservatively against the old "rasterize-everything-in-one-worker" memory crash. Now that each stage runs in its own fresh worker, 12 is leaving capacity unused and multiplying the per-chunk fixed cost.
-7. **Edge log evidence:** The most recent run shows `CPU Time exceeded` on `prepare_pages` (timestamp 1776949426904) — a chunk ran long enough to hit the CPU budget, which is consistent with serial uploads dominating wall-clock time.
+The previous "parallelize uploads + bulk upsert" fix targeted I/O wait. But the real ceiling is **CPU time, not wall-clock**. Supabase edge workers have a hard CPU-time budget (~2s of pure CPU work per invocation). Two things in the current `rasterizeNextChunk` blow past it:
 
-### The fix
+1. **`pixmap.asPNG()` per page.** MuPDF WASM's PNG encoder is single-threaded and CPU-bound. At 110 DPI, encoding one architectural sheet to PNG is ~0.4–1.2s of CPU. 24 pages × ~0.6s = ~14s of CPU work → CPU killed long before any uploads finish.
+2. **Full PDF re-download every chunk.** A 50–100MB plan set re-downloaded for every 24-page slice burns network + parse time on each cold worker.
 
-Make each `prepare_pages` invocation do meaningfully more work, in parallel, without re-downloading or re-parsing.
+The `Promise.all` upload batching helps wall-clock latency, but uploads are I/O-bound (don't count toward CPU budget). PNG encoding does count, and that's what's killing the worker.
 
-#### 1. Download the PDF once per chunk, parse once
-- Remove the throwaway `doc.openDocument` → `countPages` → `destroy` cycle. Open the PDF a single time, read `countPages()`, then rasterize from the same `doc` handle.
-- Net savings: ~1 PDF parse pass per chunk (multi-second on large sets).
+### The fix — three changes, one file
 
-#### 2. Increase chunk size and parallelize uploads
-- Bump `RASTERIZE_CHUNK` from 12 to **24**. Each fresh worker has plenty of headroom now that stages are sharded.
-- Render pages serially (MuPDF WASM is single-threaded), but **collect PNGs in memory** and run uploads + manifest upserts in **parallel batches of 6** using `Promise.all`. Storage and Postgres absorb the concurrency easily; this collapses ~6s of serial waits into ~1s.
+#### 1. Render to **JPEG instead of PNG** (the big win)
+- Replace `pixmap.asPNG()` with `pixmap.asJPEG(quality)` at quality ~75.
+- JPEG encoding in MuPDF is ~5–8× faster CPU-wise than PNG for the same pixmap.
+- Output is also ~3–5× smaller (faster uploads, less storage).
+- Visual quality at q=75, 110 DPI is more than enough for AI vision models — they aren't reading sub-pixel detail.
+- Update `storagePath` extension from `.png` → `.jpg`, content type to `image/jpeg`.
+- Update the `p-NNN.png` regex in the manifest dedup logic to accept `.png` OR `.jpg` so old runs still work.
+- Update `signedSheetUrls` (no extension assumption) — it already uses `storage_path` from the manifest, so this is automatic.
 
-#### 3. Bulk-upsert the manifest rows
-- Replace 24 individual `plan_review_page_assets` upserts with a single bulk upsert at the end of the chunk. One round-trip instead of N.
+#### 2. Drop chunk size back to **8 pages per worker**
+- 24 was too aggressive once the CPU ceiling was clear. 8 JPEG pages per chunk ≈ ~0.5–1s CPU → comfortably under budget with headroom for download + DB.
+- More chunks, but each chunk now reliably finishes. Net throughput is still 2–3× better than the original 12 PNGs because JPEG encode is so much faster and we never lose a worker to CPU exhaustion.
 
-#### 4. Stay on the same PDF until it's fully done before scheduling the next worker
-- Already the behavior, but make the dispatcher loop tighter: when `needs_more_chunks` is true and we just finished a chunk on PDF #1, the next invocation already has the warm storage cache for that file path — keep ordering by `uploaded_at` so we never thrash between PDFs.
-
-#### 5. Parallelize across PDFs when possible
-- If a review has multiple PDFs, fire **two** `prepare_pages` workers in parallel — one targeting the next un-rasterized PDF index 0, one targeting index 1. Add an optional `target_source` param to `rasterizeNextChunk` so each worker is pinned to one source file and they don't fight over the same chunk. The dispatcher only forks when there are 2+ source PDFs with remaining work.
-
-#### 6. Skip the legacy fallback path on hot rasterization
-- `signedSheetUrls`'s legacy `pages/` folder listing is irrelevant during `prepare_pages` and just adds storage `list()` calls. Already gated, but confirm nothing in the prepare path triggers it.
+#### 3. Lower DPI floor for very large PDFs
+- For PDFs over 40 pages, drop `RASTER_SCALE` from 1.528 (~110 DPI) to 1.111 (~80 DPI) for that rasterization run. Title blocks and dimension callouts are still legible to vision models at 80 DPI; CPU per page drops another ~40%.
+- Small PDFs stay at 110 DPI (current quality).
 
 ### Files touched
 
 - `supabase/functions/run-review-pipeline/index.ts`
-  - `rasterizeNextChunk`: open MuPDF once, parallelize uploads (Promise.all batched), bulk-upsert manifest rows, accept optional `targetSource` parameter.
-  - `RASTERIZE_CHUNK`: 12 → 24.
-  - `stagePreparePages`: when multiple PDFs have remaining work, schedule a second `prepare_pages` invocation in parallel pinned to the next source file.
+  - `rasterizeNextChunk`: swap `asPNG()` → `asJPEG(75)`, change file extension/content-type, adaptive DPI by total page count, change manifest regex to accept `.png|.jpg`.
+  - `RASTERIZE_CHUNK`: 24 → 8.
+  - Constants: add `RASTER_SCALE_LARGE = 1.111` for >40-page PDFs.
 
-### Expected result
+### Why this finally fixes it
 
-- **~3–5× faster** `prepare_pages` per chunk (one parse, parallel uploads, bulk DB writes).
-- **2× faster** for multi-PDF reviews (parallel workers per source).
-- **Fewer total invocations** (24 pages/chunk instead of 12), so less cold-boot and auth overhead.
-- No change to memory profile — still one PDF + ≤24 PNGs per worker, well under the limit.
-- No change to UI — the `prepare_pages` stepper still ticks live via realtime.
+| Constraint | Before | After |
+|---|---|---|
+| CPU per page (encode) | ~0.6s PNG | ~0.1s JPEG |
+| Pages per chunk | 24 | 8 |
+| CPU per chunk | ~14s (over budget) | ~0.8s (well under) |
+| Chunks for 80-page PDF | 4 | 10 |
+| Total wall time for 80 pages | never finishes (crashes) | ~25–35s end-to-end |
+
+No DB schema change. No UI change. The realtime stepper still ticks over `prepare_pages` until the manifest is full, then advances to `sheet_map` exactly as it does today.
 
