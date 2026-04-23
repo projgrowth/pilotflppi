@@ -3360,47 +3360,37 @@ Deno.serve(async (req) => {
         return;
       }
 
-      // CRASH-RESILIENT PREPARE: pre-schedule the next prepare_pages worker
-      // BEFORE we start rasterizing. If the current worker dies on a CPU
-      // limit (MuPDF cold-load + render is right at the edge of the budget),
-      // the follow-up worker will arrive, see the manifest already has N
-      // pages, and either finish the remaining chunks or no-op into the
-      // next stage. Without this a single CPU-kill stranded `prepare_pages`
-      // forever in `running`.
-      let prepareRecoveryScheduled = false;
-      if (stageToRun === "prepare_pages") {
-        prepareRecoveryScheduled = true;
-        // Fire-and-forget — don't await. The recovery worker comes online
-        // ~1s later and is idempotent: if our chunk already finished, it
-        // just advances to sheet_map.
-        scheduleNextStage(plan_review_id, "prepare_pages", {
-          target_source: targetSource,
-          mode,
-        });
-      }
+      // SEQUENTIAL PREPARE_PAGES: one worker per chunk, no racing. The
+      // dispatcher's stale-row watchdog (above) is the safety net for when
+      // a worker dies on a CPU limit before scheduling its successor.
 
       await setStage(admin, plan_review_id, firmId, stageToRun, { status: "running" });
       try {
         const meta = await withRetry(() => stageImpls[stageToRun](), `stage:${stageToRun}`);
 
         // Special case: prepare_pages may need to loop itself for more chunks
-        // before advancing to sheet_map. We already pre-scheduled a recovery
-        // worker above; only schedule an EXTRA worker if it would target a
-        // different PDF than the recovery covers.
+        // before advancing to sheet_map. Schedule exactly one follow-up worker
+        // AFTER the current chunk's manifest has been written.
         if (stageToRun === "prepare_pages") {
           const m = meta as {
             needs_more_chunks?: boolean;
             remaining_sources?: string[];
             source?: string | null;
             target_source?: string | null;
+            prepare_attempts?: number;
           };
           if (m.needs_more_chunks) {
+            // Reset the attempt counter on success — failures only accumulate
+            // when a chunk genuinely throws.
             await setStage(admin, plan_review_id, firmId, stageToRun, {
               status: "running",
-              metadata: meta,
+              metadata: { ...meta, prepare_attempts: 0 },
             });
-            // The pre-scheduled recovery worker (with `targetSource`) will
-            // pick up where we left off. Don't double-schedule.
+            scheduleNextStage(plan_review_id, "prepare_pages", {
+              target_source:
+                (m.remaining_sources && m.remaining_sources[0]) ?? targetSource,
+              mode,
+            });
             return;
           }
           // Done with prepare — fall through to mark complete & advance.
@@ -3432,8 +3422,8 @@ Deno.serve(async (req) => {
         const idx = activeChain.indexOf(stageToRun);
         const next = idx >= 0 ? activeChain[idx + 1] : undefined;
         if (next) {
-          // Don't double-schedule: if a recovery worker raced us to advance
-          // the chain, the next stage may already be running or complete.
+          // Don't double-schedule: if the watchdog or a recovery worker raced
+          // us to advance the chain, the next stage may already be running.
           const { data: nextRow } = await admin
             .from("review_pipeline_status")
             .select("status")
@@ -3445,19 +3435,59 @@ Deno.serve(async (req) => {
             scheduleNextStage(plan_review_id, next, { mode });
           }
         }
-        void prepareRecoveryScheduled;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+
+        // BOUNDED RETRY for prepare_pages: CPU-kills look like throws here.
+        // Re-mark `running` (not error) and schedule one more attempt with a
+        // small delay, capped at 8 attempts. This keeps the chunk loop alive
+        // through transient cold-load CPU exhaustion.
+        if (stageToRun === "prepare_pages") {
+          const { data: existingRow } = await admin
+            .from("review_pipeline_status")
+            .select("metadata")
+            .eq("plan_review_id", plan_review_id)
+            .eq("stage", "prepare_pages")
+            .maybeSingle();
+          const existingMeta =
+            (existingRow as { metadata?: Record<string, unknown> | null } | null)?.metadata ??
+            {};
+          const attempts =
+            typeof existingMeta.prepare_attempts === "number"
+              ? existingMeta.prepare_attempts + 1
+              : 1;
+          if (attempts <= 8) {
+            console.warn(
+              `[prepare_pages] attempt ${attempts}/8 failed (${message}) — re-scheduling in 2s`,
+            );
+            await setStage(admin, plan_review_id, firmId, "prepare_pages", {
+              status: "running",
+              metadata: { ...existingMeta, prepare_attempts: attempts, last_error: message },
+            });
+            // 2s delay before re-scheduling so a hot CPU limit can drain.
+            setTimeout(() => {
+              scheduleNextStage(plan_review_id, "prepare_pages", {
+                target_source: targetSource,
+                mode,
+              });
+            }, 2000);
+            return;
+          }
+          await setStage(admin, plan_review_id, firmId, "prepare_pages", {
+            status: "error",
+            error_message: `prepare_pages exhausted ${attempts - 1} retries: ${message}`,
+            metadata: { ...existingMeta, prepare_attempts: attempts, last_error: message },
+          });
+          return;
+        }
+
         await setStage(admin, plan_review_id, firmId, stageToRun, {
           status: "error",
           error_message: message,
         });
         // For non-fatal stages, still try to advance so the user gets partial
-        // results. `upload`, `prepare_pages`, and `dna_extract` halt the chain.
-        const isFatal =
-          stageToRun === "upload" ||
-          stageToRun === "prepare_pages" ||
-          stageToRun === "dna_extract";
+        // results. `upload` and `dna_extract` halt the chain.
+        const isFatal = stageToRun === "upload" || stageToRun === "dna_extract";
         if (!isFatal) {
           if (await isCancelled()) return;
           const idx = activeChain.indexOf(stageToRun);
