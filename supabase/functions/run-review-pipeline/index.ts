@@ -3164,7 +3164,7 @@ async function stageGroundCitations(
 function scheduleNextStage(
   planReviewId: string,
   nextStage: Stage,
-  extra?: { target_source?: string | null },
+  extra?: { target_source?: string | null; mode?: PipelineMode },
 ) {
   const url = `${SUPABASE_URL}/functions/v1/run-review-pipeline`;
   // Don't await — return immediately and let waitUntil keep this socket alive
@@ -3180,6 +3180,7 @@ function scheduleNextStage(
       plan_review_id: planReviewId,
       stage: nextStage,
       target_source: extra?.target_source ?? null,
+      mode: extra?.mode ?? "core",
       _internal: true,
     }),
   })
