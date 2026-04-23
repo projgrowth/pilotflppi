@@ -18,6 +18,7 @@ import {
   Sparkles,
   FileText,
   TrendingUp,
+  Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/contexts/AuthContext";
+import { useActivePipelineCount } from "@/hooks/useAllActivePipelines";
 import { useState, useEffect } from "react";
 
 interface NavItem {
@@ -39,6 +41,7 @@ const mainNav: NavItem[] = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
   { label: "Projects", path: "/projects", icon: FolderKanban },
   { label: "Plan Review", path: "/review", icon: Search },
+  { label: "Pipeline Activity", path: "/pipelines", icon: Activity },
   { label: "Inspections", path: "/inspections", icon: ClipboardCheck },
   { label: "Documents", path: "/documents", icon: FileText },
   { label: "Invoices", path: "/invoices", icon: Receipt },
@@ -59,10 +62,12 @@ const bottomTabs: NavItem[] = [
 
 const NavList = React.forwardRef<HTMLDivElement, { items: NavItem[]; onNavigate?: () => void; collapsed?: boolean }>(function NavList({ items, onNavigate, collapsed }, ref) {
   const location = useLocation();
+  const activeCount = useActivePipelineCount();
   return (
     <nav ref={ref} className="space-y-0.5 px-2">
       {items.map((item) => {
         const active = location.pathname.startsWith(item.path);
+        const showBadge = item.path === "/pipelines" && activeCount > 0;
         const link = (
           <Link
             key={item.path}
@@ -77,15 +82,30 @@ const NavList = React.forwardRef<HTMLDivElement, { items: NavItem[]; onNavigate?
             )}
           >
             <item.icon className="h-4 w-4 shrink-0" />
-            {!collapsed && <span>{item.label}</span>}
+            {!collapsed && <span className="flex-1">{item.label}</span>}
+            {!collapsed && showBadge && (
+              <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-sidebar-primary px-1.5 text-[10px] font-semibold text-sidebar-primary-foreground">
+                {activeCount}
+              </span>
+            )}
+            {collapsed && showBadge && (
+              <span className="absolute top-1 right-1 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-sidebar-primary px-1 text-[9px] font-semibold text-sidebar-primary-foreground">
+                {activeCount}
+              </span>
+            )}
           </Link>
         );
 
         if (collapsed) {
           return (
             <Tooltip key={item.path} delayDuration={0}>
-              <TooltipTrigger asChild>{link}</TooltipTrigger>
-              <TooltipContent side="right" className="text-xs">{item.label}</TooltipContent>
+              <TooltipTrigger asChild>
+                <div className="relative">{link}</div>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="text-xs">
+                {item.label}
+                {showBadge && ` · ${activeCount} active`}
+              </TooltipContent>
             </Tooltip>
           );
         }
