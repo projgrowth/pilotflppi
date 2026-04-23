@@ -3185,7 +3185,7 @@ Deno.serve(async (req) => {
 
     const stageImpls: Record<Stage, () => Promise<Record<string, unknown>>> = {
       upload: () => stageUpload(admin, plan_review_id),
-      prepare_pages: () => stagePreparePages(admin, plan_review_id, firmId),
+      prepare_pages: () => stagePreparePages(admin, plan_review_id, firmId, targetSource),
       sheet_map: () => stageSheetMap(admin, plan_review_id, firmId),
       dna_extract: () =>
         startFrom && STAGES.indexOf(startFrom) > 0 && stageToRun === "dna_extract"
