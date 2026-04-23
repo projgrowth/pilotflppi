@@ -489,6 +489,49 @@ export async function renderZoomCropForCell(
 }
 
 /**
+ * Render specific (1-based) page numbers from a PDF and return them as JPEG
+ * blobs. Used by the gap-only re-rasterize path: when 1 of 78 pages failed
+ * the first time, we don't want to re-render the other 77 from scratch.
+ *
+ * `pageNumbersInFile` are 1-based pdf.js page numbers. Returns one entry per
+ * input number (in the same order); throws on getPage failure for any single
+ * page so the caller can record a per-page failure and continue.
+ */
+export async function rasterizePagesByIndex(
+  file: File,
+  pageNumbersInFile: number[],
+  dpi = 96,
+  quality = 0.72,
+): Promise<Array<{ pageInFile: number; blob: Blob }>> {
+  if (pageNumbersInFile.length === 0) return [];
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const out: Array<{ pageInFile: number; blob: Blob }> = [];
+  for (const n of pageNumbersInFile) {
+    if (n < 1 || n > pdf.numPages) {
+      throw new Error(`Page ${n} out of range (PDF has ${pdf.numPages})`);
+    }
+    const page = await pdf.getPage(n);
+    const viewport = page.getViewport({ scale: dpi / 72 });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext("2d")!;
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((next) => {
+        if (next) resolve(next);
+        else reject(new Error(`Failed to encode page ${n} as JPEG`));
+      }, "image/jpeg", quality);
+    });
+    out.push({ pageInFile: n, blob });
+    canvas.width = 0;
+    canvas.height = 0;
+  }
+  return out;
+}
+
+/**
  * Get page count without rendering.
  */
 export async function getPDFPageCount(file: File): Promise<number> {
