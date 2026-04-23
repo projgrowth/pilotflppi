@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { callAI } from "@/lib/ai";
@@ -7,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
  Select,
@@ -28,6 +28,7 @@ import {
  Building2,
  Check,
  FileText,
+ Home,
  Loader2,
  MapPin,
  Sparkles,
@@ -39,6 +40,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { isHVHZ, getCountyLabel } from "@/lib/county-utils";
 import { geocodeAddress } from "@/lib/geocode";
+import { PipelineProgressStepper } from "@/components/plan-review/PipelineProgressStepper";
 
 const FLORIDA_COUNTIES = [
  "miami-dade", "broward", "palm-beach", "hillsborough", "orange", "duval",
@@ -67,8 +69,10 @@ const SERVICES = [
 const STEPS = [
  { id: 1, label: "Upload", icon: Upload },
  { id: 2, label: "Confirm", icon: Check },
- { id: 3, label: "Launch", icon: Sparkles },
+ { id: 3, label: "Analyze", icon: Sparkles },
 ];
+
+type UseType = "commercial" | "residential";
 
 interface UploadedFile {
  name: string;
@@ -86,6 +90,7 @@ interface NewPlanReviewWizardProps {
 
 export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselectedProjectId }: NewPlanReviewWizardProps) {
  const queryClient = useQueryClient();
+ const navigate = useNavigate();
  const [step, setStep] = useState(1);
  const [saving, setSaving] = useState(false);
  const [uploading, setUploading] = useState(false);
@@ -105,6 +110,7 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  const [tradeType, setTradeType] = useState("");
  const [services, setServices] = useState("plan_review");
  const [architect, setArchitect] = useState("");
+ const [useType, setUseType] = useState<UseType | "">("");
  const [aiExtracted, setAiExtracted] = useState(false);
 
  // Existing project match
@@ -113,6 +119,9 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
 
  // Created IDs
  const [createdReviewId, setCreatedReviewId] = useState("");
+ const [createdProjectId, setCreatedProjectId] = useState("");
+ const [pipelineError, setPipelineError] = useState<string | null>(null);
+ const [retrying, setRetrying] = useState(false);
 
  const { data: existingProjects } = useQuery({
  queryKey: ["projects-for-wizard"],
@@ -139,10 +148,14 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  setTradeType("");
  setServices("plan_review");
  setArchitect("");
+ setUseType("");
  setAiExtracted(false);
  setMatchedProject(null);
  setUseExisting(false);
  setCreatedReviewId("");
+ setCreatedProjectId("");
+ setPipelineError(null);
+ setRetrying(false);
  setExtracting(false);
  setExtractProgress(0);
  };
@@ -272,16 +285,30 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  setStep(2);
  };
 
- // --- Create project & review ---
- const step2Valid = !!(projectName && address && county && tradeType);
+ // Step 2 is valid only when use_type is also picked.
+ const step2Valid = !!(projectName && address && county && tradeType && useType);
+
+ // --- Kick off the pipeline (extracted so the Retry button can re-use it) ---
+ const invokePipeline = async (planReviewId: string) => {
+   const { error } = await supabase.functions.invoke("run-review-pipeline", {
+     body: { plan_review_id: planReviewId },
+   });
+   if (error) throw error;
+ };
 
  const handleLaunch = async () => {
  setSaving(true);
+ setPipelineError(null);
  try {
  let projectId: string;
 
  if (useExisting && matchedProject) {
  projectId = matchedProject.id;
+ // Update use_type on the existing project so the pipeline can read it.
+ await supabase
+   .from("projects")
+   .update({ use_type: useType || null })
+   .eq("id", projectId);
  } else {
  const serviceArray = services === "both" ? ["plan_review", "inspections"] : [services];
  const { data: proj, error: projErr } = await supabase
@@ -293,6 +320,7 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  jurisdiction,
  trade_type: tradeType,
  services: serviceArray,
+ use_type: useType || null,
  status: "plan_review" as const,
  })
  .select("id")
@@ -310,6 +338,7 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  if (revErr) throw revErr;
 
  setCreatedReviewId(review.id);
+ setCreatedProjectId(projectId);
 
  // Upload files to storage
  const fileUrls: string[] = [];
@@ -351,24 +380,69 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  queryClient.invalidateQueries({ queryKey: ["plan-reviews"] });
  queryClient.invalidateQueries({ queryKey: ["projects"] });
 
- // Auto-start the pipeline immediately after upload
- try {
-   await supabase.functions.invoke("run-review-pipeline", {
-     body: { plan_review_id: review.id },
-   });
- } catch {
-   // Non-fatal — reviewer can manually run from dashboard
-   toast.warning("Files uploaded. Pipeline will need to be started manually.");
- }
+ // Move to step 3 BEFORE invoking — the realtime stepper subscribes immediately.
+ setStep(3);
 
- onComplete(review.id, projectId);
- handleClose();
- toast.success("Review created — AI analysis started");
+ // Fire and forget; the stepper subscription will reflect progress live.
+ // We do NOT await — the function may take 30-90s and we want the dialog
+ // responsive immediately. Errors get caught by the realtime stepper
+ // (stage rows flip to status='error') and surfaced via pipelineError.
+ invokePipeline(review.id).catch((err) => {
+   const msg = err instanceof Error ? err.message : "Pipeline failed to start";
+   setPipelineError(msg);
+ });
+
+ toast.success("Review created — analysis started");
  } catch (err) {
  toast.error(err instanceof Error ? err.message : "Failed to create review");
  } finally {
  setSaving(false);
  }
+ };
+
+ // --- Pipeline complete handler (auto-route to workspace) ---
+ const handlePipelineComplete = useCallback(() => {
+   if (!createdReviewId || !createdProjectId) return;
+   onComplete(createdReviewId, createdProjectId);
+   handleClose();
+   toast.success("Analysis complete — opening workspace");
+ // eslint-disable-next-line react-hooks/exhaustive-deps
+ }, [createdReviewId, createdProjectId]);
+
+ const handleContinueInBackground = () => {
+   if (createdReviewId && createdProjectId) {
+     // Keep the pipeline running; just close the dialog. The toast lets the
+     // reviewer know it's still working in the background.
+     toast.info(`Analyzing ${projectName}…`, {
+       description: "We'll keep working in the background.",
+       action: {
+         label: "Open workspace",
+         onClick: () => navigate(`/plan-review/${createdReviewId}`),
+       },
+       duration: 8000,
+     });
+   }
+   handleClose();
+ };
+
+ const handleOpenWorkspaceNow = () => {
+   if (!createdReviewId || !createdProjectId) return;
+   onComplete(createdReviewId, createdProjectId);
+   handleClose();
+ };
+
+ const handleRetryPipeline = async () => {
+   if (!createdReviewId) return;
+   setRetrying(true);
+   setPipelineError(null);
+   try {
+     await invokePipeline(createdReviewId);
+     toast.success("Retrying analysis…");
+   } catch (err) {
+     setPipelineError(err instanceof Error ? err.message : "Retry failed");
+   } finally {
+     setRetrying(false);
+   }
  };
 
  const totalPages = uploadedFiles.reduce((sum, f) => sum + f.pageCount, 0);
@@ -526,6 +600,49 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  <ArrowLeft className="h-3 w-3" /> Back to upload
  </button>
 
+ {/* Use type — required, drives which FBC code path the AI follows */}
+ <div className="space-y-2">
+   <Label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+     Project use type *
+   </Label>
+   <div className="grid grid-cols-2 gap-3">
+     <button
+       type="button"
+       onClick={() => setUseType("commercial")}
+       className={cn(
+         "flex flex-col items-start gap-1 rounded-lg border-2 p-4 text-left transition-all hover:border-accent/60",
+         useType === "commercial"
+           ? "border-accent bg-accent/5"
+           : "border-border bg-card",
+       )}
+     >
+       <div className="flex w-full items-center justify-between">
+         <Building2 className={cn("h-5 w-5", useType === "commercial" ? "text-accent" : "text-muted-foreground")} />
+         {useType === "commercial" && <Check className="h-4 w-4 text-accent" />}
+       </div>
+       <p className="text-sm font-semibold">Commercial</p>
+       <p className="text-xs text-muted-foreground">FBC Building, accessibility, life safety</p>
+     </button>
+     <button
+       type="button"
+       onClick={() => setUseType("residential")}
+       className={cn(
+         "flex flex-col items-start gap-1 rounded-lg border-2 p-4 text-left transition-all hover:border-accent/60",
+         useType === "residential"
+           ? "border-accent bg-accent/5"
+           : "border-border bg-card",
+       )}
+     >
+       <div className="flex w-full items-center justify-between">
+         <Home className={cn("h-5 w-5", useType === "residential" ? "text-accent" : "text-muted-foreground")} />
+         {useType === "residential" && <Check className="h-4 w-4 text-accent" />}
+       </div>
+       <p className="text-sm font-semibold">Residential</p>
+       <p className="text-xs text-muted-foreground">1 & 2 family, FBC Residential (FBCR)</p>
+     </button>
+   </div>
+ </div>
+
  {aiExtracted && (
  <div className="flex items-center gap-2 rounded-lg bg-accent/10 border border-accent/20 px-3 py-2">
  <Sparkles className="h-4 w-4 text-accent shrink-0" />
@@ -680,22 +797,86 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  </span>
  </>
  )}
+ {useType && (
+ <>
+ <span className="text-muted-foreground">Use type</span>
+ <span className="font-medium capitalize">{useType}</span>
+ </>
+ )}
  </div>
  </CardContent>
  </Card>
 
  <Button
  onClick={handleLaunch}
- disabled={(!useExisting && !step2Valid) || saving}
+ disabled={(!useExisting && !step2Valid) || !useType || saving}
  className="w-full h-12"
  >
  {saving ? (
  <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Creating...</>
  ) : (
- <><Sparkles className="h-4 w-4 mr-2" /> Create Review & Open Workspace</>
+ <><Sparkles className="h-4 w-4 mr-2" /> Create & Analyze <ArrowRight className="h-4 w-4 ml-2" /></>
  )}
  </Button>
  </div>
+ )}
+
+ {/* ===== STEP 3: Analyzing ===== */}
+ {step === 3 && createdReviewId && (
+   <div className="space-y-5">
+     <div className="text-center py-2">
+       <div className="inline-flex items-center justify-center h-12 w-12 rounded-full bg-accent/10 mb-3">
+         <Sparkles className="h-6 w-6 text-accent animate-pulse" />
+       </div>
+       <p className="text-sm font-semibold">Analyzing your plans</p>
+       <p className="text-xs text-muted-foreground mt-1">
+         {projectName ? `${projectName} · ` : ""}{useType === "residential" ? "FBCR" : "FBC"} review in progress
+       </p>
+     </div>
+
+     {pipelineError && (
+       <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 space-y-2">
+         <p className="text-sm font-semibold text-destructive">Analysis failed to start</p>
+         <p className="text-xs text-destructive/80">{pipelineError}</p>
+         <Button
+           size="sm"
+           variant="outline"
+           onClick={handleRetryPipeline}
+           disabled={retrying}
+           className="border-destructive/40 text-destructive hover:bg-destructive/10"
+         >
+           {retrying ? (
+             <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Retrying…</>
+           ) : (
+             "Retry analysis"
+           )}
+         </Button>
+       </div>
+     )}
+
+     <div className="rounded-lg border bg-card p-4">
+       <PipelineProgressStepper
+         planReviewId={createdReviewId}
+         onComplete={handlePipelineComplete}
+       />
+     </div>
+
+     <div className="flex gap-3">
+       <Button
+         variant="outline"
+         onClick={handleContinueInBackground}
+         className="flex-1"
+       >
+         Continue in background
+       </Button>
+       <Button
+         onClick={handleOpenWorkspaceNow}
+         className="flex-1"
+       >
+         Open workspace
+       </Button>
+     </div>
+   </div>
  )}
  </DialogContent>
  </Dialog>

@@ -695,15 +695,17 @@ async function stageDnaExtract(
 
   const { data: pr } = await admin
     .from("plan_reviews")
-    .select("project_id, fbc_edition, projects(address, jurisdiction, county)")
+    .select("project_id, fbc_edition, projects(address, jurisdiction, county, use_type)")
     .eq("id", planReviewId)
     .maybeSingle();
 
   const project = pr as unknown as {
     project_id: string;
     fbc_edition: string | null;
-    projects: { address: string; jurisdiction: string; county: string } | null;
+    projects: { address: string; jurisdiction: string; county: string; use_type: string | null } | null;
   } | null;
+
+  const useType = project?.projects?.use_type ?? null;
 
   // Pick cover/code-summary pages from sheet_coverage; fall back to first 3 pages.
   const [{ data: coverSheets }, signed] = await Promise.all([
@@ -756,10 +758,19 @@ async function stageDnaExtract(
     return { seeded: true, source: "no_images" };
   }
 
+  // Inject use_type so the model knows whether this is FBC vs FBCR
+  // and stops guessing the occupancy on every residential job.
+  const useTypeHint = useType === "residential"
+    ? `This is a RESIDENTIAL project (FBC Residential / FBCR applies, not FBC Building). Occupancy is R-3 by default for 1 & 2 family dwellings — only flag mixed_occupancy if the plans show it. `
+    : useType === "commercial"
+      ? `This is a COMMERCIAL project (FBC Building applies, not FBCR). Read the occupancy classification from the code summary verbatim. `
+      : ``;
+
   const userText =
     `Read the project DNA from the supplied cover / code-summary pages. ` +
     `Florida project. Address: ${project?.projects?.address ?? "(unknown)"}, ` +
     `County: ${project?.projects?.county ?? "(unknown)"}. ` +
+    useTypeHint +
     `Return values via submit_project_dna. ` +
     `If the county is Miami-Dade, Broward, or Monroe, hvhz must be true. ` +
     `If you cannot read a value, set it to null and add the key to missing_fields. ` +
@@ -940,7 +951,7 @@ async function stageDisciplineReview(
       .maybeSingle(),
     admin
       .from("plan_reviews")
-      .select("projects(county)")
+      .select("projects(county, use_type)")
       .eq("id", planReviewId)
       .maybeSingle(),
   ]);
@@ -952,9 +963,11 @@ async function stageDisciplineReview(
     page_index: number | null;
   }>;
   const dna = (dnaRow.data ?? null) as Record<string, unknown> | null;
-  const county = ((jurisdictionRow.data ?? null) as
-    | { projects: { county: string } | null }
-    | null)?.projects?.county ?? null;
+  const jurisdictionProject = (jurisdictionRow.data ?? null) as
+    | { projects: { county: string; use_type: string | null } | null }
+    | null;
+  const county = jurisdictionProject?.projects?.county ?? null;
+  const useType = jurisdictionProject?.projects?.use_type ?? null;
 
   let jurisdiction: Record<string, unknown> | null = null;
   if (county) {
@@ -965,6 +978,13 @@ async function stageDisciplineReview(
       .maybeSingle();
     jurisdiction = (jr ?? null) as Record<string, unknown> | null;
   }
+
+  // Residential 1-2 family projects don't need a commercial accessibility
+  // (ADA / FBC Ch.11) review — skip that discipline entirely so the AI
+  // doesn't manufacture irrelevant findings.
+  const disciplinesToRun = useType === "residential"
+    ? DISCIPLINES.filter((d) => d !== "Accessibility")
+    : DISCIPLINES;
 
   // Resolve each sheet's discipline: prefer the AI-extracted title-block
   // discipline (sheet_coverage.discipline). Fall back to prefix heuristic ONLY
@@ -995,7 +1015,7 @@ async function stageDisciplineReview(
   const failed: string[] = [];
   let totalFindings = 0;
 
-  for (const discipline of DISCIPLINES) {
+  for (const discipline of disciplinesToRun) {
     try {
       const disciplineSheets = routed.filter((s) => s.discipline === discipline);
       const disciplineImageUrls = disciplineSheets
@@ -1029,6 +1049,7 @@ async function stageDisciplineReview(
         generalImageUrls,
         dna,
         jurisdiction,
+        useType,
       });
       totalFindings += inserted;
     } catch (err) {
@@ -1059,6 +1080,7 @@ interface DisciplineRunCtx {
   generalImageUrls: string[];
   dna: Record<string, unknown> | null;
   jurisdiction: Record<string, unknown> | null;
+  useType: string | null;
 }
 
 async function runDisciplineChecks(
@@ -1196,7 +1218,16 @@ async function runDisciplineChecks(
   // common failure modes + wording/evidence guidance + shared review rules.
   const systemPrompt = composeDisciplineSystemPrompt(ctx.discipline);
 
+  // Use-type prefix tells the expert which FBC code path applies before they
+  // start reading sheets — prevents commercial-coded findings on residential.
+  const useTypeLine = ctx.useType === "residential"
+    ? `## Project Use Type\nRESIDENTIAL — apply FBC Residential (FBCR), NOT FBC Building. Skip commercial accessibility (FBC Ch.11). Use IRC/FBCR-style code references.\n\n`
+    : ctx.useType === "commercial"
+      ? `## Project Use Type\nCOMMERCIAL — apply FBC Building (not FBCR). Accessibility (FBC Ch.11/ADA) and commercial life-safety apply.\n\n`
+      : ``;
+
   const userText =
+    useTypeLine +
     `## Project DNA\n${dnaSummary}\n\n` +
     `## Jurisdiction\n${jurSummary}\n\n` +
     `## Sheets routed to ${ctx.discipline}\n${sheetIndex || "(none)"}\n\n` +
