@@ -214,6 +214,22 @@ export default function ReviewDashboard() {
               <ArrowLeft className="mr-1 h-4 w-4" /> Back to workspace
             </Link>
           </Button>
+          {isPipelineActive && (
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={cancelPipeline}
+              disabled={cancelling}
+              title="Stop the running pipeline"
+            >
+              {cancelling ? (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              ) : (
+                <Square className="mr-1 h-4 w-4" />
+              )}
+              {cancelling ? "Cancelling…" : "Cancel"}
+            </Button>
+          )}
           {/* Re-run analysis is a secondary action — the wizard handles the
               first run automatically. Keep this for follow-up rounds where
               the reviewer uploads new sheets. */}
