@@ -2,6 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   getPDFPageCount,
   rasterizeAndUploadPages,
+  validatePDFHeader,
   type PreparedPageAsset,
 } from "@/lib/pdf-utils";
 import { startPipeline } from "@/lib/pipeline-run";
@@ -45,9 +46,23 @@ export async function uploadPlanReviewFiles(
     args;
   const warnings: string[] = [];
 
-  const acceptedFiles = files.filter((f) => f.type === "application/pdf");
+  const acceptedFiles: File[] = [];
+  for (const f of files) {
+    if (f.type !== "application/pdf") {
+      warnings.push(`${f.name}: only PDF files are supported.`);
+      continue;
+    }
+    // Validate magic bytes BEFORE upload — server can no longer rasterize, so
+    // a corrupt PDF that slips through means the review is dead-on-arrival.
+    const isPdf = await validatePDFHeader(f);
+    if (!isPdf) {
+      warnings.push(`${f.name}: file is not a valid PDF (bad header).`);
+      continue;
+    }
+    acceptedFiles.push(f);
+  }
   if (acceptedFiles.length === 0) {
-    throw new Error("Only PDF files are supported.");
+    throw new Error(warnings.join("; ") || "No valid PDF files to upload.");
   }
 
   // 1. Upload PDFs.

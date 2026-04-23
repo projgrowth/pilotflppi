@@ -279,81 +279,51 @@ function disciplineForSheetFallback(sheetRef: string): string | null {
   }
 }
 
-/**
- * Rasterize a single PDF (loaded as bytes) into PNG bytes per page.
- * Uses MuPDF WASM. Resolution is tuned for vision: ~150 DPI = 2.083x scale.
- * Pages over MAX_PAGES are skipped (vision cost guard for huge sets).
- */
-// Lower scale + page cap to reduce edge-worker memory pressure. Vision models
-// still read sheet titles and notes fine at ~110 DPI, and capping at 80 pages
-// per PDF keeps a single rasterization run inside the worker's budget. Larger
-// sets are still supported — the pipeline raster-prepares them in chunks across
-// stages instead of all at once.
-const RASTER_SCALE = 1.528; // ~110 DPI — small/medium PDFs
-const RASTER_SCALE_LARGE = 1.111; // ~80 DPI — used when a PDF has > LARGE_PDF_THRESHOLD pages
-const RASTER_SCALE_COLD = 0.833; // ~60 DPI — cold-start rescue mode for the very first chunk of a PDF
-const LARGE_PDF_THRESHOLD = 40;
-const MAX_PAGES_PER_PDF = 80;
-// JPEG quality used by asJPEG(). 75 is plenty for vision models reading
-// title blocks / dimension callouts and keeps CPU/encode time tiny.
-const RASTER_JPEG_QUALITY = 75;
-// Cap how many pages we rasterize per stage call. Edge workers have a hard
-// CPU-time budget (~2s pure CPU per invocation). The MuPDF WASM cold-load
-// alone burns ~1.5–2s, so the first chunk on each fresh worker has very
-// little budget left. 2 JPEG pages keeps us safely under the limit even on
-// cold workers, and we ALWAYS schedule the next chunk before starting
-// rasterization so a CPU-kill mid-chunk can't strand the pipeline.
-const RASTERIZE_CHUNK = 2;
-const RASTERIZE_CHUNK_COLD_START = 1;
-// If a `prepare_pages` row has been `running` longer than this without a
-// completion or status update, the next dispatcher invocation treats it as
-// dead and resumes the chunk loop. Without this any single CPU-kill stranded
-// the whole pipeline behind a forever-running prepare row.
-const PREPARE_STALE_RUNNING_MS = 60_000;
-// Parallel concurrency for storage uploads + manifest writes within a chunk.
-// MuPDF rasterization itself stays serial (single-threaded WASM).
-const RASTER_UPLOAD_CONCURRENCY = 6;
-// Match either legacy .png or current .jpg page assets when scanning storage
-// or storage_path strings, so older runs are still recognized.
-const PAGE_ASSET_RE = /^p-\d{3,}\.(png|jpe?g)$/;
+// Page assets are produced by the BROWSER (pdf.js in the wizard / inline
+// upload). Server-side rasterization was removed — Supabase edge workers'
+// ~2s CPU budget can't reliably load MuPDF WASM, decode, JPEG-encode, and
+// upload a single page on a cold start, let alone a multi-PDF plan set.
+// `prepare_pages` is now a thin verifier; if the manifest is empty the
+// stage throws NEEDS_BROWSER_RASTERIZATION and the client takes over.
+//
+// Match either legacy .png or current .jpg page assets when scanning
+// storage or storage_path strings, so older runs are still recognized.
 const PAGE_ASSET_INDEX_RE = /p-(\d{3,})\.(png|jpe?g)$/;
 
-let mupdfModulePromise: Promise<any> | null = null;
+// Sentinel error class written to pipeline_error_log + surfaced to the client
+// so the dashboard can show a one-click "Re-prepare in browser" CTA.
+const NEEDS_BROWSER_RASTERIZATION = "needs_browser_rasterization";
 
-async function getMupdf() {
-  if (!mupdfModulePromise) {
-    mupdfModulePromise = import("npm:mupdf@1.3.0");
-  }
-  return await mupdfModulePromise;
-}
-
-async function rasterizePdfStreaming(
-  pdfBytes: Uint8Array,
-  onPage: (pageIndex: number, jpegBytes: Uint8Array) => Promise<void>,
-): Promise<number> {
-  const mupdf = await getMupdf();
-  const doc = mupdf.Document.openDocument(pdfBytes, "application/pdf");
+/**
+ * Persist a structured row to public.pipeline_error_log so the dashboard
+ * Errors tab + the per-review error stream both have something to show.
+ * Best-effort — never throws (a failed insert can't be allowed to mask the
+ * real stage error that triggered this call).
+ */
+async function recordPipelineError(
+  admin: ReturnType<typeof createClient>,
+  args: {
+    planReviewId: string;
+    firmId: string | null;
+    stage: Stage;
+    errorClass: string;
+    errorMessage: string;
+    attemptCount?: number;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<void> {
   try {
-    const pageCount = Math.min(doc.countPages(), MAX_PAGES_PER_PDF);
-    const scale = pageCount > LARGE_PDF_THRESHOLD ? RASTER_SCALE_LARGE : RASTER_SCALE;
-    const matrix = mupdf.Matrix.scale(scale, scale);
-    for (let i = 0; i < pageCount; i++) {
-      const page = doc.loadPage(i);
-      try {
-        const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false);
-        try {
-          const jpeg = pixmap.asJPEG(RASTER_JPEG_QUALITY);
-          await onPage(i, jpeg);
-        } finally {
-          pixmap.destroy();
-        }
-      } finally {
-        page.destroy();
-      }
-    }
-    return pageCount;
-  } finally {
-    doc.destroy();
+    await admin.from("pipeline_error_log").insert({
+      plan_review_id: args.planReviewId,
+      firm_id: args.firmId,
+      stage: args.stage,
+      error_class: args.errorClass,
+      error_message: (args.errorMessage ?? "").slice(0, 4000),
+      attempt_count: args.attemptCount ?? 1,
+      metadata: args.metadata ?? {},
+    });
+  } catch (err) {
+    console.error("[pipeline_error_log] insert failed:", err);
   }
 }
 
@@ -503,265 +473,13 @@ async function signedSheetUrls(
   return out;
 }
 
-/**
- * Chunked rasterizer. Finds the first source PDF in `plan_review_files` that
- * still has un-rasterized pages, rasterizes the next RASTERIZE_CHUNK pages of
- * it, persists manifest rows, and returns whether more work remains.
- *
- * One invocation = one chunk = ≤12 pages of ONE PDF. MuPDF WASM never has to
- * hold a whole plan set in memory at once.
- */
-async function rasterizeNextChunk(
-  admin: ReturnType<typeof createClient>,
-  planReviewId: string,
-  firmId: string | null,
-  targetSource?: string | null,
-): Promise<{ done: boolean; rasterized: number; source?: string; remaining_sources?: string[] }> {
-  const { data: files, error } = await admin
-    .from("plan_review_files")
-    .select("file_path")
-    .eq("plan_review_id", planReviewId)
-    .order("uploaded_at", { ascending: true });
-  if (error) throw error;
+// rasterizeNextChunk + computeRemainingSources removed in the prepare_pages
+// overhaul: server-side MuPDF rasterization could not finish a single chunk
+// inside Supabase Edge's ~2s CPU budget on a cold worker, so 100% of recent
+// reviews that hit the server fallback errored out. Browser pdf.js
+// rasterization (uploadPlanReviewFiles + reprepareInBrowser) is now the
+// only path. See stagePreparePages below for the verify-only stage.
 
-  // Pull existing manifest rows once so we know which (source,page) pairs are done.
-  const { data: existingRows } = await admin
-    .from("plan_review_page_assets")
-    .select("source_file_path, page_index, storage_path")
-    .eq("plan_review_id", planReviewId);
-  const existing = (existingRows ?? []) as Array<{
-    source_file_path: string;
-    page_index: number;
-    storage_path: string;
-  }>;
-  const doneBySource = new Map<string, Set<number>>();
-  for (const r of existing) {
-    let s = doneBySource.get(r.source_file_path);
-    if (!s) {
-      s = new Set();
-      doneBySource.set(r.source_file_path, s);
-    }
-    // page_index here is the GLOBAL index, but we need per-source. We re-derive
-    // local index from storage_path's `p-NNN.{png|jpg}` suffix when present.
-    const m = r.storage_path.match(PAGE_ASSET_INDEX_RE);
-    if (m) s.add(parseInt(m[1], 10));
-    else s.add(r.page_index);
-  }
-
-  // Compute the next global page index to assign (continues across chunks).
-  let nextGlobal = existing.reduce(
-    (acc, r) => (r.page_index >= acc ? r.page_index + 1 : acc),
-    0,
-  );
-
-  const allFiles = (files ?? []) as Array<{ file_path: string }>;
-  // If a target source was passed, restrict the search to that file. This lets
-  // the dispatcher fork two parallel `prepare_pages` workers, each pinned to a
-  // different PDF, without them fighting over the same chunk.
-  const orderedFiles = targetSource
-    ? allFiles.filter((f) => f.file_path === targetSource)
-    : allFiles;
-
-  for (const f of orderedFiles) {
-    const filePath = f.file_path;
-    const isPdf = filePath.toLowerCase().endsWith(".pdf");
-    const doneSet = doneBySource.get(filePath) ?? new Set<number>();
-
-    if (!isPdf) {
-      // Single image — register if not already done.
-      if (doneSet.size === 0) {
-        await admin
-          .from("plan_review_page_assets")
-          .upsert(
-            [
-              {
-                plan_review_id: planReviewId,
-                firm_id: firmId,
-                source_file_path: filePath,
-                page_index: nextGlobal,
-                storage_path: filePath,
-                status: "ready",
-              },
-            ],
-            { onConflict: "plan_review_id,page_index" },
-          );
-        nextGlobal++;
-        const remaining = computeRemainingSources(allFiles, doneBySource, filePath, true);
-        return { done: remaining.length === 0, rasterized: 1, source: filePath, remaining_sources: remaining };
-      }
-      continue;
-    }
-
-    // Download the PDF ONCE, open MuPDF ONCE — reuse the same handle for both
-    // page-count and rasterization. Saves a full PDF re-parse per chunk.
-    const { data: pdfBlob, error: dlErr } = await admin.storage
-      .from("documents")
-      .download(filePath);
-    if (dlErr || !pdfBlob) {
-      console.error(`[prepare_pages] download failed for ${filePath}:`, dlErr);
-      continue;
-    }
-    const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer());
-    const isFirstChunkForSource = doneSet.size === 0;
-    const mupdf = await getMupdf();
-    const doc = mupdf.Document.openDocument(pdfBytes, "application/pdf");
-    let rasterized = 0;
-    let totalPages = 0;
-    let stillHasMore = false;
-    let chunkPlannedSize = 0;
-    try {
-      totalPages = Math.min(doc.countPages(), MAX_PAGES_PER_PDF);
-
-      // All pages already done?
-      let allDone = true;
-      for (let i = 0; i < totalPages; i++) {
-        if (!doneSet.has(i)) {
-          allDone = false;
-          break;
-        }
-      }
-      if (allDone) {
-        doc.destroy();
-        continue;
-      }
-
-      // Find the next contiguous chunk of missing pages for this PDF.
-      const targets: number[] = [];
-      const chunkBudget = isFirstChunkForSource ? RASTERIZE_CHUNK_COLD_START : RASTERIZE_CHUNK;
-      for (let i = 0; i < totalPages && targets.length < chunkBudget; i++) {
-        if (!doneSet.has(i)) targets.push(i);
-      }
-      chunkPlannedSize = targets.length;
-
-      const lastSlash = filePath.lastIndexOf("/");
-      const dir = lastSlash >= 0 ? filePath.slice(0, lastSlash) : "";
-      const pagesDir = `${dir}/pages`;
-
-      // Adaptive DPI: large PDFs render at ~80 DPI to keep per-page CPU low.
-      const scale = isFirstChunkForSource
-        ? RASTER_SCALE_COLD
-        : totalPages > LARGE_PDF_THRESHOLD
-          ? RASTER_SCALE_LARGE
-          : RASTER_SCALE;
-      const matrix = mupdf.Matrix.scale(scale, scale);
-
-      // Render serially (MuPDF is single-threaded), buffer JPEGs in memory,
-      // then upload + manifest in parallel batches. JPEG encoding is ~5–8×
-      // faster CPU-wise than PNG and produces ~3–5× smaller files, so the
-      // chunk fits comfortably under the edge worker's CPU-time budget.
-      type RenderedPage = { localIndex: number; globalIndex: number; bytes: Uint8Array; storagePath: string };
-      const rendered: RenderedPage[] = [];
-      for (const i of targets) {
-        const page = doc.loadPage(i);
-        try {
-          const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false);
-          try {
-            const jpeg = pixmap.asJPEG(RASTER_JPEG_QUALITY);
-            const pageName = `p-${String(i).padStart(3, "0")}.jpg`;
-            const fullPath = `${pagesDir}/${pageName}`;
-            rendered.push({
-              localIndex: i,
-              globalIndex: nextGlobal,
-              bytes: jpeg,
-              storagePath: fullPath,
-            });
-            nextGlobal++;
-          } finally {
-            pixmap.destroy();
-          }
-        } finally {
-          page.destroy();
-        }
-      }
-
-      // Parallel uploads in batches of RASTER_UPLOAD_CONCURRENCY.
-      const uploadOk = new Set<number>();
-      for (let b = 0; b < rendered.length; b += RASTER_UPLOAD_CONCURRENCY) {
-        const batch = rendered.slice(b, b + RASTER_UPLOAD_CONCURRENCY);
-        await Promise.all(
-          batch.map(async (rp) => {
-            const { error: upErr } = await admin.storage
-              .from("documents")
-              .upload(rp.storagePath, rp.bytes, { contentType: "image/jpeg", upsert: true });
-            if (upErr) {
-              console.error(`[prepare_pages] upload failed for ${rp.storagePath}:`, upErr);
-              return;
-            }
-            uploadOk.add(rp.globalIndex);
-          }),
-        );
-      }
-
-      // Bulk-upsert manifest rows in a single round-trip.
-      const manifestRows = rendered
-        .filter((rp) => uploadOk.has(rp.globalIndex))
-        .map((rp) => ({
-          plan_review_id: planReviewId,
-          firm_id: firmId,
-          source_file_path: filePath,
-          page_index: rp.globalIndex,
-          storage_path: rp.storagePath,
-          status: "ready",
-        }));
-      if (manifestRows.length > 0) {
-        const { error: insErr } = await admin
-          .from("plan_review_page_assets")
-          .upsert(manifestRows, { onConflict: "plan_review_id,page_index" });
-        if (insErr) console.error(`[prepare_pages] bulk manifest upsert failed:`, insErr);
-        else {
-          rasterized = manifestRows.length;
-          for (const rp of rendered) {
-            if (uploadOk.has(rp.globalIndex)) doneSet.add(rp.localIndex);
-          }
-        }
-      }
-
-      // Determine if this PDF still has more pages to do after this chunk.
-      for (let i = 0; i < totalPages; i++) {
-        if (!doneSet.has(i) && !targets.includes(i)) {
-          stillHasMore = true;
-          break;
-        }
-      }
-    } finally {
-      doc.destroy();
-    }
-
-    void chunkPlannedSize;
-    const remaining = computeRemainingSources(allFiles, doneBySource, filePath, !stillHasMore);
-    const overallDone = !stillHasMore && remaining.length === 0;
-    return { done: overallDone, rasterized, source: filePath, remaining_sources: remaining };
-  }
-
-  // Nothing left to do across the requested scope.
-  return { done: true, rasterized: 0, remaining_sources: [] };
-}
-
-/**
- * Returns the list of source file paths that still have un-rasterized pages
- * AFTER the current chunk completes. Used by the dispatcher to decide whether
- * to fork a parallel `prepare_pages` worker on a different PDF.
- */
-function computeRemainingSources(
-  allFiles: Array<{ file_path: string }>,
-  doneBySource: Map<string, Set<number>>,
-  justFinishedPath: string,
-  justFinishedSourceFullyDone: boolean,
-): string[] {
-  const remaining: string[] = [];
-  for (const f of allFiles) {
-    if (f.file_path === justFinishedPath) {
-      if (!justFinishedSourceFullyDone) remaining.push(f.file_path);
-      continue;
-    }
-    // We can't know the page count of other PDFs without opening them, but
-    // any PDF with zero manifest entries OR fewer than its (unknown) total
-    // is a candidate. We treat absence/short manifest as "has work".
-    const done = doneBySource.get(f.file_path);
-    if (!done || done.size === 0) remaining.push(f.file_path);
-  }
-  return remaining;
-}
 
 
 const FINDINGS_SCHEMA = {
@@ -871,56 +589,62 @@ async function stageUpload(
 }
 
 /**
- * Rasterizes the next chunk of pages for this review. If more chunks remain,
- * returns metadata signaling the dispatcher to schedule another `prepare_pages`
- * invocation instead of advancing to `sheet_map`.
+ * Verify-only `prepare_pages` stage.
+ *
+ * The browser (pdf.js in `uploadPlanReviewFiles` / `reprepareInBrowser`) is
+ * the ONLY place that rasterizes plan PDFs into per-page JPEGs. This stage
+ * just confirms the manifest exists and at least one asset is reachable;
+ * everything else throws NEEDS_BROWSER_RASTERIZATION so the dashboard can
+ * surface a "Re-prepare in browser" CTA.
+ *
+ * Cost budget: ~50ms — one count(*), one signed URL, no MuPDF, no downloads.
  */
 async function stagePreparePages(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
-  firmId: string | null,
-  targetSource?: string | null,
+  _firmId: string | null,
 ) {
-  const { data: review } = await admin
-    .from("plan_reviews")
-    .select("ai_run_progress")
-    .eq("id", planReviewId)
-    .maybeSingle();
-  const progress = (review as { ai_run_progress?: Record<string, unknown> | null } | null)?.ai_run_progress ?? {};
-  const expectedPreparedPages =
-    typeof progress.pre_rasterized_pages === "number" ? progress.pre_rasterized_pages : 0;
-  const { count: existingPreparedPages } = await admin
+  const { count: readyCount } = await admin
     .from("plan_review_page_assets")
     .select("id", { count: "exact", head: true })
     .eq("plan_review_id", planReviewId)
     .eq("status", "ready");
+  const prepared = readyCount ?? 0;
 
-  if (
-    progress.pre_rasterized === true &&
-    expectedPreparedPages > 0 &&
-    (existingPreparedPages ?? 0) >= expectedPreparedPages
-  ) {
-    _pageManifestCache.delete(planReviewId);
-    return {
-      rasterized: 0,
-      source: null,
-      target_source: targetSource ?? null,
-      remaining_sources: [],
-      needs_more_chunks: false,
-      pre_rasterized: true,
-      prepared_pages: existingPreparedPages ?? 0,
-    };
+  if (prepared <= 0) {
+    throw new Error(
+      `${NEEDS_BROWSER_RASTERIZATION}: no page assets in manifest for plan_review ${planReviewId}`,
+    );
   }
 
-  const result = await rasterizeNextChunk(admin, planReviewId, firmId, targetSource);
-  // Clear the per-invocation cache so the next worker re-reads from DB.
+  // Spot-check the first manifest row resolves to a signable storage object.
+  // If it doesn't, the manifest is stale (storage cleared, asset paths wrong)
+  // and the browser needs to re-rasterize.
+  const { data: firstRow } = await admin
+    .from("plan_review_page_assets")
+    .select("storage_path")
+    .eq("plan_review_id", planReviewId)
+    .eq("status", "ready")
+    .order("page_index", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  const storagePath = (firstRow as { storage_path?: string } | null)?.storage_path;
+  if (!storagePath) {
+    throw new Error(`${NEEDS_BROWSER_RASTERIZATION}: manifest row missing storage_path`);
+  }
+  const { data: signed, error: signErr } = await admin.storage
+    .from("documents")
+    .createSignedUrl(storagePath, 60);
+  if (signErr || !signed) {
+    throw new Error(
+      `${NEEDS_BROWSER_RASTERIZATION}: cannot sign first manifest asset (${storagePath}): ${signErr?.message ?? "unknown"}`,
+    );
+  }
+
   _pageManifestCache.delete(planReviewId);
   return {
-    rasterized: result.rasterized,
-    source: result.source ?? null,
-    target_source: targetSource ?? null,
-    remaining_sources: result.remaining_sources ?? [],
-    needs_more_chunks: !result.done,
+    prepared_pages: prepared,
+    pre_rasterized: true,
   };
 }
 
@@ -3164,7 +2888,7 @@ async function stageGroundCitations(
 function scheduleNextStage(
   planReviewId: string,
   nextStage: Stage,
-  extra?: { target_source?: string | null; mode?: PipelineMode },
+  extra?: { mode?: PipelineMode },
 ) {
   const url = `${SUPABASE_URL}/functions/v1/run-review-pipeline`;
   // Don't await — return immediately and let waitUntil keep this socket alive
@@ -3179,7 +2903,6 @@ function scheduleNextStage(
     body: JSON.stringify({
       plan_review_id: planReviewId,
       stage: nextStage,
-      target_source: extra?.target_source ?? null,
       mode: extra?.mode ?? "core",
       _internal: true,
     }),
@@ -3212,10 +2935,10 @@ Deno.serve(async (req) => {
     const mode: PipelineMode =
       rawMode === "deep" || rawMode === "full" ? rawMode : "core";
     const activeChain = stagesForMode(mode);
-    const targetSource: string | null =
-      typeof body?.target_source === "string" && body.target_source.length > 0
-        ? body.target_source
-        : null;
+    // target_source dropped from the contract — the verify-only prepare_pages
+    // never forks per-PDF workers. Body field is ignored if a legacy caller
+    // still sends it.
+    void body?.target_source;
     const isInternalSelfInvoke =
       body?._internal === true || req.headers.get("x-internal-self-invoke") === "1";
 
@@ -3294,38 +3017,13 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── prepare_pages watchdog (per planReviewId, scoped) ─────────────────
-    // If this review's prepare_pages row is `running` but hasn't been touched
-    // in PREPARE_STALE_RUNNING_MS, treat it as dead. Two outcomes:
-    //   - If we're already trying to run prepare_pages → fall through and
-    //     resume the chunk loop (the row will be updated by setStage(running)).
-    //   - If we're trying to run any OTHER stage → redirect this invocation
-    //     to prepare_pages so the dead worker gets revived. The other stage
-    //     will be re-scheduled when prepare_pages finishes.
-    {
-      const { data: prepareRow } = await admin
-        .from("review_pipeline_status")
-        .select("status, updated_at, metadata")
-        .eq("plan_review_id", plan_review_id)
-        .eq("stage", "prepare_pages")
-        .maybeSingle();
-      const r = prepareRow as
-        | { status?: string; updated_at?: string; metadata?: Record<string, unknown> | null }
-        | null;
-      const ageMs = r?.updated_at ? Date.now() - new Date(r.updated_at).getTime() : 0;
-      const isStaleRunning = r?.status === "running" && ageMs > PREPARE_STALE_RUNNING_MS;
-      if (isStaleRunning && stageToRun !== "prepare_pages") {
-        console.log(
-          `[watchdog] prepare_pages stale-running (${Math.round(ageMs / 1000)}s) — redirecting ${stageToRun} → prepare_pages`,
-        );
-        stageToRun = "prepare_pages";
-        await setStage(admin, plan_review_id, firmId, "prepare_pages", { status: "pending" });
-      }
-    }
+    // prepare_pages watchdog removed: the stage is now O(1) (verify the
+    // manifest, sign one URL) so it cannot get "stuck running". If the row
+    // is in `running` state, the worker is genuinely doing the verify call.
 
     const stageImpls: Record<Stage, () => Promise<Record<string, unknown>>> = {
       upload: () => stageUpload(admin, plan_review_id),
-      prepare_pages: () => stagePreparePages(admin, plan_review_id, firmId, targetSource),
+      prepare_pages: () => stagePreparePages(admin, plan_review_id, firmId),
       sheet_map: () => stageSheetMap(admin, plan_review_id, firmId),
       dna_extract: () =>
         startFrom && STAGES.indexOf(startFrom) > 0 && stageToRun === "dna_extract"
@@ -3374,33 +3072,8 @@ Deno.serve(async (req) => {
       try {
         const meta = await withRetry(() => stageImpls[stageToRun](), `stage:${stageToRun}`);
 
-        // Special case: prepare_pages may need to loop itself for more chunks
-        // before advancing to sheet_map. Schedule exactly one follow-up worker
-        // AFTER the current chunk's manifest has been written.
-        if (stageToRun === "prepare_pages") {
-          const m = meta as {
-            needs_more_chunks?: boolean;
-            remaining_sources?: string[];
-            source?: string | null;
-            target_source?: string | null;
-            prepare_attempts?: number;
-          };
-          if (m.needs_more_chunks) {
-            // Reset the attempt counter on success — failures only accumulate
-            // when a chunk genuinely throws.
-            await setStage(admin, plan_review_id, firmId, stageToRun, {
-              status: "running",
-              metadata: { ...meta, prepare_attempts: 0 },
-            });
-            scheduleNextStage(plan_review_id, "prepare_pages", {
-              target_source:
-                (m.remaining_sources && m.remaining_sources[0]) ?? targetSource,
-              mode,
-            });
-            return;
-          }
-          // Done with prepare — fall through to mark complete & advance.
-        }
+        // prepare_pages is now a single O(1) verify call — no chunk loop, no
+        // self-rescheduling. Falls straight through to the standard advance.
 
         await setStage(admin, plan_review_id, firmId, stageToRun, {
           status: "complete",
@@ -3444,45 +3117,27 @@ Deno.serve(async (req) => {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
 
-        // BOUNDED RETRY for prepare_pages: CPU-kills look like throws here.
-        // Re-mark `running` (not error) and schedule one more attempt with a
-        // small delay, capped at 8 attempts. This keeps the chunk loop alive
-        // through transient cold-load CPU exhaustion.
+        // prepare_pages is now verify-only. Any throw here means the manifest
+        // is missing/corrupt — only the BROWSER can rasterize the source PDFs
+        // (Supabase Edge can't reliably finish even one page in its CPU
+        // budget). Surface a clear error class + log row so the dashboard can
+        // show a one-click "Re-prepare in browser" CTA.
         if (stageToRun === "prepare_pages") {
-          const { data: existingRow } = await admin
-            .from("review_pipeline_status")
-            .select("metadata")
-            .eq("plan_review_id", plan_review_id)
-            .eq("stage", "prepare_pages")
-            .maybeSingle();
-          const existingMeta =
-            (existingRow as { metadata?: Record<string, unknown> | null } | null)?.metadata ??
-            {};
-          const attempts =
-            typeof existingMeta.prepare_attempts === "number"
-              ? existingMeta.prepare_attempts + 1
-              : 1;
-          if (attempts <= 8) {
-            console.warn(
-              `[prepare_pages] attempt ${attempts}/8 failed (${message}) — re-scheduling in 2s`,
-            );
-            await setStage(admin, plan_review_id, firmId, "prepare_pages", {
-              status: "running",
-              metadata: { ...existingMeta, prepare_attempts: attempts, last_error: message },
-            });
-            // 2s delay before re-scheduling so a hot CPU limit can drain.
-            setTimeout(() => {
-              scheduleNextStage(plan_review_id, "prepare_pages", {
-                target_source: targetSource,
-                mode,
-              });
-            }, 2000);
-            return;
-          }
+          const isNeedsBrowser = message.includes(NEEDS_BROWSER_RASTERIZATION);
+          const userMessage = isNeedsBrowser
+            ? "This review's pages haven't been prepared. Click \"Re-prepare in browser\" on the dashboard to render them locally."
+            : `prepare_pages failed: ${message}`;
+          await recordPipelineError(admin, {
+            planReviewId: plan_review_id,
+            firmId,
+            stage: "prepare_pages",
+            errorClass: isNeedsBrowser ? NEEDS_BROWSER_RASTERIZATION : "prepare_pages_failed",
+            errorMessage: message,
+          });
           await setStage(admin, plan_review_id, firmId, "prepare_pages", {
             status: "error",
-            error_message: `prepare_pages exhausted ${attempts - 1} retries: ${message}`,
-            metadata: { ...existingMeta, prepare_attempts: attempts, last_error: message },
+            error_message: userMessage,
+            metadata: { error_class: isNeedsBrowser ? NEEDS_BROWSER_RASTERIZATION : "prepare_pages_failed" },
           });
           return;
         }
