@@ -1498,13 +1498,6 @@ async function runDisciplineChecks(
     memoryBlock +
     `\n\nAnalyze the attached pages (general-notes pages first, then ${ctx.discipline} sheets). ` +
     `Return findings via submit_discipline_findings.`;
-    `## Project DNA\n${dnaSummary}\n\n` +
-    `## Jurisdiction\n${jurSummary}\n\n` +
-    `## Sheets routed to ${ctx.discipline}\n${sheetIndex || "(none)"}\n\n` +
-    `## Mandatory ${ctx.discipline} checklist\n${checklistText}` +
-    memoryBlock +
-    `\n\nAnalyze the attached pages (general-notes pages first, then ${ctx.discipline} sheets). ` +
-    `Return findings via submit_discipline_findings.`;
 
   // fbcEdition is available for future prompt injection if needed.
   void fbcEdition;
