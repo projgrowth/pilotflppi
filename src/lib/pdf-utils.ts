@@ -225,40 +225,119 @@ export interface PreparedPageAsset {
   status: "ready";
 }
 
+/**
+ * Result of a resilient rasterize+upload pass. `succeeded` always reflects the
+ * rows that uploaded cleanly; `failures` lists per-page reasons so the caller
+ * can surface "Rasterized 77 of 78 — 1 failed" instead of dropping the whole
+ * batch on a single hiccup.
+ */
+export interface RasterizeResult {
+  succeeded: PreparedPageAsset[];
+  failures: Array<{ fileName: string; pageIndex: number; reason: string }>;
+}
+
 export async function rasterizeAndUploadPages(
   reviewId: string,
   files: Array<{ name: string; file: File; storagePath: string; pageCount: number }>,
   uploadFn: (path: string, blob: Blob) => Promise<{ error: { message: string } | null }>,
-  opts: { dpi?: number; quality?: number; startGlobalIndex?: number } = {},
+  opts: {
+    dpi?: number;
+    quality?: number;
+    startGlobalIndex?: number;
+    /** Render in chunks of this many pages, releasing memory between chunks. */
+    batchSize?: number;
+  } = {},
 ): Promise<PreparedPageAsset[]> {
+  const result = await rasterizeAndUploadPagesResilient(reviewId, files, uploadFn, opts);
+  return result.succeeded;
+}
+
+/**
+ * Resilient variant — returns BOTH the successful rows and per-page failures.
+ * Prefer this in new callers; the legacy `rasterizeAndUploadPages` returns
+ * only `succeeded` for backward compatibility with the upload toast.
+ */
+export async function rasterizeAndUploadPagesResilient(
+  reviewId: string,
+  files: Array<{ name: string; file: File; storagePath: string; pageCount: number }>,
+  uploadFn: (path: string, blob: Blob) => Promise<{ error: { message: string } | null }>,
+  opts: {
+    dpi?: number;
+    quality?: number;
+    startGlobalIndex?: number;
+    batchSize?: number;
+  } = {},
+): Promise<RasterizeResult> {
   const dpi = opts.dpi ?? 96;
   const quality = opts.quality ?? 0.72;
+  const batchSize = Math.max(1, opts.batchSize ?? 4);
   let nextGlobalPageIndex = opts.startGlobalIndex ?? 0;
-  const pageAssetRows: PreparedPageAsset[] = [];
+  const succeeded: PreparedPageAsset[] = [];
+  const failures: Array<{ fileName: string; pageIndex: number; reason: string }> = [];
 
   for (const uf of files) {
     const isPdf = uf.file.type === "application/pdf" || uf.name.toLowerCase().endsWith(".pdf");
     if (!isPdf) continue;
-    const pageJpegs = await renderPDFPagesToJpegs(uf.file, uf.pageCount, dpi, quality);
-    for (const page of pageJpegs) {
-      const baseName = uf.name.replace(/\.pdf$/i, "");
-      const pagePath = `plan-reviews/${reviewId}/pages/${baseName}/p-${String(page.pageIndex).padStart(3, "0")}.jpg`;
-      const { error: pageUploadError } = await uploadFn(pagePath, page.blob);
-      if (pageUploadError) {
-        throw new Error(`Failed to upload page ${page.pageIndex + 1} for ${uf.name}: ${pageUploadError.message}`);
+
+    // Render in batches of `batchSize` so a 78-page PDF doesn't try to keep
+    // every canvas alive simultaneously. Browsers without aggressive GC will
+    // OOM mid-PDF if we render all pages first then upload.
+    for (let chunkStart = 0; chunkStart < uf.pageCount; chunkStart += batchSize) {
+      const chunkLen = Math.min(batchSize, uf.pageCount - chunkStart);
+      let pageJpegs: Array<{ pageIndex: number; blob: Blob }> = [];
+      try {
+        pageJpegs = await renderPDFPagesToJpegs(uf.file, chunkLen, dpi, quality, {
+          startPage: chunkStart,
+        });
+      } catch (err) {
+        // Whole chunk failed to render — record one failure per page and move on.
+        for (let p = chunkStart; p < chunkStart + chunkLen; p++) {
+          failures.push({
+            fileName: uf.name,
+            pageIndex: p,
+            reason: `render: ${err instanceof Error ? err.message : String(err)}`,
+          });
+          nextGlobalPageIndex += 1;
+        }
+        continue;
       }
-      pageAssetRows.push({
-        plan_review_id: reviewId,
-        source_file_path: uf.storagePath,
-        page_index: nextGlobalPageIndex,
-        storage_path: pagePath,
-        status: "ready",
-      });
-      nextGlobalPageIndex += 1;
+
+      // Upload all pages in this chunk in parallel; settle so a single failure
+      // doesn't take down the rest.
+      const baseName = uf.name.replace(/\.pdf$/i, "");
+      const settled = await Promise.allSettled(
+        pageJpegs.map(async (page) => {
+          const pagePath = `plan-reviews/${reviewId}/pages/${baseName}/p-${String(page.pageIndex).padStart(3, "0")}.jpg`;
+          const { error: pageUploadError } = await uploadFn(pagePath, page.blob);
+          if (pageUploadError) throw new Error(pageUploadError.message);
+          return { page, pagePath };
+        }),
+      );
+
+      for (let i = 0; i < settled.length; i++) {
+        const s = settled[i];
+        const page = pageJpegs[i];
+        if (s.status === "fulfilled") {
+          succeeded.push({
+            plan_review_id: reviewId,
+            source_file_path: uf.storagePath,
+            page_index: nextGlobalPageIndex,
+            storage_path: s.value.pagePath,
+            status: "ready",
+          });
+        } else {
+          failures.push({
+            fileName: uf.name,
+            pageIndex: page.pageIndex,
+            reason: `upload: ${s.reason instanceof Error ? s.reason.message : String(s.reason)}`,
+          });
+        }
+        nextGlobalPageIndex += 1;
+      }
     }
   }
 
-  return pageAssetRows;
+  return { succeeded, failures };
 }
 
 /**
