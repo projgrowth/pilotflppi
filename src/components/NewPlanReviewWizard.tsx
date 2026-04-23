@@ -317,7 +317,11 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  toast.success(geocoded ? "Project details extracted & address geocoded" : "Project details extracted");
  setStep(2);
  } catch (err) {
- toast.error(err instanceof Error ? err.message : "AI extraction failed");
+        const msg = err instanceof Error ? err.message : "AI extraction failed";
+        // On timeout / AI errors, fall through to manual entry instead of
+        // stranding the user on Step 1 with no clear path forward.
+        toast.error(`${msg} — please fill in details manually`);
+        setStep(2);
  } finally {
  setExtracting(false);
  }
