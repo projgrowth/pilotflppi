@@ -300,11 +300,16 @@ const RASTER_JPEG_QUALITY = 75;
 // Cap how many pages we rasterize per stage call. Edge workers have a hard
 // CPU-time budget (~2s pure CPU per invocation). The MuPDF WASM cold-load
 // alone burns ~1.5–2s, so the first chunk on each fresh worker has very
-// little budget left. 4 JPEG pages keeps us safely under the limit even on
-// cold workers; warm workers (rare) finish faster than the round-trip cost
-// of an extra invocation, so this is the right floor.
-const RASTERIZE_CHUNK = 4;
+// little budget left. 2 JPEG pages keeps us safely under the limit even on
+// cold workers, and we ALWAYS schedule the next chunk before starting
+// rasterization so a CPU-kill mid-chunk can't strand the pipeline.
+const RASTERIZE_CHUNK = 2;
 const RASTERIZE_CHUNK_COLD_START = 1;
+// If a `prepare_pages` row has been `running` longer than this without a
+// completion or status update, the next dispatcher invocation treats it as
+// dead and resumes the chunk loop. Without this any single CPU-kill stranded
+// the whole pipeline behind a forever-running prepare row.
+const PREPARE_STALE_RUNNING_MS = 60_000;
 // Parallel concurrency for storage uploads + manifest writes within a chunk.
 // MuPDF rasterization itself stays serial (single-threaded WASM).
 const RASTER_UPLOAD_CONCURRENCY = 6;
