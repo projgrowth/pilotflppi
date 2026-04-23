@@ -154,27 +154,29 @@ export default function ReviewDashboard() {
           }
         />
         <div className="flex items-center gap-2">
-          <Button size="sm" onClick={runPipeline} disabled={running}>
-            {running ? (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-            ) : (
-              <Play className="mr-1 h-4 w-4" />
-            )}
-            {running ? "Running…" : "Run Pipeline"}
-          </Button>
           <Button
             size="sm"
-            variant="secondary"
             onClick={handleGenerateReport}
             disabled={!review?.project}
           >
             <FileDown className="mr-1 h-4 w-4" />
             Generate Report
           </Button>
-          <Button asChild variant="outline" size="sm">
+          <Button asChild variant="default" size="sm">
             <Link to={`/plan-review/${id}`}>
               <ArrowLeft className="mr-1 h-4 w-4" /> Back to workspace
             </Link>
+          </Button>
+          {/* Re-run analysis is a secondary action — the wizard handles the
+              first run automatically. Keep this for follow-up rounds where
+              the reviewer uploads new sheets. */}
+          <Button size="sm" variant="ghost" onClick={runPipeline} disabled={running} title="Re-run the analysis pipeline">
+            {running ? (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="mr-1 h-4 w-4" />
+            )}
+            {running ? "Running…" : "Re-run Analysis"}
           </Button>
         </div>
       </div>
