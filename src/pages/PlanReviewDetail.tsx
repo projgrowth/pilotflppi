@@ -632,7 +632,7 @@ export default function PlanReviewDetail() {
           this review was wedged and the cron resumed it. Pure presentation;
           dismissible via localStorage. */}
       {(() => {
-        const progress = (review.ai_run_progress ?? {}) as Record<string, unknown>;
+        const progress = ((review as unknown as { ai_run_progress?: Record<string, unknown> }).ai_run_progress ?? {}) as Record<string, unknown>;
         return (
           <div className="shrink-0 px-4 pt-2 empty:hidden">
             <StuckRecoveryBanner
