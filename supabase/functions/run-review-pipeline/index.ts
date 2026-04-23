@@ -3209,15 +3209,48 @@ Deno.serve(async (req) => {
         // Special case: prepare_pages may need to loop itself for more chunks
         // before advancing to sheet_map.
         if (stageToRun === "prepare_pages") {
-          const m = meta as { needs_more_chunks?: boolean };
+          const m = meta as {
+            needs_more_chunks?: boolean;
+            remaining_sources?: string[];
+            source?: string | null;
+            target_source?: string | null;
+          };
           if (m.needs_more_chunks) {
-            // Stay on prepare_pages; mark complete-then-running cycle is noisy,
-            // so leave status as 'running' with metadata note and just schedule.
             await setStage(admin, plan_review_id, firmId, stageToRun, {
               status: "running",
               metadata: meta,
             });
-            scheduleNextStage(plan_review_id, "prepare_pages");
+
+            // Default: continue on the same PDF we just chunked (warm cache).
+            const justFinished = m.source ?? null;
+            const remaining = m.remaining_sources ?? [];
+
+            // If there are 2+ distinct PDFs still needing work, fork a second
+            // worker pinned to a different source so two PDFs rasterize in
+            // parallel. We only fork from a "free" worker (no target_source
+            // pinned) to avoid cascading forks.
+            const otherSources = remaining.filter((s) => s !== justFinished);
+            if (!targetSource && otherSources.length > 0) {
+              // Primary: keep going on the PDF we just touched (if it has more).
+              if (justFinished && remaining.includes(justFinished)) {
+                scheduleNextStage(plan_review_id, "prepare_pages", {
+                  target_source: justFinished,
+                });
+              }
+              // Parallel: fork on the next un-rasterized PDF.
+              scheduleNextStage(plan_review_id, "prepare_pages", {
+                target_source: otherSources[0],
+              });
+            } else {
+              // Single-track: same PDF if it has more, else next remaining.
+              const nextTarget =
+                justFinished && remaining.includes(justFinished)
+                  ? justFinished
+                  : remaining[0] ?? null;
+              scheduleNextStage(plan_review_id, "prepare_pages", {
+                target_source: nextTarget,
+              });
+            }
             return;
           }
         }
