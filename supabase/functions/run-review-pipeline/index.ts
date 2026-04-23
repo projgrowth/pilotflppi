@@ -3387,6 +3387,7 @@ Deno.serve(async (req) => {
         // self-invoke for a single stage finishes, we still advance using
         // the mode the caller passed — so re-running an arbitrary stage
         // never accidentally drags the user back into the old long pipeline.
+        if (await isCancelled()) return;
         const idx = activeChain.indexOf(stageToRun);
         const next = idx >= 0 ? activeChain[idx + 1] : undefined;
         if (next) scheduleNextStage(plan_review_id, next, { mode });
@@ -3403,6 +3404,7 @@ Deno.serve(async (req) => {
           stageToRun === "prepare_pages" ||
           stageToRun === "dna_extract";
         if (!isFatal) {
+          if (await isCancelled()) return;
           const idx = activeChain.indexOf(stageToRun);
           const next = idx >= 0 ? activeChain[idx + 1] : undefined;
           if (next) scheduleNextStage(plan_review_id, next, { mode });
