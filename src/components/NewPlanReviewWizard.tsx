@@ -74,6 +74,15 @@ const STEPS = [
 
 type UseType = "commercial" | "residential";
 
+// Aggregate upload guardrails. Each PDF page costs ~1.5–2s of MuPDF WASM
+// cold-start + encode time on a fresh edge worker. Cap totals so a review
+// never accidentally schedules a multi-hour pipeline run.
+const MAX_TOTAL_UPLOAD_MB = 80;
+const MAX_TOTAL_PAGES = 120;
+// AI title-block extraction is best-effort. If the `ai` edge function is
+// slow or failing, fall back to manual entry instead of hanging Step 1.
+const EXTRACTION_TIMEOUT_MS = 20_000;
+
 interface UploadedFile {
  name: string;
  url: string;
@@ -187,16 +196,39 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  newFiles.push({ name: file.name, url: "", file, pageCount });
  }
 
- if (newFiles.length > 0) {
- setUploadedFiles((prev) => [...prev, ...newFiles]);
- toast.success(`${newFiles.length} file(s) added`);
- }
+        if (newFiles.length > 0) {
+          // Aggregate guardrails: total bytes + total pages across the whole
+          // upload. Reject the *new batch* if adding it would exceed limits,
+          // so the user keeps whatever was already validated.
+          const existingBytes = uploadedFiles.reduce((s, f) => s + f.file.size, 0);
+          const existingPages = uploadedFiles.reduce((s, f) => s + f.pageCount, 0);
+          const newBytes = newFiles.reduce((s, f) => s + f.file.size, 0);
+          const newPages = newFiles.reduce((s, f) => s + f.pageCount, 0);
+          const totalMB = (existingBytes + newBytes) / 1024 / 1024;
+          const totalPages = existingPages + newPages;
+
+          if (totalMB > MAX_TOTAL_UPLOAD_MB) {
+            toast.error(
+              `Upload exceeds ${MAX_TOTAL_UPLOAD_MB}MB total (${totalMB.toFixed(1)}MB). Remove a file or split the submission.`,
+            );
+            return;
+          }
+          if (totalPages > MAX_TOTAL_PAGES) {
+            toast.error(
+              `Upload exceeds ${MAX_TOTAL_PAGES} total pages (${totalPages}). Split this submission into smaller batches.`,
+            );
+            return;
+          }
+
+          setUploadedFiles((prev) => [...prev, ...newFiles]);
+          toast.success(`${newFiles.length} file(s) added`);
+        }
  } catch (err) {
  toast.error(err instanceof Error ? err.message : "Failed to process files");
  } finally {
  setUploading(false);
  }
- }, []);
+ }, [uploadedFiles]);
 
  const removeFile = (index: number) => {
  setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
@@ -220,11 +252,21 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  return;
  }
 
- // Call AI to extract info
- const result = await callAI({
- action: "extract_project_info",
- payload: { images: [titleBlockBase64] },
- });
+      // Call AI to extract info. Wrap in a hard timeout so a slow/failing
+      // `ai` edge function can never strand the user on Step 1 — they can
+      // always fall through to manual entry.
+      const result = await Promise.race<string>([
+        callAI({
+          action: "extract_project_info",
+          payload: { images: [titleBlockBase64] },
+        }),
+        new Promise<string>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("AI extraction timed out")),
+            EXTRACTION_TIMEOUT_MS,
+          ),
+        ),
+      ]);
 
  setExtractProgress(90);
 
@@ -232,9 +274,10 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  try {
  extracted = JSON.parse(result);
  } catch {
- toast.error("Could not parse AI extraction result");
- setExtracting(false);
- return;
+        toast.error("Could not parse AI extraction result — please fill in manually");
+        setExtracting(false);
+        setStep(2);
+        return;
  }
 
  // Pre-fill fields
