@@ -3357,6 +3357,13 @@ Deno.serve(async (req) => {
               justFinished && remaining.includes(justFinished)
                 ? justFinished
                 : remaining[0] ?? null;
+            if (await isCancelled()) {
+              await setStage(admin, plan_review_id, firmId, stageToRun, {
+                status: "error",
+                error_message: "Cancelled by user",
+              });
+              return;
+            }
             scheduleNextStage(plan_review_id, "prepare_pages", {
               target_source: nextTarget,
               mode,
