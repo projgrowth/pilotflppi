@@ -3268,13 +3268,18 @@ Deno.serve(async (req) => {
     const firmId = (pr as { firm_id: string | null }).firm_id;
 
     // Resolve which single stage this invocation runs.
-    // - First call (no `stage`, no `start_from`): seed pending rows for ALL
-    //   stages and run `upload` first.
-    // - First call with `start_from`: seed only the trailing stages, run `start_from`.
-    // - Self-invoke (`stage` set): run exactly that stage.
+    // - First call (no `stage`, no `start_from`): seed pending rows for the
+    //   active mode's chain and run its first stage.
+    // - First call with `start_from`: seed only the trailing stages of the
+    //   FULL chain (legacy partial reruns).
+    // - Self-invoke (`stage` set): run exactly that stage. The mode comes
+    //   along on the body so advancement stays within the same chain.
     let stageToRun: Stage;
     if (requestedStage) {
       stageToRun = requestedStage;
+      // Make sure the requested stage at least has a pending row so the
+      // dashboard can render it even if this is the first time we touch it.
+      await setStage(admin, plan_review_id, firmId, stageToRun, { status: "pending" });
     } else if (startFrom) {
       stageToRun = startFrom;
       const idx = STAGES.indexOf(startFrom);
@@ -3283,8 +3288,8 @@ Deno.serve(async (req) => {
         await setStage(admin, plan_review_id, firmId, s, { status: "pending" });
       }
     } else {
-      stageToRun = "upload";
-      for (const s of STAGES) {
+      stageToRun = activeChain[0];
+      for (const s of activeChain) {
         await setStage(admin, plan_review_id, firmId, s, { status: "pending" });
       }
     }
