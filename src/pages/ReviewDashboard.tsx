@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Play, Loader2, FileDown, Layers, Sparkles, Square } from "lucide-react";
+import { ArrowLeft, Play, Loader2, FileDown, Layers, Sparkles, Square, Inbox } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { PageHeader } from "@/components/PageHeader";
@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import ReviewHealthStrip from "@/components/review-dashboard/ReviewHealthStrip";
 import DeficiencyList from "@/components/review-dashboard/DeficiencyList";
+import TriageInbox from "@/components/review-dashboard/TriageInbox";
 import HumanReviewQueue from "@/components/review-dashboard/HumanReviewQueue";
 import ProjectDNAViewer from "@/components/review-dashboard/ProjectDNAViewer";
 import DnaHealthBanner from "@/components/review-dashboard/DnaHealthBanner";
@@ -17,11 +18,13 @@ import SheetCoverageMap from "@/components/review-dashboard/SheetCoverageMap";
 import DeferredScopePanel from "@/components/review-dashboard/DeferredScopePanel";
 import DedupeAuditTrail from "@/components/review-dashboard/DedupeAuditTrail";
 import LetterQualityGate from "@/components/review-dashboard/LetterQualityGate";
+import ReviewerMemoryCard from "@/components/review-dashboard/ReviewerMemoryCard";
 import { useDeficienciesV2, useDeferredScope, useProjectDna, useSheetCoverage, usePipelineStatus } from "@/hooks/useReviewDashboard";
 import { useFirmSettings } from "@/hooks/useFirmSettings";
 import { generateCountyReport } from "@/lib/county-report";
 import { determineReviewStatus } from "@/lib/review-status";
 import { cancelPipelineForReview } from "@/lib/pipeline-cancel";
+import { usePipelineErrorStream } from "@/hooks/usePipelineErrors";
 
 interface ReviewWithProject {
   id: string;

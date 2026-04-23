@@ -46,21 +46,30 @@ export default function DeficiencyActions({ planReviewId, def }: Props) {
       // Optimistic — cache patches immediately, realtime echo reconciles.
       await optimisticUpdate(def.id, { reviewer_disposition: d });
       // When confirming, credit any matching correction pattern so confirm_count
-      // counterweights rejection_count in the reliability score.
+      // counterweights rejection_count in the reliability score. We log
+      // failures (instead of swallowing them) so we can diagnose silent misses.
       if (d === "confirm") {
-        await recordPatternConfirmation({
-          planReviewId,
-          deficiency: {
-            discipline: def.discipline,
-            code_reference: def.code_reference as {
-              code?: string;
-              section?: string;
-              edition?: string;
-            } | null,
-          },
-        }).catch(() => {
-          /* non-critical — don't surface to reviewer */
-        });
+        try {
+          const matchedId = await recordPatternConfirmation({
+            planReviewId,
+            deficiency: {
+              discipline: def.discipline,
+              code_reference: def.code_reference as {
+                code?: string;
+                section?: string;
+                edition?: string;
+              } | null,
+            },
+          });
+          if (matchedId) {
+            // Refresh the pattern card so the new confirm_count is visible.
+            qc.invalidateQueries({ queryKey: ["correction_patterns"] });
+          }
+        } catch (err) {
+          // Non-blocking — confirmation already saved on the deficiency. Log
+          // so we can spot recurring matcher misses in console.
+          console.error("[pattern-confirm] match failed", err);
+        }
       }
       toast.success(`Marked ${d}`);
     } catch {
