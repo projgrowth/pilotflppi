@@ -340,20 +340,10 @@ export async function rasterizeAndUploadPagesResilient(
   return { succeeded, failures };
 }
 
-/**
- * Render a single PDF file at higher DPI for AI vision analysis.
- * Returns base64 PNGs only (display variant in renderPDFPagesToImages stays at 150 DPI).
- * 220 DPI gives the model meaningfully more pixel detail to localize against
- * without blowing up memory the way 300 DPI would.
- */
-export async function renderPDFPagesForVision(
-  file: File,
-  maxPages = 10,
-  dpi = 220
-): Promise<string[]> {
-  const images = await renderPDFPagesToImages(file, maxPages, dpi);
-  return images.map((img) => img.base64);
-}
+// renderPDFPagesForVision removed — superseded by browser-side resilient
+// rasterization in rasterizeAndUploadPagesResilient (used by uploadPlanReviewFiles
+// and reprepareInBrowser). The 10-page cap baked into this helper was already
+// blocking every plan review > 10 pages, and it had no remaining callers.
 
 /** Letters used for grid rows (top → bottom). Matches schema cell strings like "H7". */
 const GRID_ROW_LETTERS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"] as const;
@@ -428,23 +418,9 @@ async function overlayGridOnBase64(
   return canvas.toDataURL("image/png");
 }
 
-/**
- * Render PDF pages at vision DPI AND overlay a 10×10 labelled grid on each page.
- * The model uses the visible labels (e.g. "H7") to anchor each finding to a
- * known coordinate cell, so the worst-case pin error is bounded to one cell (~10%).
- */
-export async function renderPDFPagesForVisionWithGrid(
-  file: File,
-  maxPages = 10,
-  dpi = 220
-): Promise<string[]> {
-  const images = await renderPDFPagesToImages(file, maxPages, dpi);
-  const out: string[] = [];
-  for (const img of images) {
-    out.push(await overlayGridOnBase64(img.base64));
-  }
-  return out;
-}
+// renderPDFPagesForVisionWithGrid removed — same reason as renderPDFPagesForVision
+// above. The grid-overlay path was only used by the long-deleted server-side
+// rasterizer; vision pages are now uploaded as plain rasterized JPEGs.
 
 /**
  * Convert a grid cell label like "H7" to percent center coords (0-100).
