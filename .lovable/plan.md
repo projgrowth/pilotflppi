@@ -1,175 +1,78 @@
 
-## Simplify the review pipeline into a fast, precise “Core Review” path
 
-### What to strip down
+## Add a global "Pipeline Activity" screen with one-click cancel
 
-The current flow is doing too many sequential AI passes after upload, and two of them are hidden from the stepper:
+### What you'll get
 
-```text
-upload
-prepare_pages
-sheet_map
-dna_extract
-discipline_review
-verify
-dedupe
-ground_citations
-cross_check      <- hidden in current stepper
-deferred_scope   <- hidden in current stepper
-prioritize
-complete
-```
+A new page at `/pipelines` (linked from the sidebar as **Pipeline Activity**) that lists every plan review with active or recent pipeline work — across all your projects — with a **Cancel** button on each row. No more hunting for which dashboard is still grinding.
 
-That creates two problems:
-1. It feels like the system is “working forever” even when visible steps look done.
-2. Precision work is being spread across too many stages, so latency and failure surface area are high.
+### What the screen shows
 
-### Proposed simplification
-
-#### 1. Make the default pipeline “Core Review” only
-Keep only the stages that generate the main review accurately:
+For each plan review that has any pipeline rows from the last 24h:
 
 ```text
-upload
-pages_ready
-sheet_map
-dna_extract
-discipline_review
-dedupe
-complete
+┌─────────────────────────────────────────────────────────────────────┐
+│ Project name · Round 2          Mode: Core    [Open] [Cancel]      │
+│ 1234 Main St · Hillsborough                                         │
+│ ━━━━●━━━━○━━━━○━━━○━━━○━━━○                                          │
+│ upload  prepare  sheet  dna  disc  dedupe  complete                 │
+│ Currently: discipline_review · running 4m 12s                       │
+│ ⚠ Stuck >2 min — likely safe to cancel                              │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-Implementation intent:
-- `upload` = validate files exist.
-- `pages_ready` = client-rasterized pages already uploaded; no server raster loop in the default path.
-- `sheet_map` = keep.
-- `dna_extract` = keep.
-- `discipline_review` = keep as the main precision stage.
-- `dedupe` = keep because it is deterministic cleanup.
-- `complete` = keep for comment-letter output.
+Sections on the page:
+1. **Active now** — anything with a `running` or `pending` stage. Sorted by oldest start time so the most stuck ones float to the top.
+2. **Stuck (no progress >2 min)** — same rows, but flagged with an orange "Stuck" badge so you can spot them immediately.
+3. **Recently finished (last 24h)** — read-only history so you can confirm a cancel actually took effect.
 
-#### 2. Move the expensive “QA / enrichment” stages out of the default run
-Remove these from the automatic first pass:
-- `verify`
-- `ground_citations`
-- `cross_check`
-- `deferred_scope`
-- `prioritize`
+Each row has:
+- Project name, address, round, and pipeline mode (Core / Deep).
+- Mini-stepper showing current stage.
+- Elapsed time on the current stage with a "Stuck" warning at >120s.
+- **Open** button → jumps to that review's dashboard.
+- **Cancel** button → stops the pipeline (only enabled when something is actually running/pending).
+- A **Cancel All** button at the top of the Active section for the nuclear option.
 
-Instead, expose them as a secondary action:
-- “Run Deep QA”
-- or “Enrich findings”
+### How cancel works
 
-That way the user gets results fast first, then can opt into heavier validation only when needed.
+Reuses the exact mechanism already in `ReviewDashboard.tsx`:
+1. Write `cancelled_at` into `plan_reviews.ai_run_progress` (the worker's circuit breaker).
+2. Mark every `running`/`pending` row in `review_pipeline_status` for that review as `error` with message `"Cancelled by user"` so the UI updates instantly.
+3. Toast confirmation; row re-renders as cancelled within ~1s thanks to the existing realtime subscription.
 
-### Why this keeps precision
+No edge function or DB changes — the cancel sentinel is already wired up end-to-end.
 
-Most of the actual finding quality comes from:
-- correct page assets,
-- correct sheet routing,
-- correct project DNA,
-- disciplined sheet-by-sheet review.
+### Where it lives
 
-Those are already concentrated in:
-- `sheet_map`
-- `dna_extract`
-- `discipline_review`
+- New sidebar entry **Pipeline Activity** with a `Activity` icon, placed right under **Plan Review** so it sits with the review workflow.
+- A small badge on the sidebar item showing the count of active pipelines (e.g. `Pipeline Activity · 3`) so you notice background work without opening the page.
+- Also surfaced as a compact **"3 pipelines running"** chip in the top of the existing Review list page, linking to `/pipelines`.
 
-The later stages mostly:
-- re-audit findings,
-- enrich citations,
-- look for cross-sheet mismatches,
-- detect deferred scope,
-- reprioritize.
+### Cleanup of current zombie state
 
-They can improve confidence, but they are not required to get a solid first-pass review. To preserve precision after stripping stages:
-- tighten `discipline_review` prompts,
-- keep evidence-only findings,
-- keep `requires_human_review` when evidence is weak,
-- optionally upgrade just the core discipline pass to a stronger model since there will be fewer total AI calls.
+Right now the DB has ~20 `pending` rows with `started_at = NULL` (orphans from earlier failed runs). The new page will:
+- Treat `pending` rows older than 10 minutes with no `started_at` as **orphaned** and show a "Clear orphaned" button that bulk-marks them as `error` with `"Orphaned — never started"`. One-click cleanup.
 
-### Additional simplifications to reduce churn
+### Files to add / change
 
-#### 3. Remove server-side `prepare_pages` fallback from the default path
-The upload wizard already pre-rasterizes pages in the browser and inserts `plan_review_page_assets`.
+**New**
+- `src/pages/PipelineActivity.tsx` — the new screen.
+- `src/hooks/useAllActivePipelines.ts` — query for all `review_pipeline_status` rows in the last 24h joined with `plan_reviews` + `projects`, plus a shared realtime subscription on the `review_pipeline_status` table firm-wide.
 
-So the default pipeline should:
-- trust pre-rasterized assets,
-- verify manifest completeness,
-- fail fast if they are missing,
-- not fall back to MuPDF chunking unless explicitly running a rescue path.
+**Edit**
+- `src/App.tsx` — register `/pipelines` route inside the `AppLayout` guard.
+- `src/components/AppSidebar.tsx` — add **Pipeline Activity** nav item with `Activity` icon and live count badge.
+- `src/pages/Review.tsx` — add the small "N pipelines running" chip linking to `/pipelines` (optional surface).
+- `src/pages/ReviewDashboard.tsx` — extract the existing `cancelPipeline` logic into a small shared helper (`src/lib/pipeline-cancel.ts`) so both the dashboard and the new page share one implementation.
 
-This removes the most failure-prone part of the system.
-
-#### 4. Stop creating “no sheets found” pseudo-deficiencies for absent disciplines
-`discipline_review` currently loops through all disciplines and inserts human-review items when no sheets are routed.
-
-Simplify that to:
-- run only on disciplines that actually have mapped sheets,
-- optionally keep a lightweight warning in stage metadata instead of inserting a deficiency row.
-
-That reduces noise and DB churn without hurting review quality.
-
-#### 5. Align the UI to the actual executed stages
-Right now hidden backend stages make the dashboard feel stalled.
-
-Update the stepper so it either:
-- shows only the simplified core stages, or
-- separates “Core Review” and “Deep QA” into distinct sections.
-
-### Files to change
-
-#### `supabase/functions/run-review-pipeline/index.ts`
-- Add a pipeline mode, e.g. `mode: "core" | "deep"`, defaulting to `"core"`.
-- Reduce the default stage order to the core set.
-- Convert `prepare_pages` into a manifest-validation / fast-pass stage for pre-rasterized uploads.
-- Remove automatic scheduling of `verify`, `ground_citations`, `cross_check`, `deferred_scope`, and `prioritize` from the default chain.
-- Change `discipline_review` to run only on disciplines with routed sheets.
-- Keep `dedupe` and `complete` in the default path.
-- Keep the stripped stages callable via an explicit deep-QA trigger.
-
-#### `src/components/NewPlanReviewWizard.tsx`
-- Launch the pipeline in `core` mode by default.
-- Fail early if the expected pre-rasterized page count does not match what was registered.
-- Update user messaging so the first pass is positioned as “core analysis.”
-
-#### `src/hooks/useReviewDashboard.ts`
-- Update the canonical stage list for the default mode.
-- If deep QA remains available, add a second stage set or metadata flag so the UI can distinguish it cleanly.
-
-#### `src/components/plan-review/PipelineProgressStepper.tsx`
-- Show only the simplified default stages.
-- Remove the confusing hidden-work gap.
-- If deep QA is added later, present it as a separate optional sequence rather than silent continuation.
-
-#### `src/pages/ReviewDashboard.tsx`
-- Add a “Run Deep QA” action after core review completes.
-- Keep the existing rerun action for full reruns, but default it to core mode.
-
-### Expected result
-
-- Much shorter time-to-first-results.
-- No “it keeps working forever” feeling from hidden post-processing.
-- Fewer background retries and fewer failure points.
-- Better user trust because the UI matches what is actually happening.
-- Precision stays high because the core evidence-generation path remains intact.
+**No backend/edge changes** — the cancellation sentinel and worker behavior already work; we're just adding a centralized UI on top.
 
 ### Technical details
 
-#### New default pipeline
-```text
-Core Review:
-upload -> pages_ready -> sheet_map -> dna_extract -> discipline_review -> dedupe -> complete
-```
+- Query: `select * from review_pipeline_status where started_at > now() - interval '24 hours' or status in ('running','pending')` — cap to firm via existing RLS.
+- Realtime: one shared channel `pipeline-activity-all` filtered by `firm_id` (using existing `subscribeShared` helper).
+- Stuck threshold: `Date.now() - started_at > 120_000 && status === 'running'`.
+- Orphan threshold: `status === 'pending' && created_at < now() - 10min && started_at is null`.
+- Mode detection: read `plan_reviews.ai_run_progress.mode` (already written by the wizard / re-run buttons).
 
-#### Optional second pass
-```text
-Deep QA:
-verify -> ground_citations -> cross_check -> deferred_scope -> prioritize
-```
-
-#### Precision guardrails to keep
-- Require quoted evidence in findings.
-- Keep human-review escalation for weak/uncertain findings.
-- Keep deterministic dedupe.
-- Prefer stronger model quality in `discipline_review` if total stage count is reduced.
