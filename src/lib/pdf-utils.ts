@@ -163,16 +163,18 @@ export async function renderPDFPagesToImages(
 
 export async function renderPDFPagesToJpegs(
   file: File,
-  maxPages = 10,
+  maxPages: number = Infinity,
   dpi = 110,
   quality = 0.75,
+  opts: { startPage?: number; onPage?: (pageIndex: number, total: number) => void } = {},
 ): Promise<Array<{ pageIndex: number; blob: Blob }>> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const totalPages = Math.min(pdf.numPages, maxPages);
+  const startPage = Math.max(0, opts.startPage ?? 0);
+  const endExclusive = Math.min(pdf.numPages, startPage + (Number.isFinite(maxPages) ? maxPages : pdf.numPages));
   const pages: Array<{ pageIndex: number; blob: Blob }> = [];
 
-  for (let i = 0; i < totalPages; i++) {
+  for (let i = startPage; i < endExclusive; i++) {
     const page = await pdf.getPage(i + 1);
     const viewport = page.getViewport({ scale: dpi / 72 });
     const canvas = document.createElement("canvas");
@@ -190,8 +192,10 @@ export async function renderPDFPagesToJpegs(
     });
 
     pages.push({ pageIndex: i, blob });
+    // Release canvas memory before the next page.
     canvas.width = 0;
     canvas.height = 0;
+    opts.onPage?.(i, pdf.numPages);
   }
 
   return pages;
