@@ -1,11 +1,11 @@
 // Cron-triggered edge function that finds plan reviews wedged in
-// `pending` / `running` for >15 min with no progress, retries them once,
-// and fails them on the second strike. Without this, the dispatcher won't
-// re-pick a non-failed review, so abandoned runs sit forever.
+// `pending` / `running` for >15 min with no progress. For SERVER-recoverable
+// stages it retries once then fails. For BROWSER-context stages (upload,
+// prepare_pages) it flips to `needs_user_action` so the user knows to re-open
+// the project — server retries can't help with browser-only work.
 //
-// Invoked by pg_cron every 5 min. Keep the work bounded — process at most
-// 25 reviews per tick so a flood of stuck rows doesn't blow our request
-// budget.
+// Invoked by pg_cron every 5 min. Bounded to MAX_REVIEWS_PER_TICK so a flood
+// of stuck rows doesn't blow our request budget.
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -19,6 +19,25 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const STUCK_MINUTES = 15;
 const MAX_REVIEWS_PER_TICK = 25;
 const MAX_AUTO_RECOVERIES = 1; // retry once, then fail
+
+// Stages a server-side worker CAN actually re-run. The browser-context stages
+// (upload, prepare_pages) need pdf.js running in the user's browser — a server
+// kick does nothing useful and just burns the recovery slot.
+const SERVER_RECOVERABLE_STAGES = new Set<string>([
+  "dna_extract",
+  "sheet_map",
+  "discipline_review",
+  "cross_check",
+  "ground_citations",
+  "verify",
+  "letter_draft",
+  "dedupe",
+  "deferred_scope",
+  "prioritize",
+  "complete",
+]);
+
+const BROWSER_CONTEXT_STAGES = new Set<string>(["upload", "prepare_pages"]);
 
 interface AdminLike {
   // deno-lint-ignore no-explicit-any
@@ -55,7 +74,7 @@ async function logRecovery(admin: AdminLike, args: {
   lastStage: string | null;
   minutesIdle: number;
   recoveryCount: number;
-  action: "retry" | "fail";
+  action: "retry" | "fail" | "needs_user_action";
   reason: string;
 }) {
   try {
@@ -110,6 +129,65 @@ async function reconcileOne(admin: AdminLike, row: StuckRow, nowMs: number) {
     typeof (progress as Record<string, unknown>).auto_recovery_count === "number"
       ? ((progress as Record<string, number>).auto_recovery_count as number)
       : 0;
+
+  // BROWSER-CONTEXT STAGE: server can't help. Park for the user.
+  if (lastStage && BROWSER_CONTEXT_STAGES.has(lastStage)) {
+    const reason =
+      lastStage === "upload"
+        ? "Upload incomplete — please re-open the project to finish uploading the plan files."
+        : "Page preparation incomplete — please re-open the project to finish rendering pages in your browser.";
+    await admin
+      .from("plan_reviews")
+      .update({
+        ai_check_status: "needs_user_action",
+        ai_run_progress: {
+          ...(progress as Record<string, unknown>),
+          failure_reason: reason,
+          needs_user_action_stage: lastStage,
+          needs_user_action_at: new Date().toISOString(),
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", row.id);
+    await logRecovery(admin, {
+      planReviewId: row.id,
+      firmId: row.firm_id,
+      lastStage,
+      minutesIdle,
+      recoveryCount,
+      action: "needs_user_action",
+      reason: `Stuck at browser-context stage '${lastStage}' for ${minutesIdle} min — parked for user action.`,
+    });
+    return { id: row.id, action: "needs_user_action" as const, lastStage, minutesIdle };
+  }
+
+  // SERVER-RECOVERABLE: only retry these.
+  if (lastStage && !SERVER_RECOVERABLE_STAGES.has(lastStage)) {
+    // Unknown stage — fail it cleanly, don't waste a retry.
+    const failureReason = `Stuck at unknown stage '${lastStage}' for ${minutesIdle} min — cannot auto-recover.`;
+    await admin
+      .from("plan_reviews")
+      .update({
+        ai_check_status: "failed",
+        ai_run_progress: {
+          ...(progress as Record<string, unknown>),
+          failure_reason: failureReason,
+          failed_at: new Date().toISOString(),
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", row.id);
+    await logRecovery(admin, {
+      planReviewId: row.id,
+      firmId: row.firm_id,
+      lastStage,
+      minutesIdle,
+      recoveryCount,
+      action: "fail",
+      reason: failureReason,
+    });
+    return { id: row.id, action: "fail" as const, lastStage, minutesIdle };
+  }
 
   if (recoveryCount >= MAX_AUTO_RECOVERIES) {
     // Already retried — fail it cleanly so the dashboard shows it.

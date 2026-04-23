@@ -1336,6 +1336,7 @@ export type Database = {
           qc_status: string
           reviewer_id: string | null
           round: number
+          stage_checkpoints: Json
           updated_at: string
         }
         Insert: {
@@ -1357,6 +1358,7 @@ export type Database = {
           qc_status?: string
           reviewer_id?: string | null
           round?: number
+          stage_checkpoints?: Json
           updated_at?: string
         }
         Update: {
@@ -1378,6 +1380,7 @@ export type Database = {
           qc_status?: string
           reviewer_id?: string | null
           round?: number
+          stage_checkpoints?: Json
           updated_at?: string
         }
         Relationships: [
