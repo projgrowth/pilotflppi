@@ -283,6 +283,31 @@ export default function ReviewHealthStrip({
 
         <CoverageChip planReviewId={planReviewId} />
 
+        {hasPageGap && (
+          <button
+            type="button"
+            onClick={handleRepairPages}
+            disabled={repairing}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors",
+              "border-amber-500/40 bg-amber-500/5 text-amber-700 hover:bg-amber-500/10 dark:text-amber-400",
+              "disabled:cursor-not-allowed disabled:opacity-60",
+            )}
+            title="Re-render only the missing pages without re-processing the rest."
+          >
+            {repairing ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <FileWarning className="h-3 w-3" />
+            )}
+            <span className="font-medium">Pages</span>
+            <span className="font-mono text-foreground">
+              {readyPages}/{expectedPages}
+            </span>
+            {!repairing && <span className="ml-0.5 text-2xs">repair</span>}
+          </button>
+        )}
+
         <span className="ml-auto text-2xs font-mono text-muted-foreground">
           Sheets {presentSheets}/{expectedSheets}
         </span>
