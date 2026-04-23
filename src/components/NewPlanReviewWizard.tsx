@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { callAI } from "@/lib/ai";
-import { renderTitleBlock, renderPDFPagesToJpegs, validatePDFHeader, getPDFPageCount } from "@/lib/pdf-utils";
+import { renderTitleBlock, validatePDFHeader, getPDFPageCount } from "@/lib/pdf-utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -391,14 +391,7 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
 
   // Upload files to storage
  const fileUrls: string[] = [];
-  const pageAssetRows: Array<{
-    plan_review_id: string;
-    source_file_path: string;
-    page_index: number;
-    storage_path: string;
-    status: "ready";
-  }> = [];
-  let nextGlobalPageIndex = 0;
+  const uploadedForRaster: Array<{ name: string; file: File; storagePath: string; pageCount: number }> = [];
  for (const uf of uploadedFiles) {
  const path = `plan-reviews/${review.id}/${uf.name}`;
  const { error: uploadError } = await supabase.storage
@@ -412,31 +405,23 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  fileUrls.push(path);
 
   if (uf.file.type === "application/pdf" || uf.name.toLowerCase().endsWith(".pdf")) {
-    const pageJpegs = await renderPDFPagesToJpegs(
-      uf.file,
-      uf.pageCount,
-      CLIENT_PAGE_RASTER_DPI,
-      CLIENT_PAGE_RASTER_QUALITY,
-    );
-    for (const page of pageJpegs) {
-      const pagePath = `plan-reviews/${review.id}/pages/${uf.name.replace(/\.pdf$/i, "")}/p-${String(page.pageIndex).padStart(3, "0")}.jpg`;
-      const { error: pageUploadError } = await supabase.storage
-        .from("documents")
-        .upload(pagePath, page.blob, { upsert: true, contentType: "image/jpeg" });
-      if (pageUploadError) {
-        throw new Error(`Failed to upload page ${page.pageIndex + 1} for ${uf.name}: ${pageUploadError.message}`);
-      }
-      pageAssetRows.push({
-        plan_review_id: review.id,
-        source_file_path: path,
-        page_index: nextGlobalPageIndex,
-        storage_path: pagePath,
-        status: "ready",
-      });
-      nextGlobalPageIndex += 1;
-    }
+    uploadedForRaster.push({ name: uf.name, file: uf.file, storagePath: path, pageCount: uf.pageCount });
   }
  }
+
+  // Browser-side pre-rasterization (shared with PlanReviewDetail's inline drop).
+  const { rasterizeAndUploadPages } = await import("@/lib/pdf-utils");
+  const pageAssetRows = await rasterizeAndUploadPages(
+    review.id,
+    uploadedForRaster,
+    async (path, blob) => {
+      const res = await supabase.storage
+        .from("documents")
+        .upload(path, blob, { upsert: true, contentType: "image/jpeg" });
+      return { error: res.error ? { message: res.error.message } : null };
+    },
+    { dpi: CLIENT_PAGE_RASTER_DPI, quality: CLIENT_PAGE_RASTER_QUALITY },
+  );
 
   // Update plan_review with file URLs
  if (fileUrls.length > 0) {

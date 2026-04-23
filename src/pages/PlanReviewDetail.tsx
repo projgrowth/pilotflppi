@@ -148,8 +148,10 @@ export default function PlanReviewDetail() {
     if (!files || !review) return;
     setUploading(true);
     try {
+      const { rasterizeAndUploadPages, getPDFPageCount } = await import("@/lib/pdf-utils");
       const newUrls: string[] = [...(review.file_urls || [])];
       const newFilePaths: string[] = [];
+      const acceptedFiles: Array<{ name: string; file: File; storagePath: string; pageCount: number }> = [];
       for (const file of Array.from(files)) {
         const lowerName = file.name.toLowerCase();
         if (file.type !== "application/pdf" && !lowerName.endsWith(".pdf")) {
@@ -169,8 +171,61 @@ export default function PlanReviewDetail() {
         if (uploadError) throw uploadError;
         newUrls.push(path);
         newFilePaths.push(path);
+        let pageCount = 0;
+        try {
+          pageCount = await getPDFPageCount(file);
+        } catch {
+          // If page-count fails the edge function will rasterize server-side.
+        }
+        if (pageCount > 0) {
+          acceptedFiles.push({ name: file.name, file, storagePath: path, pageCount });
+        }
       }
-      await supabase.from("plan_reviews").update({ file_urls: newUrls }).eq("id", review.id);
+
+      // Browser-side pre-rasterization. If anything fails (very large PDF,
+      // browser memory pressure, etc.) we still proceed — the edge function's
+      // chunked prepare_pages stage covers the fallback path.
+      let pageAssetRows: Array<{
+        plan_review_id: string;
+        source_file_path: string;
+        page_index: number;
+        storage_path: string;
+        status: "ready";
+      }> = [];
+      if (acceptedFiles.length > 0 && typeof window !== "undefined") {
+        // Continue numbering after any pages that were already prepared.
+        const { count: existingPageCount } = await supabase
+          .from("plan_review_page_assets")
+          .select("id", { count: "exact", head: true })
+          .eq("plan_review_id", review.id);
+        try {
+          pageAssetRows = await rasterizeAndUploadPages(
+            review.id,
+            acceptedFiles,
+            async (path, blob) => {
+              const res = await supabase.storage
+                .from("documents")
+                .upload(path, blob, { upsert: true, contentType: "image/jpeg" });
+              return { error: res.error ? { message: res.error.message } : null };
+            },
+            { startGlobalIndex: existingPageCount ?? 0 },
+          );
+        } catch (err) {
+          console.warn("[upload] browser rasterize failed; edge function will fall back:", err);
+          pageAssetRows = [];
+        }
+      }
+
+      await supabase
+        .from("plan_reviews")
+        .update({
+          file_urls: newUrls,
+          ai_run_progress:
+            pageAssetRows.length > 0
+              ? { pre_rasterized: true, pre_rasterized_pages: pageAssetRows.length }
+              : undefined,
+        })
+        .eq("id", review.id);
 
       if (newFilePaths.length > 0) {
         await supabase.from("plan_review_files").insert(
@@ -181,6 +236,26 @@ export default function PlanReviewDetail() {
             uploaded_by: user?.id || null,
           })),
         );
+      }
+
+      if (pageAssetRows.length > 0) {
+        const { error: assetErr } = await supabase
+          .from("plan_review_page_assets")
+          .upsert(pageAssetRows, { onConflict: "plan_review_id,page_index" });
+        if (assetErr) {
+          console.warn("[upload] page asset upsert failed:", assetErr.message);
+        }
+      }
+
+      // Kick off the review pipeline so the new files actually get analyzed.
+      // Without this, dropping files on the inline zone uploaded them but
+      // left prepare_pages/sheet_map/dna_extract/etc. untouched.
+      try {
+        await supabase.functions.invoke("run-review-pipeline", {
+          body: { plan_review_id: review.id, mode: "core" },
+        });
+      } catch (err) {
+        console.warn("[upload] pipeline invoke failed:", err);
       }
 
       queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
