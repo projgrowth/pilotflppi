@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useProjects } from "@/hooks/useProjects";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -10,8 +10,9 @@ import ConfidenceBar from "@/components/shared/ConfidenceBar";
 import ReviewStagePipeline from "@/components/shared/ReviewStagePipeline";
 import DaysActiveBadge from "@/components/shared/DaysActiveBadge";
 import FppEmptyState from "@/components/shared/FppEmptyState";
-import { Search, FolderOpen } from "lucide-react";
+import { Search, FolderOpen, Activity } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
+import { useActivePipelineCount } from "@/hooks/useAllActivePipelines";
 
 const stageMap: Record<string, "intake" | "ai_scan" | "under_review" | "comments_sent" | "resubmittal" | "approved"> = {
   intake: "intake",
@@ -32,6 +33,7 @@ export default function Review() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [countyFilter, setCountyFilter] = useState("all");
+  const activePipelineCount = useActivePipelineCount();
 
   // Fetch latest plan_review id per project for direct linking
   const { data: latestReviews } = useQuery({
@@ -82,6 +84,16 @@ export default function Review() {
         title="Plan Review"
         subtitle="Select a project to begin or continue a review"
       />
+
+      {activePipelineCount > 0 && (
+        <Link
+          to="/pipelines"
+          className="mb-4 inline-flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs text-primary hover:bg-primary/10 transition-colors"
+        >
+          <Activity className="h-3.5 w-3.5 animate-pulse" />
+          {activePipelineCount} pipeline{activePipelineCount === 1 ? "" : "s"} running — view & cancel
+        </Link>
+      )}
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-md">
