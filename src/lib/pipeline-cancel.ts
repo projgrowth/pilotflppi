@@ -99,6 +99,9 @@ export async function resumePipelineForReview(
       .eq("id", planReviewId);
   }
 
+  // Reset EVERY stuck row, not just the one the user clicked. Otherwise the
+  // dispatcher's per-review watchdog redirects to an earlier still-running
+  // stage and keeps looping.
   await supabase
     .from("review_pipeline_status")
     .update({
@@ -108,7 +111,7 @@ export async function resumePipelineForReview(
       completed_at: null,
     })
     .eq("plan_review_id", planReviewId)
-    .eq("stage", stage);
+    .in("status", ["running", "pending", "error"]);
 
   const mode =
     (progress as { mode?: string }).mode === "deep" ? "deep" : "core";
