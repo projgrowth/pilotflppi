@@ -3481,6 +3481,49 @@ Deno.serve(async (req) => {
           return;
         }
 
+        // Non-fatal stages get bounded retry too — a single transient AI
+        // gateway hiccup at sheet_map or dedupe used to strand the chain.
+        // Cap at 3 attempts then fall through to the existing error path.
+        const NON_FATAL_RETRY_STAGES = new Set<Stage>([
+          "sheet_map",
+          "discipline_review",
+          "verify",
+          "dedupe",
+          "ground_citations",
+          "cross_check",
+          "deferred_scope",
+          "prioritize",
+        ]);
+        if (NON_FATAL_RETRY_STAGES.has(stageToRun)) {
+          const { data: existingRow } = await admin
+            .from("review_pipeline_status")
+            .select("metadata")
+            .eq("plan_review_id", plan_review_id)
+            .eq("stage", stageToRun)
+            .maybeSingle();
+          const existingMeta =
+            (existingRow as { metadata?: Record<string, unknown> | null } | null)?.metadata ??
+            {};
+          const attemptsKey = `${stageToRun}_attempts`;
+          const attempts =
+            typeof (existingMeta as Record<string, unknown>)[attemptsKey] === "number"
+              ? ((existingMeta as Record<string, number>)[attemptsKey] as number) + 1
+              : 1;
+          if (attempts <= 3) {
+            console.warn(
+              `[${stageToRun}] attempt ${attempts}/3 failed (${message}) — re-scheduling in 2s`,
+            );
+            await setStage(admin, plan_review_id, firmId, stageToRun, {
+              status: "pending",
+              metadata: { ...existingMeta, [attemptsKey]: attempts, last_error: message },
+            });
+            setTimeout(() => {
+              scheduleNextStage(plan_review_id, stageToRun, { mode });
+            }, 2000);
+            return;
+          }
+        }
+
         await setStage(admin, plan_review_id, firmId, stageToRun, {
           status: "error",
           error_message: message,
