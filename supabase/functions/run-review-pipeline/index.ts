@@ -291,14 +291,6 @@ async function rasterizePdfStreaming(
 }
 
 /**
- * Ensure each plan_review_files row has rasterized PNG pages in storage at
- * `<dir>/pages/p-NNN.png`, then return one entry per page (in upload order
- * across all files) suitable for vision input.
- *
- * Sheet_coverage.page_index values are GLOBAL across all uploaded files —
- * matching the order this function returns.
- */
-/**
  * In-memory cache keyed by plan_review_id, scoped to a single edge invocation.
  * Multiple stages call signedSheetUrls() — caching avoids repeated storage
  * listing, repeated rasterization checks, and repeated URL signing on the
