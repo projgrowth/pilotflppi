@@ -26,12 +26,22 @@ export function compareDefs(a: DeficiencyV2Row, b: DeficiencyV2Row): number {
   return bc - ac;
 }
 
+export type ChipFilter =
+  | "all"
+  | "needs-eyes"
+  | "life-safety"
+  | "low-confidence"
+  | "deferred";
+
 export interface FilterOptions {
   hideOverturned?: boolean;
   showSuperseded?: boolean;
   onlyHumanReview?: boolean;
   groupBy?: "discipline" | "none";
+  /** Inline chip filter applied AFTER the basic visibility filters. */
+  chip?: ChipFilter;
 }
+
 
 export interface FilteredDeficiencies {
   isLoading: boolean;
@@ -111,5 +121,5 @@ export function useFilteredDeficiencies(
         humanReview: all.filter((d) => d.requires_human_review).length,
       },
     };
-  }, [defs, hideOverturned, showSuperseded, onlyHumanReview, groupBy, isLoading]);
+  }, [defs, hideOverturned, showSuperseded, onlyHumanReview, groupBy, chip, isLoading]);
 }
