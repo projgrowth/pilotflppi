@@ -201,6 +201,65 @@ type ChatMessage = {
   >;
 };
 
+// ---------- cost telemetry ----------
+// Lightweight per-request context so callAI() can attribute every Lovable AI
+// call back to a stage / discipline / chunk without us having to thread args
+// through 35 callsites. The Deno.serve handler sets this once per request and
+// individual stages can refine it via withCostCtx() before calling callAI().
+type CostCtx = {
+  admin: ReturnType<typeof createClient> | null;
+  planReviewId: string | null;
+  firmId: string | null;
+  stage: string | null;
+  discipline: string | null;
+  chunk: string | null;
+};
+let CURRENT_COST_CTX: CostCtx = {
+  admin: null,
+  planReviewId: null,
+  firmId: null,
+  stage: null,
+  discipline: null,
+  chunk: null,
+};
+
+/** Push a refined context for the duration of `fn`, then restore. */
+async function withCostCtx<T>(
+  patch: Partial<Pick<CostCtx, "stage" | "discipline" | "chunk">>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const prev = CURRENT_COST_CTX;
+  CURRENT_COST_CTX = { ...prev, ...patch };
+  try {
+    return await fn();
+  } finally {
+    CURRENT_COST_CTX = prev;
+  }
+}
+
+async function recordCostMetric(metadata: Record<string, unknown>): Promise<void> {
+  const ctx = CURRENT_COST_CTX;
+  if (!ctx.admin || !ctx.planReviewId) return;
+  try {
+    await ctx.admin.from("pipeline_error_log").insert({
+      plan_review_id: ctx.planReviewId,
+      firm_id: ctx.firmId,
+      stage: ctx.stage ?? "unknown",
+      error_class: "cost_metric",
+      error_message: "",
+      attempt_count: 1,
+      metadata: {
+        discipline: ctx.discipline,
+        chunk: ctx.chunk,
+        ...metadata,
+      },
+    });
+  } catch (err) {
+    // Best-effort — never let telemetry mask a real error.
+    console.error("[cost_metric] insert failed:", err);
+  }
+}
+
 async function callAI(
   messages: ChatMessage[],
   toolSchema?: Record<string, unknown>,
@@ -215,6 +274,7 @@ async function callAI(
     };
   }
 
+  const startedAt = Date.now();
   const resp = await fetch(
     "https://ai.gateway.lovable.dev/v1/chat/completions",
     {
@@ -235,6 +295,18 @@ async function callAI(
   }
 
   const data = await resp.json();
+  // Fire-and-forget telemetry. Lovable AI Gateway returns OpenAI-shaped
+  // usage: { prompt_tokens, completion_tokens, total_tokens }.
+  const usage = data?.usage ?? {};
+  void recordCostMetric({
+    model,
+    ms: Date.now() - startedAt,
+    input_tokens: usage.prompt_tokens ?? null,
+    output_tokens: usage.completion_tokens ?? null,
+    total_tokens: usage.total_tokens ?? null,
+    has_tool: !!toolSchema,
+  });
+
   if (toolSchema) {
     const args =
       data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
@@ -3496,6 +3568,18 @@ Deno.serve(async (req) => {
     }
     const firmId = (pr as { firm_id: string | null }).firm_id;
 
+    // Seed cost-telemetry context for this request. Individual stages can
+    // refine via withCostCtx() to add discipline / chunk attribution.
+    CURRENT_COST_CTX = {
+      admin,
+      planReviewId: plan_review_id,
+      firmId,
+      stage: requestedStage ?? null,
+      discipline: null,
+      chunk: null,
+    };
+
+
     // Resolve which single stage this invocation runs.
     // - First call (no `stage`, no `start_from`): seed pending rows for the
     //   active mode's chain and run its first stage.
@@ -3576,7 +3660,9 @@ Deno.serve(async (req) => {
 
       await setStage(admin, plan_review_id, firmId, stageToRun, { status: "running" });
       try {
-        const meta = await withRetry(() => stageImpls[stageToRun](), `stage:${stageToRun}`);
+        const meta = await withCostCtx({ stage: stageToRun }, () =>
+          withRetry(() => stageImpls[stageToRun](), `stage:${stageToRun}`),
+        );
 
         // prepare_pages is now a single O(1) verify call — no chunk loop, no
         // self-rescheduling. Falls straight through to the standard advance.
