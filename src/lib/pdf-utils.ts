@@ -114,20 +114,27 @@ export function snapToNearestText(
 /**
  * Render specific pages of a PDF file to base64 PNG images.
  * @param file - The PDF File object
- * @param maxPages - Maximum number of pages to render (default 10)
+ * @param maxPages - Maximum number of pages to render. Pass `Infinity` (default)
+ *                   to render every page in the document — callers that need a
+ *                   cap (e.g. vision payload size) can still pass a number.
  * @param dpi - Resolution in DPI (default 150)
+ * @param opts.startPage - 0-based index of the first page to render (default 0).
+ *                         Useful for chunked / background rendering where the
+ *                         eager pass already produced [0..startPage-1].
  */
 export async function renderPDFPagesToImages(
   file: File,
-  maxPages = 10,
-  dpi = 150
+  maxPages: number = Infinity,
+  dpi = 150,
+  opts: { startPage?: number } = {},
 ): Promise<PDFPageImage[]> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const totalPages = Math.min(pdf.numPages, maxPages);
+  const startPage = Math.max(0, opts.startPage ?? 0);
+  const endExclusive = Math.min(pdf.numPages, startPage + (Number.isFinite(maxPages) ? maxPages : pdf.numPages));
   const images: PDFPageImage[] = [];
 
-  for (let i = 0; i < totalPages; i++) {
+  for (let i = startPage; i < endExclusive; i++) {
     const page = await pdf.getPage(i + 1);
     const viewport = page.getViewport({ scale: dpi / 72 });
     const canvas = document.createElement("canvas");
@@ -144,7 +151,9 @@ export async function renderPDFPagesToImages(
       height: viewport.height,
     });
 
-    // Cleanup
+    // Cleanup — explicitly release canvas memory between pages so big PDFs
+    // (78+ pages at 150 DPI) don't OOM mid-render in browsers without
+    // aggressive GC.
     canvas.width = 0;
     canvas.height = 0;
   }
