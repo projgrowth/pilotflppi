@@ -215,6 +215,20 @@ export default function PipelineActivity() {
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [cancellingAll, setCancellingAll] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [resumingId, setResumingId] = useState<string | null>(null);
+
+  const handleResume = async (planReviewId: string, stage: string) => {
+    setResumingId(planReviewId);
+    try {
+      await resumePipelineForReview(planReviewId, stage);
+      toast.success(`Resumed ${stage.replace(/_/g, " ")}`);
+      qc.invalidateQueries({ queryKey: ["pipeline-activity-all"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to resume");
+    } finally {
+      setResumingId(null);
+    }
+  };
 
   const active = useMemo(() => data.filter((a) => a.hasActive), [data]);
   const recent = useMemo(() => data.filter((a) => !a.hasActive), [data]);
