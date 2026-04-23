@@ -25,6 +25,7 @@ const corsHeaders = {
 
 type Stage =
   | "upload"
+  | "prepare_pages"
   | "sheet_map"
   | "dna_extract"
   | "discipline_review"
@@ -38,6 +39,7 @@ type Stage =
 
 const STAGES: Stage[] = [
   "upload",
+  "prepare_pages",
   "sheet_map",
   "dna_extract",
   "discipline_review",
