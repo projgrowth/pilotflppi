@@ -68,6 +68,7 @@ export function PipelineProgressStepper({
   className,
   onComplete,
   compact = false,
+  mode = "core",
 }: PipelineProgressStepperProps) {
   const { data: rows = [] } = usePipelineStatus(planReviewId);
   const [retryingStage, setRetryingStage] = useState<PipelineStage | null>(null);
@@ -85,26 +86,37 @@ export function PipelineProgressStepper({
     new Map(),
   );
 
+  // Active stage list comes from the mode. The stepper only renders stages
+  // that the running pipeline will actually execute — no more "hidden work"
+  // gap that made the dashboard feel stalled.
+  const visibleKeys = useMemo<PipelineStage[]>(
+    () => (mode === "deep" ? DEEP_STAGE_KEYS : CORE_STAGE_KEYS),
+    [mode],
+  );
+  // Terminal stage of whichever chain we're rendering.
+  const terminalKey = visibleKeys[visibleKeys.length - 1];
+
   const byStage = useMemo(() => {
     const m = new Map<PipelineStage, (typeof rows)[number]>();
     for (const r of rows) m.set(r.stage as PipelineStage, r);
     return m;
   }, [rows]);
 
-  // Fire onComplete once when the terminal stage lands.
-  const completeRow = byStage.get("complete");
+  // Fire onComplete once when the terminal stage of the active mode lands.
+  const completeRow = byStage.get(terminalKey);
   if (completeRow?.status === "complete" && onComplete) {
-    // Defer to next tick so React doesn't warn about state updates during render.
     queueMicrotask(onComplete);
   }
 
-  const stages = compact ? PIPELINE_STAGES.filter((s) => VISIBLE_STAGES.includes(s.key)) : PIPELINE_STAGES;
+  const stages = compact
+    ? PIPELINE_STAGES.filter((s) => visibleKeys.includes(s.key))
+    : PIPELINE_STAGES;
 
   const handleRetryStage = async (stage: PipelineStage, opts?: { auto?: boolean }) => {
     setRetryingStage(stage);
     try {
       const { error } = await supabase.functions.invoke("run-review-pipeline", {
-        body: { plan_review_id: planReviewId, stage },
+        body: { plan_review_id: planReviewId, stage, mode },
       });
       if (error) throw error;
       if (opts?.auto) {
@@ -123,19 +135,18 @@ export function PipelineProgressStepper({
 
   // Auto-retry watcher: any visible stage that's been `running` past the stuck
   // threshold gets one nudge per attempt, capped at 2 auto-retries per stage.
-  // `prepare_pages` is the most common offender but the rule applies broadly.
   useEffect(() => {
     for (const row of rows) {
       const stage = row.stage as PipelineStage;
-      if (!VISIBLE_STAGES.includes(stage)) continue;
+      if (!visibleKeys.includes(stage)) continue;
       if (row.status !== "running" || !row.started_at) continue;
 
       const startedAtMs = new Date(row.started_at).getTime();
       if (Date.now() - startedAtMs <= STUCK_THRESHOLD_MS) continue;
 
       const log = autoRetryLog.current.get(stage) ?? { count: 0, lastStartedAt: null };
-      if (log.lastStartedAt === row.started_at) continue; // already retried this attempt
-      if (log.count >= 2) continue; // cap to avoid infinite loops on hard failures
+      if (log.lastStartedAt === row.started_at) continue;
+      if (log.count >= 2) continue;
 
       autoRetryLog.current.set(stage, {
         count: log.count + 1,
@@ -144,12 +155,12 @@ export function PipelineProgressStepper({
       void handleRetryStage(stage, { auto: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, planReviewId]);
+  }, [rows, planReviewId, visibleKeys]);
 
   return (
     <ul className={cn("space-y-1.5", className)}>
       {stages
-        .filter((s) => VISIBLE_STAGES.includes(s.key))
+        .filter((s) => visibleKeys.includes(s.key))
         .map((s) => {
           const row = byStage.get(s.key);
           const status = row?.status ?? "pending";
