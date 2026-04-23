@@ -1,16 +1,20 @@
 /**
- * Surfaces three pipeline conditions:
+ * Surfaces four pipeline conditions:
  *  1. Auto-recovery success — cron resumed a stalled review (info, dismissible).
  *  2. needs_user_action — browser-context stage (upload/prepare_pages) couldn't
  *     finish; user needs to re-open the project so pdf.js can finish locally.
  *  3. needs_human_review — pipeline ran but yielded suspiciously low results
  *     (e.g. 0 findings on a multi-page set). Reviewer must decide.
+ *  4. needs_preparation — files are uploaded but no `plan_review_page_assets`
+ *     rows exist yet, so the pipeline would fail server-side. CTA runs the
+ *     in-browser rasterizer.
  *
- * Pure presentation; no mutations. Dismissed state lives in localStorage so
- * the banner doesn't reappear after a page refresh.
+ * Pure presentation; no mutations beyond the optional onPrepareNow callback.
+ * Dismissed state lives in localStorage so the banner doesn't reappear after
+ * a page refresh.
  */
 import { useEffect, useState } from "react";
-import { CheckCircle2, X, AlertTriangle, AlertCircle } from "lucide-react";
+import { CheckCircle2, X, AlertTriangle, AlertCircle, Wand2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface Props {
@@ -20,6 +24,10 @@ interface Props {
   recoveryCount: number | undefined;
   aiCheckStatus?: string | null;
   failureReason?: string | null;
+  /** True when file_urls.length > 0 but page_assets count === 0. */
+  needsPreparation?: boolean;
+  onPrepareNow?: () => void;
+  preparingNow?: boolean;
 }
 
 export function StuckRecoveryBanner({
@@ -29,6 +37,9 @@ export function StuckRecoveryBanner({
   recoveryCount,
   aiCheckStatus,
   failureReason,
+  needsPreparation,
+  onPrepareNow,
+  preparingNow,
 }: Props) {
   const dismissKey = autoRecoveredAt
     ? `stuck-recovery-dismissed:${planReviewId}:${autoRecoveredAt}`
@@ -42,6 +53,38 @@ export function StuckRecoveryBanner({
     }
     setDismissed(localStorage.getItem(dismissKey) === "1");
   }, [dismissKey]);
+
+  // ---- needs_preparation variant (highest priority — blocks pipeline) ----
+  if (needsPreparation && onPrepareNow) {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs">
+        <AlertTriangle className="h-4 w-4 flex-shrink-0 text-warning" />
+        <div className="min-w-0 flex-1">
+          <div className="font-medium text-warning-foreground">
+            This review hasn't been prepared yet
+          </div>
+          <div className="mt-0.5 text-muted-foreground">
+            Files are uploaded but pages haven't been rasterized. Click below
+            to prepare them in your browser, then the pipeline can run.
+          </div>
+        </div>
+        <Button
+          size="sm"
+          variant="default"
+          onClick={onPrepareNow}
+          disabled={preparingNow}
+          className="h-7 shrink-0 text-2xs"
+        >
+          {preparingNow ? (
+            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+          ) : (
+            <Wand2 className="mr-1 h-3 w-3" />
+          )}
+          {preparingNow ? "Preparing…" : "Prepare pages now"}
+        </Button>
+      </div>
+    );
+  }
 
   // ---- needs_user_action variant (not dismissible — blocks progress) ----
   if (aiCheckStatus === "needs_user_action") {
