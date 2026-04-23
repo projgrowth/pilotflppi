@@ -1592,7 +1592,7 @@ async function runCrossSheetConsistency(
   }>;
   if (allSheets.length < 2 || signedUrls.length < 2) return [];
 
-  // Cap at 12 sheets to keep the call within model limits / cost. Prefer sheets
+  // Cap at 8 sheets to keep the call within model limits / cost. Prefer sheets
   // that are most likely to have cross-sheet relationships.
   const PRIORITY_PREFIXES = ["A", "S", "M", "P", "E", "F", "L", "G"];
   const ranked = [...allSheets].sort((a, b) => {
@@ -1600,7 +1600,7 @@ async function runCrossSheetConsistency(
     const bi = PRIORITY_PREFIXES.indexOf(b.sheet_ref.trim().toUpperCase()[0] ?? "Z");
     return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
   });
-  const selected = ranked.slice(0, 12);
+  const selected = ranked.slice(0, 8);
   const imageUrls = selected
     .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
     .filter(Boolean) as string[];
