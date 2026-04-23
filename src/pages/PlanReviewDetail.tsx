@@ -53,6 +53,9 @@ import { usePlanReviewData } from "@/hooks/plan-review/usePlanReviewData";
 import { useFindingFilters, useRoundDiff } from "@/hooks/plan-review/useFindingFilters";
 import { useFindingStatuses } from "@/hooks/plan-review/useFindingStatuses";
 import { usePdfPageRender } from "@/hooks/plan-review/usePdfPageRender";
+import { usePipelineStatus } from "@/hooks/useReviewDashboard";
+import { reprepareInBrowser } from "@/lib/reprepare-in-browser";
+import { Wand2, AlertTriangle } from "lucide-react";
 
 type RightPanelMode = "findings" | "checklist" | "completeness" | "letter" | "county";
 
