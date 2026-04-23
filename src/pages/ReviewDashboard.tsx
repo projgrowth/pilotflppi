@@ -41,6 +41,7 @@ export default function ReviewDashboard() {
   const qc = useQueryClient();
   const [running, setRunning] = useState(false);
   const [runningDeep, setRunningDeep] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [activeTab, setActiveTab] = useState("deficiencies");
 
   const runPipeline = async (mode: "core" | "deep" = "core") => {
@@ -48,6 +49,12 @@ export default function ReviewDashboard() {
     const setter = mode === "deep" ? setRunningDeep : setRunning;
     setter(true);
     try {
+      // Clear any prior cancellation marker so the new run isn't aborted
+      // on its first heartbeat.
+      await supabase
+        .from("plan_reviews")
+        .update({ ai_run_progress: { cancelled_at: null } })
+        .eq("id", id);
       const { error } = await supabase.functions.invoke("run-review-pipeline", {
         body: { plan_review_id: id, mode },
       });
@@ -63,6 +70,51 @@ export default function ReviewDashboard() {
       toast.error(msg);
     } finally {
       setter(false);
+    }
+  };
+
+  const cancelPipeline = async () => {
+    if (!id) return;
+    setCancelling(true);
+    try {
+      // 1. Set the cancellation marker — workers re-check this between stages
+      //    and on wake-up, then halt without scheduling the next stage.
+      const { data: prev } = await supabase
+        .from("plan_reviews")
+        .select("ai_run_progress")
+        .eq("id", id)
+        .maybeSingle();
+      const progress =
+        (prev?.ai_run_progress as Record<string, unknown> | null) ?? {};
+      await supabase
+        .from("plan_reviews")
+        .update({
+          ai_run_progress: {
+            ...progress,
+            cancelled_at: new Date().toISOString(),
+          },
+        })
+        .eq("id", id);
+
+      // 2. Mark any currently running rows as errored so the stepper
+      //    immediately reflects the stop. The edge worker will also
+      //    write its own "Cancelled by user" row when it wakes up.
+      await supabase
+        .from("review_pipeline_status")
+        .update({
+          status: "error",
+          error_message: "Cancelled by user",
+          completed_at: new Date().toISOString(),
+        })
+        .eq("plan_review_id", id)
+        .in("status", ["running", "pending"]);
+
+      qc.invalidateQueries({ queryKey: ["pipeline_status", id] });
+      toast.success("Pipeline cancelled");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to cancel");
+    } finally {
+      setCancelling(false);
     }
   };
 
