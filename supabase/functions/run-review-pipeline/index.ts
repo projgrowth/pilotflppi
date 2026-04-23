@@ -1342,6 +1342,9 @@ interface DisciplineRunCtx {
   dna: Record<string, unknown> | null;
   jurisdiction: Record<string, unknown> | null;
   useType: string | null;
+  /** Active prompt_versions.id for `discipline_review`, stamped on every insert
+   *  so we can A/B prompt revisions and filter quality metrics by generation. */
+  promptVersionId: string | null;
 }
 
 async function runDisciplineChecks(
@@ -1581,6 +1584,7 @@ async function runDisciplineChecks(
     confidence_score: Math.max(0, Math.min(1, f.confidence_score ?? 0.5)),
     confidence_basis: f.confidence_basis ?? "Vision-extracted",
     model_version: "google/gemini-2.5-flash",
+    prompt_version_id: ctx.promptVersionId,
     status: "open",
   }));
 
