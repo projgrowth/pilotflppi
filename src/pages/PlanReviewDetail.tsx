@@ -76,7 +76,10 @@ export default function PlanReviewDetail() {
   const { findingStatuses, updateFindingStatus } = useFindingStatuses(review, user?.id, refetchHistory);
 
   // ── PDF rendering ──────────────────────────────────────────────────────
-  const { pageImages, pageCapInfo, renderingPages, renderProgress, renderDocumentPages, resetPages } =
+  // pageCapInfo banner is gone — coverage is reported truthfully via the
+  // dashboard's CoverageChip (which reads from review_coverage). The viewer
+  // now renders all pages (eager first 10 + idle-callback background).
+  const { pageImages, renderingPages, renderProgress, renderDocumentPages, resetPages } =
     usePdfPageRender();
 
   // ── Pipeline error recovery ───────────────────────────────────────────
@@ -626,16 +629,8 @@ export default function PlanReviewDetail() {
         </div>
       )}
 
-      {/* Page-cap banner: surface silent 10-page truncation honestly */}
-      {pageCapInfo && pageCapInfo.total > pageCapInfo.rendered && (
-        <div className="shrink-0 border-b bg-warning/10 px-4 py-1.5 flex items-center gap-2">
-          <span className="text-2xs font-semibold text-warning uppercase tracking-wide">Limited review</span>
-          <span className="text-xs text-foreground/80">
-            Reviewing the first <strong>{pageCapInfo.rendered}</strong> of <strong>{pageCapInfo.total}</strong> sheet
-            {pageCapInfo.total !== 1 ? "s" : ""}. Findings on later sheets cannot be detected by AI in this round.
-          </span>
-        </div>
-      )}
+      {/* Page-cap banner removed — see CoverageChip on the dashboard for the
+          truthful per-discipline AI coverage breakdown. */}
 
       {isMobile ? (
         <div className="flex-1 flex flex-col overflow-hidden">
