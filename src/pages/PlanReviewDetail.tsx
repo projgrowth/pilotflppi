@@ -418,6 +418,31 @@ export default function PlanReviewDetail() {
   const hasFindings = findings.length > 0;
   const openDashboard = () => navigate(`/plan-review/${review.id}/dashboard`);
 
+  const runAICheck = async () => {
+    if (!review || aiRunning) return;
+    setAiRunning(true);
+    setAiCompleteFlash(null);
+    try {
+      const { error } = await supabase.functions.invoke("run-review-pipeline", {
+        body: { plan_review_id: review.id },
+      });
+      if (error) throw error;
+      toast.message("Analysis started", { description: "Watch progress in the topbar." });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to start analysis";
+      toast.error(msg);
+      setAiRunning(false);
+    }
+  };
+
+  const handlePipelineComplete = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["plan-review-findings-v2", review?.id] });
+    queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+    setAiRunning(false);
+    setAiCompleteFlash(findings.length);
+    setTimeout(() => setAiCompleteFlash(null), 3000);
+  }, [queryClient, review?.id, id, findings.length]);
+
   const findingsListProps = {
     findings,
     filteredFindings: f.filtered,
