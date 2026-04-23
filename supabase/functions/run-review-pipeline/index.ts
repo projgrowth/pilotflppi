@@ -279,70 +279,36 @@ function disciplineForSheetFallback(sheetRef: string): string | null {
   }
 }
 
-/**
- * Rasterize a single PDF (loaded as bytes) into PNG bytes per page.
- * Uses MuPDF WASM. Resolution is tuned for vision: ~150 DPI = 2.083x scale.
- * Pages over MAX_PAGES are skipped (vision cost guard for huge sets).
- */
-// Lower scale + page cap to reduce edge-worker memory pressure. Vision models
-// still read sheet titles and notes fine at ~110 DPI, and capping at 80 pages
-// per PDF keeps a single rasterization run inside the worker's budget. Larger
-// sets are still supported — the pipeline raster-prepares them in chunks across
-// stages instead of all at once.
-const RASTER_SCALE = 1.528; // ~110 DPI — small/medium PDFs
-const RASTER_SCALE_LARGE = 1.111; // ~80 DPI — used when a PDF has > LARGE_PDF_THRESHOLD pages
-const RASTER_SCALE_COLD = 0.833; // ~60 DPI — cold-start rescue mode for the very first chunk of a PDF
-const LARGE_PDF_THRESHOLD = 40;
-const MAX_PAGES_PER_PDF = 80;
-// JPEG quality used by asJPEG(). 75 is plenty for vision models reading
-// title blocks / dimension callouts and keeps CPU/encode time tiny.
-const RASTER_JPEG_QUALITY = 75;
-// Cap how many pages we rasterize per stage call. Edge workers have a hard
-// CPU-time budget (~2s pure CPU per invocation). The MuPDF WASM cold-load
-// alone burns ~1.5–2s, so the first chunk on each fresh worker has very
-// little budget left. 2 JPEG pages keeps us safely under the limit even on
-// cold workers, and we ALWAYS schedule the next chunk before starting
-// rasterization so a CPU-kill mid-chunk can't strand the pipeline.
-const RASTERIZE_CHUNK = 2;
-const RASTERIZE_CHUNK_COLD_START = 1;
-// If a `prepare_pages` row has been `running` longer than this without a
-// completion or status update, the next dispatcher invocation treats it as
-// dead and resumes the chunk loop. Without this any single CPU-kill stranded
-// the whole pipeline behind a forever-running prepare row.
-const PREPARE_STALE_RUNNING_MS = 60_000;
-// Parallel concurrency for storage uploads + manifest writes within a chunk.
-// MuPDF rasterization itself stays serial (single-threaded WASM).
-const RASTER_UPLOAD_CONCURRENCY = 6;
-// Match either legacy .png or current .jpg page assets when scanning storage
-// or storage_path strings, so older runs are still recognized.
-const PAGE_ASSET_RE = /^p-\d{3,}\.(png|jpe?g)$/;
+// Page assets are produced by the BROWSER (pdf.js in the wizard / inline
+// upload). Server-side rasterization was removed — Supabase edge workers'
+// ~2s CPU budget can't reliably load MuPDF WASM, decode, JPEG-encode, and
+// upload a single page on a cold start, let alone a multi-PDF plan set.
+// `prepare_pages` is now a thin verifier; if the manifest is empty the
+// stage throws NEEDS_BROWSER_RASTERIZATION and the client takes over.
+//
+// Match either legacy .png or current .jpg page assets when scanning
+// storage or storage_path strings, so older runs are still recognized.
 const PAGE_ASSET_INDEX_RE = /p-(\d{3,})\.(png|jpe?g)$/;
 
-let mupdfModulePromise: Promise<any> | null = null;
+// Sentinel error class written to pipeline_error_log + surfaced to the client
+// so the dashboard can show a one-click "Re-prepare in browser" CTA.
+const NEEDS_BROWSER_RASTERIZATION = "needs_browser_rasterization";
 
-async function getMupdf() {
-  if (!mupdfModulePromise) {
-    mupdfModulePromise = import("npm:mupdf@1.3.0");
-  }
-  return await mupdfModulePromise;
-}
-
-async function rasterizePdfStreaming(
-  pdfBytes: Uint8Array,
+async function _legacyRasterStub(
+  _pdfBytes: Uint8Array,
   onPage: (pageIndex: number, jpegBytes: Uint8Array) => Promise<void>,
 ): Promise<number> {
-  const mupdf = await getMupdf();
-  const doc = mupdf.Document.openDocument(pdfBytes, "application/pdf");
-  try {
-    const pageCount = Math.min(doc.countPages(), MAX_PAGES_PER_PDF);
-    const scale = pageCount > LARGE_PDF_THRESHOLD ? RASTER_SCALE_LARGE : RASTER_SCALE;
-    const matrix = mupdf.Matrix.scale(scale, scale);
-    for (let i = 0; i < pageCount; i++) {
-      const page = doc.loadPage(i);
-      try {
-        const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false);
-        try {
-          const jpeg = pixmap.asJPEG(RASTER_JPEG_QUALITY);
+  void onPage;
+  // Intentionally unreachable. Kept ONLY to satisfy any historical caller that
+  // somehow makes it past the stagePreparePages verifier; in practice nothing
+  // else in this file calls it after the overhaul.
+  throw new Error(NEEDS_BROWSER_RASTERIZATION);
+  // Below are the original signatures — kept so refactor diffs read cleanly.
+  // deno-lint-ignore no-unreachable
+  {
+    const i = 0;
+    const empty = new Uint8Array(0);
+    return i + empty.length;
           await onPage(i, jpeg);
         } finally {
           pixmap.destroy();
