@@ -1500,6 +1500,36 @@ async function stageDisciplineReview(
     console.error("[discipline_review] failed to persist review_coverage:", err);
   }
 
+  // LOW_YIELD guard: a multi-page review that produced 0 findings is almost
+  // certainly a bad rasterize → empty DNA → AI saw nothing pattern. Refuse to
+  // mark complete; surface as needs_human_review for manual disposition.
+  const expectedPages = allSheets.length;
+  if (totalFindings === 0 && carryoverInserted === 0 && expectedPages > 5 && failed.length === 0) {
+    const reason = `Pipeline produced 0 findings on ${expectedPages} sheets. Likely a bad upload or empty rasterize — please review manually.`;
+    await admin
+      .from("plan_reviews")
+      .update({
+        ai_check_status: "needs_human_review",
+        ai_run_progress: {
+          failure_reason: reason,
+          low_yield_at: new Date().toISOString(),
+          expected_pages: expectedPages,
+          total_findings: 0,
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", planReviewId);
+    await recordPipelineError(admin, {
+      planReviewId,
+      firmId,
+      stage: "discipline_review",
+      errorClass: "LOW_YIELD_REVIEW",
+      errorMessage: reason,
+      metadata: { expected_pages: expectedPages, sheets: allSheets.length },
+    });
+    throw new Error(`LOW_YIELD_REVIEW: ${reason}`);
+  }
+
   return {
     failed_disciplines: failed,
     total_findings: totalFindings,
@@ -3509,6 +3539,17 @@ Deno.serve(async (req) => {
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+
+        // LOW_YIELD_REVIEW: pipeline already wrote ai_check_status='needs_human_review'.
+        // Just halt the chain — no retry, no advancement.
+        if (message.includes("LOW_YIELD_REVIEW")) {
+          await setStage(admin, plan_review_id, firmId, stageToRun, {
+            status: "error",
+            error_message: message,
+            metadata: { error_class: "LOW_YIELD_REVIEW" },
+          });
+          return;
+        }
 
         // prepare_pages is now verify-only. Any throw here means the manifest
         // is missing/corrupt — only the BROWSER can rasterize the source PDFs
