@@ -3410,7 +3410,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ ok: true, accepted: true, plan_review_id, stage: stageToRun }),
+      JSON.stringify({ ok: true, accepted: true, plan_review_id, stage: stageToRun, mode }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 202,
