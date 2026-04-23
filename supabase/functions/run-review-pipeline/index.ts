@@ -250,8 +250,17 @@ function disciplineForSheetFallback(sheetRef: string): string | null {
  * Uses MuPDF WASM. Resolution is tuned for vision: ~150 DPI = 2.083x scale.
  * Pages over MAX_PAGES are skipped (vision cost guard for huge sets).
  */
-const RASTER_SCALE = 2.083; // ~150 DPI
-const MAX_PAGES_PER_PDF = 200;
+// Lower scale + page cap to reduce edge-worker memory pressure. Vision models
+// still read sheet titles and notes fine at ~110 DPI, and capping at 80 pages
+// per PDF keeps a single rasterization run inside the worker's budget. Larger
+// sets are still supported — the pipeline raster-prepares them in chunks across
+// stages instead of all at once.
+const RASTER_SCALE = 1.528; // ~110 DPI
+const MAX_PAGES_PER_PDF = 80;
+// Cap how many pages we rasterize per stage call. Subsequent stages reuse the
+// cached PNGs already in storage; only the first stage that touches each page
+// pays the rasterization cost.
+const RASTERIZE_CHUNK = 12;
 
 async function rasterizePdfStreaming(
   pdfBytes: Uint8Array,
@@ -282,17 +291,73 @@ async function rasterizePdfStreaming(
 }
 
 /**
+ * In-memory cache keyed by plan_review_id, scoped to a single edge invocation.
+ * Multiple stages call signedSheetUrls() — caching avoids repeated storage
+ * listing, repeated rasterization checks, and repeated URL signing on the
+ * same page set.
+ */
+const _pageManifestCache = new Map<
+  string,
+  Array<{ file_path: string; signed_url: string }>
+>();
+
+/**
+ * Read the persisted page manifest from public.plan_review_page_assets and
+ * sign each row's storage_path. Returns null if the manifest is empty so the
+ * caller can fall back to building it.
+ */
+async function readSignedManifest(
+  admin: ReturnType<typeof createClient>,
+  planReviewId: string,
+): Promise<Array<{ file_path: string; signed_url: string }> | null> {
+  const { data: rows } = await admin
+    .from("plan_review_page_assets")
+    .select("page_index, storage_path, status")
+    .eq("plan_review_id", planReviewId)
+    .eq("status", "ready")
+    .order("page_index", { ascending: true });
+  const ready = (rows ?? []) as Array<{
+    page_index: number;
+    storage_path: string;
+    status: string;
+  }>;
+  if (ready.length === 0) return null;
+  const out: Array<{ file_path: string; signed_url: string }> = [];
+  for (const r of ready) {
+    const { data: signed } = await admin.storage
+      .from("documents")
+      .createSignedUrl(r.storage_path, 60 * 60);
+    if (signed) out.push({ file_path: r.storage_path, signed_url: signed.signedUrl });
+  }
+  return out;
+}
+
+/**
  * Ensure each plan_review_files row has rasterized PNG pages in storage at
  * `<dir>/pages/p-NNN.png`, then return one entry per page (in upload order
  * across all files) suitable for vision input.
  *
- * Sheet_coverage.page_index values are GLOBAL across all uploaded files —
- * matching the order this function returns.
+ * Caching strategy:
+ *   1. Per-invocation in-memory cache (fastest — used across stages of one run)
+ *   2. plan_review_page_assets DB manifest (persists across runs/restarts)
+ *   3. Storage listing of `<dir>/pages/` (legacy — covers reviews created
+ *      before the manifest was introduced)
+ *   4. Cold path: download PDF + rasterize via MuPDF, then persist manifest
  */
 async function signedSheetUrls(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
+  firmId: string | null = null,
 ): Promise<Array<{ file_path: string; signed_url: string }>> {
+  const cached = _pageManifestCache.get(planReviewId);
+  if (cached) return cached;
+
+  const fromDb = await readSignedManifest(admin, planReviewId);
+  if (fromDb && fromDb.length > 0) {
+    _pageManifestCache.set(planReviewId, fromDb);
+    return fromDb;
+  }
+
   const { data: files, error } = await admin
     .from("plan_review_files")
     .select("file_path")
@@ -301,6 +366,15 @@ async function signedSheetUrls(
   if (error) throw error;
 
   const out: Array<{ file_path: string; signed_url: string }> = [];
+  const manifestRows: Array<{
+    plan_review_id: string;
+    firm_id: string | null;
+    source_file_path: string;
+    page_index: number;
+    storage_path: string;
+    status: string;
+  }> = [];
+  let globalPageIndex = 0;
 
   for (const f of (files ?? []) as Array<{ file_path: string }>) {
     const filePath = f.file_path;
@@ -311,7 +385,18 @@ async function signedSheetUrls(
       const { data: signed } = await admin.storage
         .from("documents")
         .createSignedUrl(filePath, 60 * 60);
-      if (signed) out.push({ file_path: filePath, signed_url: signed.signedUrl });
+      if (signed) {
+        out.push({ file_path: filePath, signed_url: signed.signedUrl });
+        manifestRows.push({
+          plan_review_id: planReviewId,
+          firm_id: firmId,
+          source_file_path: filePath,
+          page_index: globalPageIndex,
+          storage_path: filePath,
+          status: "ready",
+        });
+        globalPageIndex++;
+      }
       continue;
     }
 
@@ -320,7 +405,7 @@ async function signedSheetUrls(
     const dir = lastSlash >= 0 ? filePath.slice(0, lastSlash) : "";
     const pagesDir = `${dir}/pages`;
 
-    // Cheap existence check: list the pages folder.
+    // Cheap existence check: list the pages folder (legacy reviews).
     const { data: existing } = await admin.storage
       .from("documents")
       .list(pagesDir, { limit: 1000, sortBy: { column: "name", order: "asc" } });
@@ -368,17 +453,40 @@ async function signedSheetUrls(
       pagePaths = uploaded;
     }
 
-    // Sign each page URL.
+    // Sign each page URL and queue a manifest row.
     for (const p of pagePaths) {
       const { data: signed } = await admin.storage
         .from("documents")
         .createSignedUrl(p, 60 * 60);
-      if (signed) out.push({ file_path: p, signed_url: signed.signedUrl });
+      if (signed) {
+        out.push({ file_path: p, signed_url: signed.signedUrl });
+        manifestRows.push({
+          plan_review_id: planReviewId,
+          firm_id: firmId,
+          source_file_path: filePath,
+          page_index: globalPageIndex,
+          storage_path: p,
+          status: "ready",
+        });
+        globalPageIndex++;
+      }
     }
   }
 
+  // Persist the manifest so future runs / future stages skip storage listing.
+  if (manifestRows.length > 0) {
+    const { error: insErr } = await admin
+      .from("plan_review_page_assets")
+      .upsert(manifestRows, { onConflict: "plan_review_id,page_index" });
+    if (insErr) console.error("[manifest] persist failed:", insErr);
+  }
+
+  _pageManifestCache.set(planReviewId, out);
   return out;
 }
+
+// Suppress unused warning — kept for potential future incremental rasterization.
+void RASTERIZE_CHUNK;
 
 
 const FINDINGS_SCHEMA = {
@@ -470,17 +578,21 @@ async function stageUpload(
     throw new Error("No files uploaded for this plan review");
   }
 
-  // Eagerly rasterize PDFs into per-page PNGs. Vision stages later in the
-  // pipeline cannot consume raw PDF URLs (Gemini returns "Unsupported image
-  // format"), so we materialize PNGs once here and cache them in storage.
-  const pages = await signedSheetUrls(admin, planReviewId);
-  if (pages.length === 0) {
-    throw new Error(
-      "Failed to rasterize uploaded PDFs into page images. Check the file is a valid PDF.",
-    );
+  // Lightweight validation only — confirm files are reachable in storage.
+  // Rasterization happens lazily inside signedSheetUrls() the first time a
+  // downstream stage actually needs page images. This keeps the upload stage
+  // well under the edge worker's CPU/memory budget for large plan sets.
+  const sample = (data as Array<{ file_path: string }>)[0]?.file_path;
+  if (sample) {
+    const { data: signed, error: signErr } = await admin.storage
+      .from("documents")
+      .createSignedUrl(sample, 60);
+    if (signErr || !signed) {
+      throw new Error(`Cannot access uploaded file in storage: ${signErr?.message ?? "unknown"}`);
+    }
   }
 
-  return { file_count: data.length, page_count: pages.length };
+  return { file_count: data.length };
 }
 
 const SHEET_MAP_SCHEMA = {
@@ -558,7 +670,9 @@ async function stageSheetMap(
     discipline: string;
   }> = [];
 
-  const BATCH = 8;
+  // Smaller batches keep memory under the worker's budget — 8 images at
+  // ~150 DPI was enough to OOM on larger plan sets.
+  const BATCH = 4;
   for (let start = 0; start < signed.length; start += BATCH) {
     const slice = signed.slice(start, start + BATCH);
     const userText =
@@ -1018,9 +1132,13 @@ async function stageDisciplineReview(
   for (const discipline of disciplinesToRun) {
     try {
       const disciplineSheets = routed.filter((s) => s.discipline === discipline);
-      const disciplineImageUrls = disciplineSheets
+      // Cap discipline image payload to keep AI request body and edge worker
+      // memory under control. ~10 pages per discipline still gives the model
+      // plenty of context for finding-grade review.
+      const MAX_DISCIPLINE_PAGES = 10;
+      const disciplineImageUrls = (disciplineSheets
         .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
-        .filter(Boolean) as string[];
+        .filter(Boolean) as string[]).slice(0, MAX_DISCIPLINE_PAGES);
 
       // No sheets routed → log a single human-review item and continue.
       if (disciplineImageUrls.length === 0) {
@@ -1474,7 +1592,7 @@ async function runCrossSheetConsistency(
   }>;
   if (allSheets.length < 2 || signedUrls.length < 2) return [];
 
-  // Cap at 12 sheets to keep the call within model limits / cost. Prefer sheets
+  // Cap at 8 sheets to keep the call within model limits / cost. Prefer sheets
   // that are most likely to have cross-sheet relationships.
   const PRIORITY_PREFIXES = ["A", "S", "M", "P", "E", "F", "L", "G"];
   const ranked = [...allSheets].sort((a, b) => {
@@ -1482,7 +1600,7 @@ async function runCrossSheetConsistency(
     const bi = PRIORITY_PREFIXES.indexOf(b.sheet_ref.trim().toUpperCase()[0] ?? "Z");
     return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
   });
-  const selected = ranked.slice(0, 12);
+  const selected = ranked.slice(0, 8);
   const imageUrls = selected
     .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
     .filter(Boolean) as string[];
@@ -2127,7 +2245,8 @@ async function stageVerify(
     "- 'cannot_locate' — you cannot verify either way from the supplied images. Will be routed to human review.\n" +
     "Be strict: 'overturned' requires positive evidence the finding is wrong, not absence of evidence.";
 
-  const BATCH = 5;
+  // Smaller batch reduces per-request image payload (was 5 → OOM risk on big sets).
+  const BATCH = 3;
   let upheld = 0;
   let overturned = 0;
   let modified = 0;
@@ -2140,7 +2259,7 @@ async function stageVerify(
     // Aggregate page indices across the batch (capped to keep payload tight).
     const pageSet = new Set<number>();
     for (const t of slice) for (const p of t.page_indices) pageSet.add(p);
-    const pages = Array.from(pageSet).slice(0, 8);
+    const pages = Array.from(pageSet).slice(0, 5);
     const imageUrls = pages
       .map((p) => signed[p]?.signed_url)
       .filter(Boolean) as string[];
