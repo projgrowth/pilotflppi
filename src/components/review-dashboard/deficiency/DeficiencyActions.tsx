@@ -27,9 +27,11 @@ import {
 interface Props {
   planReviewId: string;
   def: DeficiencyV2Row;
+  /** When false, hide the secondary controls (status select + notes). */
+  expanded?: boolean;
 }
 
-export default function DeficiencyActions({ planReviewId, def }: Props) {
+export default function DeficiencyActions({ planReviewId, def, expanded = true }: Props) {
   const qc = useQueryClient();
   const optimisticUpdate = useOptimisticDisposition(planReviewId);
   const [notes, setNotes] = useState(def.reviewer_notes ?? "");

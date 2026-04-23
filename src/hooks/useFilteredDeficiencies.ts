@@ -26,12 +26,22 @@ export function compareDefs(a: DeficiencyV2Row, b: DeficiencyV2Row): number {
   return bc - ac;
 }
 
+export type ChipFilter =
+  | "all"
+  | "needs-eyes"
+  | "life-safety"
+  | "low-confidence"
+  | "deferred";
+
 export interface FilterOptions {
   hideOverturned?: boolean;
   showSuperseded?: boolean;
   onlyHumanReview?: boolean;
   groupBy?: "discipline" | "none";
+  /** Inline chip filter applied AFTER the basic visibility filters. */
+  chip?: ChipFilter;
 }
+
 
 export interface FilteredDeficiencies {
   isLoading: boolean;
@@ -58,6 +68,7 @@ export function useFilteredDeficiencies(
     showSuperseded = false,
     onlyHumanReview = false,
     groupBy = "discipline",
+    chip,
   } = opts;
   const { data: defs = [], isLoading } = useDeficienciesV2(planReviewId);
 
@@ -72,6 +83,17 @@ export function useFilteredDeficiencies(
     }
     if (onlyHumanReview) {
       visible = visible.filter((d) => d.requires_human_review);
+    }
+    if (chip === "needs-eyes") {
+      visible = visible.filter((d) => d.requires_human_review);
+    } else if (chip === "life-safety") {
+      visible = visible.filter((d) => d.life_safety_flag || d.permit_blocker);
+    } else if (chip === "low-confidence") {
+      visible = visible.filter(
+        (d) => typeof d.confidence_score === "number" && d.confidence_score < 0.7,
+      );
+    } else if (chip === "deferred") {
+      visible = visible.filter((d) => d.status === "needs_info");
     }
     const sorted = [...visible].sort(compareDefs);
 
@@ -99,5 +121,5 @@ export function useFilteredDeficiencies(
         humanReview: all.filter((d) => d.requires_human_review).length,
       },
     };
-  }, [defs, hideOverturned, showSuperseded, onlyHumanReview, groupBy, isLoading]);
+  }, [defs, hideOverturned, showSuperseded, onlyHumanReview, groupBy, chip, isLoading]);
 }

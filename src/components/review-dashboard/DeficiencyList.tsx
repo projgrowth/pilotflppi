@@ -22,6 +22,8 @@ import { updateDeficiencyDisposition } from "@/hooks/useReviewDashboard";
 
 interface Props {
   planReviewId: string;
+  /** Optional inline chip filter (driven by FilterChips on the dashboard). */
+  chipFilter?: import("@/hooks/useFilteredDeficiencies").ChipFilter;
 }
 
 /** Fired by the dedupe audit trail when jumping to a superseded loser. */
@@ -30,7 +32,7 @@ export function requestShowSuperseded() {
   window.dispatchEvent(new CustomEvent(FORCE_SHOW_EVENT));
 }
 
-export default function DeficiencyList({ planReviewId }: Props) {
+export default function DeficiencyList({ planReviewId, chipFilter }: Props) {
   const qc = useQueryClient();
   const [showSuperseded, setShowSuperseded] = useState(false);
   const [rejectTarget, setRejectTarget] = useState<DeficiencyV2Row | null>(null);
@@ -46,6 +48,7 @@ export default function DeficiencyList({ planReviewId }: Props) {
     hideOverturned: true,
     showSuperseded,
     groupBy: "discipline",
+    chip: chipFilter,
   });
 
   const triage = useTriageController({
