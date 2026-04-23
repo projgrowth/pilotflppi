@@ -1219,36 +1219,47 @@ async function stageDisciplineReview(
   const failed: string[] = [];
   let totalFindings = 0;
 
+  // Per-discipline batching replaces the old MAX_DISCIPLINE_PAGES = 10 cap.
+  // Architectural with 74 sheets becomes ~10 calls of 8 sheets each so every
+  // sheet is reviewed exactly once. Hard ceiling per discipline keeps a
+  // 500-sheet outlier from running away — capped runs are reported in
+  // review_coverage.capped_at so the UI shows the truth.
+  const DISCIPLINE_BATCH = 8;
+  const MAX_SHEETS_PER_DISCIPLINE = 40;
+  const byDiscipline: Record<string, { reviewed: number; total: number }> = {};
+  let cappedAt: number | null = null;
+
   for (const discipline of disciplinesToRun) {
+    const disciplineSheets = routed.filter((s) => s.discipline === discipline);
+    const totalForDiscipline = disciplineSheets.length;
+    byDiscipline[discipline] = { reviewed: 0, total: totalForDiscipline };
+    if (totalForDiscipline === 0) continue;
+
+    const sheetsToReview = disciplineSheets.slice(0, MAX_SHEETS_PER_DISCIPLINE);
+    if (totalForDiscipline > MAX_SHEETS_PER_DISCIPLINE) {
+      cappedAt = MAX_SHEETS_PER_DISCIPLINE;
+    }
+
     try {
-      const disciplineSheets = routed.filter((s) => s.discipline === discipline);
-      // Cap discipline image payload to keep AI request body and edge worker
-      // memory under control. ~10 pages per discipline still gives the model
-      // plenty of context for finding-grade review.
-      const MAX_DISCIPLINE_PAGES = 10;
-      const disciplineImageUrls = (disciplineSheets
-        .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
-        .filter(Boolean) as string[]).slice(0, MAX_DISCIPLINE_PAGES);
+      for (let start = 0; start < sheetsToReview.length; start += DISCIPLINE_BATCH) {
+        const chunk = sheetsToReview.slice(start, start + DISCIPLINE_BATCH);
+        const disciplineImageUrls = chunk
+          .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
+          .filter(Boolean) as string[];
+        if (disciplineImageUrls.length === 0) continue;
 
-      // No sheets routed → skip silently in core mode (the dashboard's
-      // discipline filter already shows the discipline as untouched).
-      // Reduces DB churn and removes noise findings that the user
-      // historically had to dismiss for every project that didn't include
-      // every discipline.
-      if (disciplineImageUrls.length === 0) {
-        continue;
+        const inserted = await runDisciplineChecks(admin, planReviewId, firmId, {
+          discipline,
+          disciplineSheets: chunk,
+          disciplineImageUrls,
+          generalImageUrls,
+          dna,
+          jurisdiction,
+          useType,
+        });
+        totalFindings += inserted;
+        byDiscipline[discipline].reviewed += chunk.length;
       }
-
-      const inserted = await runDisciplineChecks(admin, planReviewId, firmId, {
-        discipline,
-        disciplineSheets,
-        disciplineImageUrls,
-        generalImageUrls,
-        dna,
-        jurisdiction,
-        useType,
-      });
-      totalFindings += inserted;
     } catch (err) {
       console.error(`[discipline_review:${discipline}] failed:`, err);
       failed.push(discipline);
@@ -1267,6 +1278,27 @@ async function stageDisciplineReview(
       });
     }
   }
+
+  // Persist a truthful coverage row for the dashboard CoverageChip.
+  const sheetsTotal = routed.length;
+  const sheetsReviewed = Object.values(byDiscipline).reduce((acc, v) => acc + v.reviewed, 0);
+  try {
+    await admin.from("review_coverage").upsert(
+      {
+        plan_review_id: planReviewId,
+        firm_id: firmId,
+        sheets_total: sheetsTotal,
+        sheets_reviewed: sheetsReviewed,
+        by_discipline: byDiscipline,
+        capped_at: cappedAt,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "plan_review_id" },
+    );
+  } catch (err) {
+    console.error("[review_coverage] upsert failed:", err);
+  }
+
   return { failed_disciplines: failed, total_findings: totalFindings };
 }
 
