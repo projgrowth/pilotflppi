@@ -2,21 +2,21 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Activity, AlertTriangle, ExternalLink, Info, Loader2, Play, Square, Trash2, AlertCircle } from "lucide-react";
+import { Activity, AlertTriangle, ExternalLink, Info, Loader2, Play, Square, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import FppEmptyState from "@/components/shared/FppEmptyState";
 import { useAllActivePipelines, type ReviewActivity } from "@/hooks/useAllActivePipelines";
 import { cancelPipelineForReview, clearOrphanedPipelineRows, resumePipelineForReview } from "@/lib/pipeline-cancel";
 import { useFirmId } from "@/hooks/useFirmId";
 import { CORE_STAGES, DEEP_STAGES, shortStageLabel } from "@/lib/pipeline-stages";
-import { useRecentPipelineErrors } from "@/hooks/usePipelineErrors";
 import { CostTimingPanel } from "@/components/pipeline/CostTimingPanel";
 import { cn } from "@/lib/utils";
+
+// formatErrorTime removed — Errors tab uses CostTimingPanel + recent rows surfaced inline.
 
 function formatErrorTime(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
