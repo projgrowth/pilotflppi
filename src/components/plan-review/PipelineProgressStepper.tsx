@@ -197,7 +197,13 @@ export function PipelineProgressStepper({
                   <span className="ml-2 text-xs text-destructive/80">{row.error_message}</span>
                 ) : isStuck ? (
                   <span className="ml-2 text-xs text-destructive/80">
-                    Stuck for &gt;{Math.round(STUCK_THRESHOLD_MS / 1000)}s — worker may have died
+                    Stuck for &gt;{Math.round(STUCK_THRESHOLD_MS / 1000)}s
+                    {(() => {
+                      const c = autoRetryLog.current.get(s.key)?.count ?? 0;
+                      if (c === 0) return " — auto-restarting…";
+                      if (c < 2) return ` — auto-restarted ${c}× (will try again)`;
+                      return ` — auto-restarted ${c}× (max reached, retry manually)`;
+                    })()}
                   </span>
                 ) : status === "running" && hint ? (
                   <span className="ml-2 text-xs text-muted-foreground">{hint}…</span>
