@@ -580,14 +580,16 @@ export default function PlanReviewDetail() {
         round={review.round}
         reviewId={review.id}
         daysLeft={daysLeft}
-        aiRunning={false}
-        aiCompleteFlash={null}
+        aiRunning={aiRunning}
+        aiCompleteFlash={aiCompleteFlash}
         hasFindings={hasFindings}
         rounds={projectRounds}
         onBack={() => navigate("/plan-review")}
-        onRunAICheck={openDashboard}
+        onRunAICheck={runAICheck}
         onNavigateRound={(rid) => navigate(`/plan-review/${rid}`)}
         onNewRound={createNewRound}
+        onPipelineComplete={handlePipelineComplete}
+        onOpenDashboard={openDashboard}
       />
 
       {/* Page-cap banner: surface silent 10-page truncation honestly */}
