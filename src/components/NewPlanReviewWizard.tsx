@@ -430,16 +430,19 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  // Move to step 3 BEFORE invoking — the realtime stepper subscribes immediately.
  setStep(3);
 
- // Fire and forget; the stepper subscription will reflect progress live.
- // We do NOT await — the function may take 30-90s and we want the dialog
- // responsive immediately. Errors get caught by the realtime stepper
- // (stage rows flip to status='error') and surfaced via pipelineError.
- invokePipeline(review.id).catch((err) => {
+ // Await the trigger so we can surface 401/500 startup failures (auth, missing
+ // service role, CORS preflight rejection) immediately as `pipelineError`
+ // instead of leaving the user staring at a "Pending" stepper forever.
+ // The function returns 202 quickly after kicking off background work, so
+ // awaiting here does not block the UI for the full pipeline duration.
+ try {
+   await invokePipeline(review.id);
+   toast.success("Review created — analysis started");
+ } catch (err) {
    const msg = err instanceof Error ? err.message : "Pipeline failed to start";
    setPipelineError(msg);
- });
-
- toast.success("Review created — analysis started");
+   toast.error(`Analysis failed to start: ${msg}`);
+ }
  } catch (err) {
  toast.error(err instanceof Error ? err.message : "Failed to create review");
  } finally {
