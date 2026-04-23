@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Play, Loader2, FileDown, Layers, Sparkles, Square, Inbox } from "lucide-react";
+import { ArrowLeft, Play, Loader2, FileDown, Layers, Sparkles, Square, Inbox, Wand2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { PageHeader } from "@/components/PageHeader";
@@ -298,6 +298,34 @@ export default function ReviewDashboard() {
           </Button>
         </div>
       </div>
+
+      {preparePagesErrored && (
+        <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+          <div className="flex-1 space-y-1">
+            <div className="text-sm font-semibold text-destructive">
+              Pages need to be re-prepared in your browser
+            </div>
+            <p className="text-sm text-muted-foreground">
+              The server can't rasterize PDFs directly — your browser will download the source files,
+              render them with pdf.js, and restart the pipeline. This usually takes 10–30 seconds.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="default"
+            onClick={handleReprepareInBrowser}
+            disabled={reprepping}
+          >
+            {reprepping ? (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            ) : (
+              <Wand2 className="mr-1 h-4 w-4" />
+            )}
+            {reprepping ? "Re-preparing…" : "Re-prepare in browser"}
+          </Button>
+        </div>
+      )}
 
       {review?.project && (
         <DnaHealthBanner
