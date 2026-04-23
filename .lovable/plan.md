@@ -1,100 +1,122 @@
 
 
-# Items #7, #8, #10 — Auto-recovery, gap re-rasterize, round-2 diff
+# Backend reliability round 6 — stop the silent failures and bad recoveries
 
-Three independent reliability/efficiency wins. None of them affect AI prompts or the dashboard layout.
+The data shows three categories of pain. None require AI changes.
 
-## 1. Auto-recover stuck reviews (#7)
+```text
+Real failures in the last 24h
+  4 reviews failed by auto-recovery on upload/prepare_pages
+    → these stages need browser context; server retry CAN'T help, just wastes a retry slot
+  2 reviews "complete" with 0 findings + 1 page asset
+    → silent failure: pipeline ran on a bad/empty upload, marked itself complete
+  1 review stuck in 'error' status (a dead state nothing handles)
+  0 active long-running queries → DB is healthy, edges aren't
+```
 
-**Problem**: 7 reviews are sitting at `ai_check_status = 'pending'` with the oldest from April 16 — no error, no progress, just abandoned. Today these block the user from re-running the pipeline because the dispatcher won't restart a non-failed review.
+## 1. Recovery cron must skip stages it can't fix
 
-**Fix**:
-- New edge function **`reconcile-stuck-reviews`** (cron-triggered, every 5 min):
-  - Find reviews where `ai_check_status IN ('pending','running')` and `updated_at < now() - interval '15 minutes'`.
-  - For each: log a `pipeline_error_log` row (`stage='dispatch'`, `error_class='stuck_no_progress'`, metadata = last known stage + minutes idle).
-  - If `retry_count < 1` (read from the new metadata): flip `ai_check_status='pending'`, clear `cancelled_at` from `ai_run_progress`, and call `startPipeline()` to retry once.
-  - If already retried once: flip to `ai_check_status='failed'` with a clear reason in `ai_run_progress.failure_reason`. The dashboard already surfaces failed reviews.
-- Schedule it with `pg_cron` + `pg_net` (extensions exist already per project setup).
-- Add a small `<StuckRecoveryBanner />` on `PlanReviewDetail` that appears when `ai_run_progress.auto_recovered_at` is set, telling the user "we noticed this stalled and resumed it".
+`reconcile-stuck-reviews` happily retries `upload` and `prepare_pages`. Both require the **browser** to rasterize PDFs — a server-side worker re-kick does nothing useful, then the second tick marks the review failed. We're auto-failing recoverable reviews.
 
-## 2. Gap-only re-rasterize (#8)
+Fix:
+- Add `SERVER_RECOVERABLE_STAGES = ['dna_extract','sheet_map','discipline_review','cross_check','ground_citations','verify','letter_draft']`. Only retry those.
+- For browser-context stages (`upload`, `prepare_pages`): instead of retrying, flip `ai_check_status='needs_user_action'` (new value) with a clear `failure_reason: "Upload incomplete — please re-open the project to finish preparing pages."`. The dashboard already has a banner pattern; wire it to this status.
+- Result: the 4 false-failures from this morning would have been parked for the user instead of burned.
 
-**Problem**: `reprepareInBrowser` today **deletes the entire `plan_review_page_assets` manifest** and re-renders all pages, even if only 1 of 78 actually failed. On a 78-page set that's 5 minutes of re-work for a 4-second problem.
+## 2. Add a "found nothing" guard
 
-**Fix**: Add a **gap-detection mode** to `reprepareInBrowser`:
-1. Read `plan_reviews.ai_run_progress.expected_pages` (already populated by upload) and the current `plan_review_page_assets` rows.
-2. Compute `missingIndices = expectedRange \ existingPageIndices`.
-3. If `missingIndices.length === 0`: no-op, just kick the pipeline. If all pages missing: full re-rasterize (today's behavior).
-4. If partial: rasterize **only** the missing page indices using a new `rasterizePagesByIndex(file, indices, dpi)` helper added to `pdf-utils.ts` (uses pdf.js `getPage(i)` for each gap, doesn't render the rest).
-5. **Insert** (not delete-then-insert) the new manifest rows. The unique index from the last migration on `(plan_review_id, page_index)` (we'll add it) prevents collisions.
+Two reviews completed with zero findings AND only 1 page asset (almost certainly bad rasterize → DNA empty → AI saw nothing). `stageComplete` should refuse to mark a multi-page review complete with zero findings unless an explicit "no issues found" assertion exists.
 
-UI:
-- New `ReviewHealthStrip` chip "**77/78 pages ready**" with click → "Repair missing page" runs gap-only re-rasterize. Replaces the current toast-only error path.
-- Toast on success: "Repaired 1 of 78 pages" instead of "Re-prepared 78 pages".
+Fix:
+- At end of `stageDisciplineReview`: if `total_findings === 0 && expected_pages > 5`, throw `LOW_YIELD_REVIEW` (new error class) with metadata `{pages, sheets, dna_completeness}`.
+- Pipeline marks status `needs_human_review` (not `complete`) and writes `failure_reason`. The dashboard's existing failure banner surfaces it; reviewer can manually approve or re-run.
+- This catches every silent-failure pattern we've actually seen, not just upload-related ones.
 
-Migration:
-- `CREATE UNIQUE INDEX plan_review_page_assets_review_page_uniq ON plan_review_page_assets (plan_review_id, page_index);`
-- Dedupe any existing collisions first (none expected, but safe).
+## 3. Resolve the dead `error` status
 
-## 3. Round-2 diff intelligence (#10)
+One review is in `ai_check_status='error'` since April 22 — the value isn't in the dispatcher's known states, so it's stranded. Either every code path emits it (it doesn't) or it's a leftover from an old version.
 
-**Problem**: When a resubmittal lands today (`round` increments), the pipeline runs from scratch on every page. We already have `previous_findings` populated and a `useRoundDiff` hook that detects unchanged sheets — but the **pipeline doesn't use that signal** to skip work.
+Fix:
+- One-time migration: `UPDATE plan_reviews SET ai_check_status='failed', ai_run_progress = ai_run_progress || jsonb_build_object('failure_reason','Legacy error state — reset by maintenance') WHERE ai_check_status='error';`
+- Dispatcher: explicitly accept `error` as equivalent to `failed` for re-run eligibility (defense in depth).
+- Add a Postgres CHECK constraint on `plan_reviews.ai_check_status` so future drift can't reintroduce unknown values: `CHECK (ai_check_status IN ('pending','running','complete','failed','needs_user_action','needs_human_review'))`.
 
-**Fix** — three coordinated changes in `run-review-pipeline/index.ts`:
+## 4. Make pipeline retries cost-aware
 
-1. **New helper `computeChangedSheets(planReviewId, round)`** runs after `sheet_map`:
-   - Loads previous round's `sheet_map` snapshot from `plan_reviews.checklist_state.last_sheet_map` (we'll add this write at end of every successful run).
-   - Compares each new sheet's `sheet_ref + page_count + sha256(rasterized_jpeg)` against the prior snapshot.
-   - Returns `{unchanged: SheetRow[], changed: SheetRow[]}`.
+`NON_FATAL_RETRY_STAGES` retries 3× with no backoff metadata. When `discipline_review` fails on chunk 7 of 10, we re-run from chunk 1 — paying for 6 chunks twice. The model already takes JSON input; we can checkpoint chunk results.
 
-2. **`stageDisciplineReview` on round ≥ 2**: only sends `changed` sheets to the AI. For each `unchanged` sheet, replay any prior round's findings against it as **carryover deficiencies** (status `open`, marked `metadata.carryover_from_round = N-1`). Reviewers see them in a separate "Carried over" filter chip.
+Fix:
+- New table column `plan_reviews.stage_checkpoints jsonb` (default `{}`) — store `{discipline: lastChunkCompleted}` after each chunk.
+- On retry, `runDisciplineChecks` skips chunks already represented by upserted `def_number`s for that discipline.
+- Result: retried discipline_review costs proportional to the failure point, not a full rerun.
 
-3. **Letter generation**: split into "New this round" (changed sheets) + "Still open from round N-1" (carryover). Reviewers focus only on the new section.
+## 5. Edge function timeout safety net
 
-DB:
-- Add `metadata jsonb` column on `deficiencies_v2` (already exists? need to verify; if not, migration adds it).
-- Add `last_sheet_map jsonb` to `plan_reviews.checklist_state` write at end of `cross_check` stage. No schema change needed — it's part of existing JSONB.
+Edge functions hard-cap at ~150s on Lovable Cloud. Long discipline_review chains can hit the wall mid-stage and leave the review in `running` forever (until cron rescues it). We should self-trigger continuation.
 
-UI:
-- `useRoundDiff` already exists; new `<RoundCarryoverPanel />` lists the carried-over findings on the workspace right panel as a collapsible group. New `FindingStatusFilter` chip "Carryover".
+Fix:
+- Track `stageStartedAt` per stage. If `Date.now() - stageStartedAt > 120_000` mid-loop, write current progress, return 200 with `{continuation: true, plan_review_id}`, and the dispatcher (or a wrapping `Deno.serve` handler) immediately re-invokes itself.
+- Net effect: long reviews finish via several short invocations instead of one long one that gets killed.
+
+## 6. Pipeline error log retention + indexing
+
+`pipeline_error_log` has no retention policy. Today it's small, but at scale (one chunk_summary per chunk per discipline per review) it grows linearly with usage. Plus it has no index on `(plan_review_id, created_at)` — the dashboard queries are getting slower.
+
+Fix:
+- Migration: `CREATE INDEX pipeline_error_log_review_created_idx ON pipeline_error_log (plan_review_id, created_at DESC);`
+- Add a daily cron job: delete `pipeline_error_log` rows older than 90 days where `error_class IN ('chunk_summary','stuck_no_progress')` (the noisy informational ones). Keep real errors forever.
+
+## 7. Storage object cleanup for failed uploads
+
+When upload fails, we leave PDFs orphaned in `documents/plan-reviews/<id>/`. They're never deleted, never viewable. Storage cost grows silently.
+
+Fix:
+- New scheduled function `cleanup-orphan-uploads` (daily): for each `plan_reviews` row with `ai_check_status='failed'` AND `created_at < now() - interval '30 days'`, list+delete its objects under `plan-reviews/<id>/` from the `documents` bucket. Log totals to `pipeline_error_log`.
+
+## 8. Database-level firm_id enforcement
+
+Several recent inserts (e.g., `pipeline_error_log` from edge functions running with service role) skip `firm_id`. RLS on read still works because of the `firm_id IS NULL OR ...` policy, but admin queries get noisy and cross-firm leakage is one careless join away.
+
+Fix:
+- For edge-inserted tables (`pipeline_error_log`, `plan_review_page_assets`), require firm_id by deriving it from the parent `plan_review` server-side at insert time. Add a trigger `set_firm_id_from_plan_review` that fills `NEW.firm_id` from `(SELECT firm_id FROM plan_reviews WHERE id = NEW.plan_review_id)` if null.
+- Tighten the read policies: drop the `firm_id IS NULL` escape hatch — every row must belong to a firm. Backfill nulls in a one-time migration.
 
 ## Files changed
 
 ```text
-CREATE
-  supabase/functions/reconcile-stuck-reviews/index.ts
-  src/components/plan-review/StuckRecoveryBanner.tsx
-  src/components/plan-review/RoundCarryoverPanel.tsx
-  supabase/migrations/<ts>_page_asset_uniq_and_recovery.sql
-    • UNIQUE INDEX plan_review_page_assets_review_page_uniq
-    • pg_cron schedule for reconcile-stuck-reviews (every 5 min)
-
 EDIT
-  src/lib/reprepare-in-browser.ts
-    • Gap-detection mode: compute missing indices, render only those
-    • Insert (not delete) when partial; full replace only when 0 existing
-  src/lib/pdf-utils.ts
-    • New rasterizePagesByIndex(file, indices, dpi) helper
-  src/components/review-dashboard/ReviewHealthStrip.tsx
-    • New "X/Y pages ready" chip → click triggers gap repair
+  supabase/functions/reconcile-stuck-reviews/index.ts
+    • Skip non-server-recoverable stages → flip to needs_user_action
   supabase/functions/run-review-pipeline/index.ts
-    • computeChangedSheets() helper
-    • stageDisciplineReview: skip unchanged sheets on round≥2, carryover prior findings
-    • End-of-run: write last_sheet_map into checklist_state
-    • Letter draft section split: New / Carried over
-  src/pages/PlanReviewDetail.tsx
-    • Mount RoundCarryoverPanel
-    • Mount StuckRecoveryBanner
-  src/hooks/plan-review/useFindingFilters.ts
-    • New "carryover" chip filter using metadata.carryover_from_round
+    • LOW_YIELD_REVIEW guard at end of discipline_review
+    • Stage checkpoint resume in runDisciplineChecks
+    • Self-continuation on 120s mid-stage timeout
+    • Accept 'error' status as re-runnable
+  src/components/plan-review/StuckRecoveryBanner.tsx
+    • Render needs_user_action variant ("re-open to finish preparing pages")
+  src/types/index.ts (or wherever plan_review status lives)
+    • Add 'needs_user_action' | 'needs_human_review'
+
+CREATE
+  supabase/functions/cleanup-orphan-uploads/index.ts
+    • Daily storage cleanup for >30d failed reviews
+  supabase/migrations/<ts>_pipeline_hardening.sql
+    • CHECK constraint on plan_reviews.ai_check_status
+    • UPDATE legacy 'error' rows to 'failed'
+    • ADD COLUMN plan_reviews.stage_checkpoints jsonb DEFAULT '{}'
+    • CREATE INDEX pipeline_error_log_review_created_idx
+    • CREATE TRIGGER set_firm_id_from_plan_review
+    • Backfill firm_id NULLs; tighten RLS to drop NULL escape hatch
+    • cron.schedule daily cleanup-orphan-uploads + log retention DELETE
 ```
 
 ## Verification
 
-- Force-stale a `pending` review by touching `updated_at` 20 min back → cron run flips it to retry, second run flips to `failed` with `stuck_no_progress` reason.
-- Delete 1 page asset row from a completed review → health strip shows "77/78 pages ready", click → repair adds only that page (network shows 1 JPEG upload, not 78).
-- Submit a round-2 resubmittal where 2 of 74 architectural sheets changed → edge logs show `discipline_review` ran on 2 sheets, 72 carryover findings inserted, letter draft has separate "Carried over" section.
-- Existing reviews continue to work: round 1 is unaffected; reviews without `expected_pages` fall back to today's full-replace behavior.
+- Force-stale a `pending` review at `prepare_pages` → cron flips to `needs_user_action`, banner appears, NOT failed.
+- Run pipeline against a corrupt PDF → fails at `LOW_YIELD_REVIEW`, status `needs_human_review`, dashboard surfaces it.
+- Kill discipline_review at chunk 5/10 mid-run → next dispatcher tick resumes at chunk 6, not chunk 1 (verify via `chunk_summary` log count).
+- Insert a row into `plan_reviews` with `ai_check_status='garbage'` → blocked by CHECK constraint.
+- Edge function inserts a `pipeline_error_log` row without firm_id → trigger fills it from the parent review.
 
-No prompt changes, no auth changes, no breaking dashboard changes. Three additive features that compose cleanly with everything shipped in rounds 1-4.
+No UI redesign. No prompt changes. All seven fixes are independent — can ship in any order, but #1 and #2 are highest leverage (they would have prevented every issue currently visible in the database).
 
