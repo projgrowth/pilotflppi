@@ -10,7 +10,6 @@ export interface PipelineRowRich {
   status: string;
   started_at: string | null;
   completed_at: string | null;
-  created_at: string;
   updated_at: string;
   error_message: string | null;
 }
@@ -58,7 +57,7 @@ export function useAllActivePipelines() {
         .from("review_pipeline_status")
         .select("*")
         .or(`started_at.gte.${since},status.in.(running,pending)`)
-        .order("created_at", { ascending: false });
+        .order("updated_at", { ascending: false });
       if (error) throw error;
 
       const reviewIds = Array.from(
