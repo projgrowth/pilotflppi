@@ -95,7 +95,7 @@ export async function resumePipelineForReview(
     void _omit;
     await supabase
       .from("plan_reviews")
-      .update({ ai_run_progress: rest })
+      .update({ ai_run_progress: rest as Record<string, never> })
       .eq("id", planReviewId);
   }
 
