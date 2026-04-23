@@ -294,32 +294,36 @@ const PAGE_ASSET_INDEX_RE = /p-(\d{3,})\.(png|jpe?g)$/;
 // so the dashboard can show a one-click "Re-prepare in browser" CTA.
 const NEEDS_BROWSER_RASTERIZATION = "needs_browser_rasterization";
 
-async function _legacyRasterStub(
-  _pdfBytes: Uint8Array,
-  onPage: (pageIndex: number, jpegBytes: Uint8Array) => Promise<void>,
-): Promise<number> {
-  void onPage;
-  // Intentionally unreachable. Kept ONLY to satisfy any historical caller that
-  // somehow makes it past the stagePreparePages verifier; in practice nothing
-  // else in this file calls it after the overhaul.
-  throw new Error(NEEDS_BROWSER_RASTERIZATION);
-  // Below are the original signatures — kept so refactor diffs read cleanly.
-  // deno-lint-ignore no-unreachable
-  {
-    const i = 0;
-    const empty = new Uint8Array(0);
-    return i + empty.length;
-          await onPage(i, jpeg);
-        } finally {
-          pixmap.destroy();
-        }
-      } finally {
-        page.destroy();
-      }
-    }
-    return pageCount;
-  } finally {
-    doc.destroy();
+/**
+ * Persist a structured row to public.pipeline_error_log so the dashboard
+ * Errors tab + the per-review error stream both have something to show.
+ * Best-effort — never throws (a failed insert can't be allowed to mask the
+ * real stage error that triggered this call).
+ */
+async function recordPipelineError(
+  admin: ReturnType<typeof createClient>,
+  args: {
+    planReviewId: string;
+    firmId: string | null;
+    stage: Stage;
+    errorClass: string;
+    errorMessage: string;
+    attemptCount?: number;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<void> {
+  try {
+    await admin.from("pipeline_error_log").insert({
+      plan_review_id: args.planReviewId,
+      firm_id: args.firmId,
+      stage: args.stage,
+      error_class: args.errorClass,
+      error_message: (args.errorMessage ?? "").slice(0, 4000),
+      attempt_count: args.attemptCount ?? 1,
+      metadata: args.metadata ?? {},
+    });
+  } catch (err) {
+    console.error("[pipeline_error_log] insert failed:", err);
   }
 }
 
