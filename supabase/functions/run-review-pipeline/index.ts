@@ -670,7 +670,9 @@ async function stageSheetMap(
     discipline: string;
   }> = [];
 
-  const BATCH = 8;
+  // Smaller batches keep memory under the worker's budget — 8 images at
+  // ~150 DPI was enough to OOM on larger plan sets.
+  const BATCH = 4;
   for (let start = 0; start < signed.length; start += BATCH) {
     const slice = signed.slice(start, start + BATCH);
     const userText =
