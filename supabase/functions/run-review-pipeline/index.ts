@@ -578,17 +578,21 @@ async function stageUpload(
     throw new Error("No files uploaded for this plan review");
   }
 
-  // Eagerly rasterize PDFs into per-page PNGs. Vision stages later in the
-  // pipeline cannot consume raw PDF URLs (Gemini returns "Unsupported image
-  // format"), so we materialize PNGs once here and cache them in storage.
-  const pages = await signedSheetUrls(admin, planReviewId);
-  if (pages.length === 0) {
-    throw new Error(
-      "Failed to rasterize uploaded PDFs into page images. Check the file is a valid PDF.",
-    );
+  // Lightweight validation only — confirm files are reachable in storage.
+  // Rasterization happens lazily inside signedSheetUrls() the first time a
+  // downstream stage actually needs page images. This keeps the upload stage
+  // well under the edge worker's CPU/memory budget for large plan sets.
+  const sample = (data as Array<{ file_path: string }>)[0]?.file_path;
+  if (sample) {
+    const { data: signed, error: signErr } = await admin.storage
+      .from("documents")
+      .createSignedUrl(sample, 60);
+    if (signErr || !signed) {
+      throw new Error(`Cannot access uploaded file in storage: ${signErr?.message ?? "unknown"}`);
+    }
   }
 
-  return { file_count: data.length, page_count: pages.length };
+  return { file_count: data.length };
 }
 
 const SHEET_MAP_SCHEMA = {
