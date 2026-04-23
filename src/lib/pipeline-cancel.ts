@@ -55,7 +55,7 @@ export async function clearOrphanedPipelineRows(firmId: string | null): Promise<
     })
     .eq("status", "pending")
     .is("started_at", null)
-    .lt("created_at", cutoff)
+    .lt("updated_at", cutoff)
     .select("id");
 
   // RLS already scopes to firm, but adding the filter shaves planner work.

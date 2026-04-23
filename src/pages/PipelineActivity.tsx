@@ -211,7 +211,7 @@ export default function PipelineActivity() {
           (r) =>
             r.status === "pending" &&
             !r.started_at &&
-            new Date(r.created_at).getTime() < cutoff,
+            new Date(r.updated_at).getTime() < cutoff,
         ).length
       );
     }, 0);
