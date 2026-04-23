@@ -299,9 +299,20 @@ export default function PipelineActivity() {
           </Badge>
         )}
         {orphanCount > 0 && (
-          <Badge variant="outline" className="text-xs">
-            {orphanCount} orphaned pending row(s)
-          </Badge>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className="text-xs cursor-help gap-1">
+                  <Info className="h-3 w-3" />
+                  {orphanCount} orphaned pending row(s)
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                Pending stages older than 10 minutes that never started — usually
+                from a worker that crashed before claiming the row. Safe to clear.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         )}
         <div className="flex-1" />
         {orphanCount > 0 && (
