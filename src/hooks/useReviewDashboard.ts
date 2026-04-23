@@ -56,6 +56,7 @@ export function subscribeShared(
 
 export type PipelineStage =
   | "upload"
+  | "prepare_pages"
   | "sheet_map"
   | "dna_extract"
   | "discipline_review"
@@ -69,6 +70,7 @@ export type PipelineStage =
 
 export const PIPELINE_STAGES: { key: PipelineStage; label: string }[] = [
   { key: "upload", label: "Upload" },
+  { key: "prepare_pages", label: "Prepare Pages" },
   { key: "sheet_map", label: "Sheet Map" },
   { key: "dna_extract", label: "DNA Extract" },
   { key: "discipline_review", label: "Discipline Review" },
