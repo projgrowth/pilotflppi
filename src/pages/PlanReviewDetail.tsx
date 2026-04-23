@@ -56,6 +56,8 @@ import { useFindingStatuses } from "@/hooks/plan-review/useFindingStatuses";
 import { usePdfPageRender } from "@/hooks/plan-review/usePdfPageRender";
 import { usePipelineStatus } from "@/hooks/useReviewDashboard";
 import { reprepareInBrowser } from "@/lib/reprepare-in-browser";
+import { StuckRecoveryBanner } from "@/components/plan-review/StuckRecoveryBanner";
+import { RoundCarryoverPanel } from "@/components/plan-review/RoundCarryoverPanel";
 import { Wand2, AlertTriangle, Loader2 } from "lucide-react";
 
 type RightPanelMode = "findings" | "checklist" | "completeness" | "letter" | "county";
@@ -623,6 +625,39 @@ export default function PlanReviewDetail() {
             )}
             {reprepping ? "Re-preparing…" : "Re-prepare in browser"}
           </Button>
+        </div>
+      )}
+
+      {/* Auto-recovery notice — set by the reconcile-stuck-reviews cron when
+          this review was wedged and the cron resumed it. Pure presentation;
+          dismissible via localStorage. */}
+      {(() => {
+        const progress = (review.ai_run_progress ?? {}) as Record<string, unknown>;
+        return (
+          <div className="shrink-0 px-4 pt-2 empty:hidden">
+            <StuckRecoveryBanner
+              planReviewId={review.id}
+              autoRecoveredAt={typeof progress.auto_recovered_at === "string" ? progress.auto_recovered_at : null}
+              recoveredFromStage={typeof progress.last_stage === "string" ? progress.last_stage : null}
+              recoveryCount={typeof progress.auto_recovery_count === "number" ? progress.auto_recovery_count : undefined}
+            />
+          </div>
+        );
+      })()}
+
+      {/* Round-2+ carryover summary — only renders when there's at least one
+          carryover finding from a prior round. */}
+      {review.round >= 2 && findings.length > 0 && (
+        <div className="shrink-0 px-4 pt-2 empty:hidden">
+          <RoundCarryoverPanel
+            findings={findings}
+            currentRound={review.round}
+            onJumpTo={(idx) => {
+              setActiveFindingIndex(idx);
+              const el = findingRefs.current.get(idx);
+              el?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }}
+          />
         </div>
       )}
 
