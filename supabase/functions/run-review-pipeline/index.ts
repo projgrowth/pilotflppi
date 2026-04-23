@@ -3301,7 +3301,30 @@ Deno.serve(async (req) => {
       complete: () => stageComplete(admin, plan_review_id),
     };
 
+    // Cancellation check helper. The dashboard writes
+    // `plan_reviews.ai_run_progress.cancelled_at` (ISO timestamp) when the
+    // user clicks Cancel. Any worker that wakes up after that timestamp
+    // halts immediately and does not schedule the next stage.
+    const isCancelled = async (): Promise<boolean> => {
+      const { data } = await admin
+        .from("plan_reviews")
+        .select("ai_run_progress")
+        .eq("id", plan_review_id)
+        .maybeSingle();
+      const progress =
+        (data as { ai_run_progress?: Record<string, unknown> | null } | null)
+          ?.ai_run_progress ?? {};
+      return typeof progress.cancelled_at === "string" && progress.cancelled_at.length > 0;
+    };
+
     const runOneStage = async () => {
+      if (await isCancelled()) {
+        await setStage(admin, plan_review_id, firmId, stageToRun, {
+          status: "error",
+          error_message: "Cancelled by user",
+        });
+        return;
+      }
       await setStage(admin, plan_review_id, firmId, stageToRun, { status: "running" });
       try {
         const meta = await withRetry(() => stageImpls[stageToRun](), `stage:${stageToRun}`);
