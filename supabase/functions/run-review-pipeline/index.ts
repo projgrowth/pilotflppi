@@ -9,7 +9,7 @@ import { createClient as _createClient } from "https://esm.sh/@supabase/supabase
 // MuPDF.js (WASM) — used to rasterize uploaded PDFs into per-page PNGs so
 // Gemini vision can consume them. Gemini's image_url field rejects raw PDF
 // URLs ("Unsupported image format"), so this conversion is mandatory.
-import * as mupdf from "https://esm.sh/mupdf@1.3.0";
+import * as mupdf from "npm:mupdf@1.3.0";
 import { composeDisciplineSystemPrompt } from "./discipline-experts.ts";
 
 // Untyped client wrapper — the edge function does not have access to generated
