@@ -676,7 +676,14 @@ export default function PlanReviewDetail() {
         onOpenDashboard={openDashboard}
       />
 
-      {preparePagesErrored && (
+      <UploadProgressBar
+        uploading={uploading}
+        prepared={uploadProgress?.prepared ?? 0}
+        expected={uploadProgress?.expected ?? 0}
+        phase={uploadProgress?.phase}
+      />
+
+
         <div className="shrink-0 border-b border-destructive/30 bg-destructive/5 px-4 py-2 flex items-center gap-3">
           <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
           <div className="flex-1 min-w-0">
