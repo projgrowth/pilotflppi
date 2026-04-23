@@ -3660,7 +3660,9 @@ Deno.serve(async (req) => {
 
       await setStage(admin, plan_review_id, firmId, stageToRun, { status: "running" });
       try {
-        const meta = await withRetry(() => stageImpls[stageToRun](), `stage:${stageToRun}`);
+        const meta = await withCostCtx({ stage: stageToRun }, () =>
+          withRetry(() => stageImpls[stageToRun](), `stage:${stageToRun}`),
+        );
 
         // prepare_pages is now a single O(1) verify call — no chunk loop, no
         // self-rescheduling. Falls straight through to the standard advance.
