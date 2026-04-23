@@ -32,7 +32,7 @@ import DashboardAlertStack, {
 import NextStepBar from "@/components/review-dashboard/NextStepBar";
 import FilterChips from "@/components/review-dashboard/FilterChips";
 import AuditCoveragePanel from "@/components/review-dashboard/AuditCoveragePanel";
-import { CRITICAL_DNA_FIELDS } from "@/components/review-dashboard/DnaHealthBanner";
+import { CRITICAL_DNA_FIELDS } from "@/lib/dna-fields";
 import { useLetterQualityCheck } from "@/hooks/useLetterQualityCheck";
 import {
   useDeficienciesV2,

@@ -48,7 +48,7 @@ export function ReviewTopBar({
         aiCompleteFlash !== null
           ? "bg-success text-success-foreground"
           : !hasFindings && !aiRunning
-            ? " animate-pulse"
+            ? "border border-primary/60 ring-1 ring-primary/20"
             : "",
       )}
     >

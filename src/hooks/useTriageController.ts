@@ -6,6 +6,7 @@ import {
   updateDeficiencyDisposition,
 } from "@/hooks/useReviewDashboard";
 import { scrollToFinding } from "@/lib/finding-jump";
+import { isRejectShortcut, isTypingTarget } from "@/lib/review-shortcuts";
 
 type Disposition = "confirm" | "reject" | "modify";
 
@@ -130,15 +131,20 @@ export function useTriageController({
   useEffect(() => {
     if (!enabled) return;
     const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName;
-      const isTyping =
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        tag === "SELECT" ||
-        target?.isContentEditable;
-      if (isTyping) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isTypingTarget(e.target)) return;
+
+      // Reject (Shift+R) — handled before the modifier-guard below because it
+      // legitimately uses Shift. All other shortcuts must be unmodified.
+      if (isRejectShortcut(e)) {
+        if (!activeId) return;
+        const def = itemsRef.current.find((i) => i.id === activeId);
+        if (!def) return;
+        e.preventDefault();
+        onRequestReject(def);
+        return;
+      }
+
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
 
       const k = e.key.toLowerCase();
       if (k === "?" || (e.shiftKey && k === "/")) {
@@ -171,13 +177,9 @@ export function useTriageController({
         if (!activeId) return;
         e.preventDefault();
         void apply(activeId, k === "c" ? "confirm" : "modify");
-      } else if (k === "r") {
-        if (!activeId) return;
-        const def = itemsRef.current.find((i) => i.id === activeId);
-        if (!def) return;
-        e.preventDefault();
-        onRequestReject(def);
       }
+      // Bare "r" intentionally does nothing — reject is Shift+R per the unified
+      // contract (see src/lib/review-shortcuts.ts).
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
