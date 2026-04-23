@@ -20,7 +20,7 @@ const createClient = _createClient as unknown as (...args: any[]) => any;
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type, x-supabase-api-version, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 type Stage =
@@ -265,10 +265,12 @@ const MAX_PAGES_PER_PDF = 80;
 // title blocks / dimension callouts and keeps CPU/encode time tiny.
 const RASTER_JPEG_QUALITY = 75;
 // Cap how many pages we rasterize per stage call. Edge workers have a hard
-// CPU-time budget (~2s pure CPU per invocation). 8 JPEG pages ≈ ~0.5–1s CPU,
-// well under budget. Subsequent stages reuse the cached images already in
-// storage; only the first stage that touches each page pays the encode cost.
-const RASTERIZE_CHUNK = 8;
+// CPU-time budget (~2s pure CPU per invocation). The MuPDF WASM cold-load
+// alone burns ~1.5–2s, so the first chunk on each fresh worker has very
+// little budget left. 4 JPEG pages keeps us safely under the limit even on
+// cold workers; warm workers (rare) finish faster than the round-trip cost
+// of an extra invocation, so this is the right floor.
+const RASTERIZE_CHUNK = 4;
 // Parallel concurrency for storage uploads + manifest writes within a chunk.
 // MuPDF rasterization itself stays serial (single-threaded WASM).
 const RASTER_UPLOAD_CONCURRENCY = 6;
@@ -3238,32 +3240,18 @@ Deno.serve(async (req) => {
             const justFinished = m.source ?? null;
             const remaining = m.remaining_sources ?? [];
 
-            // If there are 2+ distinct PDFs still needing work, fork a second
-            // worker pinned to a different source so two PDFs rasterize in
-            // parallel. We only fork from a "free" worker (no target_source
-            // pinned) to avoid cascading forks.
-            const otherSources = remaining.filter((s) => s !== justFinished);
-            if (!targetSource && otherSources.length > 0) {
-              // Primary: keep going on the PDF we just touched (if it has more).
-              if (justFinished && remaining.includes(justFinished)) {
-                scheduleNextStage(plan_review_id, "prepare_pages", {
-                  target_source: justFinished,
-                });
-              }
-              // Parallel: fork on the next un-rasterized PDF.
-              scheduleNextStage(plan_review_id, "prepare_pages", {
-                target_source: otherSources[0],
-              });
-            } else {
-              // Single-track: same PDF if it has more, else next remaining.
-              const nextTarget =
-                justFinished && remaining.includes(justFinished)
-                  ? justFinished
-                  : remaining[0] ?? null;
-              scheduleNextStage(plan_review_id, "prepare_pages", {
-                target_source: nextTarget,
-              });
-            }
+            // Always single-track: schedule exactly one next worker. The
+            // multi-PDF parallel fork is disabled because each forked worker
+            // pays the full ~1.5–2s MuPDF WASM cold-start tax independently,
+            // making both more likely to OOM/CPU-kill than to finish. Re-enable
+            // only after single-PDF prepare is reliably stable.
+            const nextTarget =
+              justFinished && remaining.includes(justFinished)
+                ? justFinished
+                : remaining[0] ?? null;
+            scheduleNextStage(plan_review_id, "prepare_pages", {
+              target_source: nextTarget,
+            });
             return;
           }
         }
