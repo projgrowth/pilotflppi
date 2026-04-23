@@ -16,7 +16,7 @@
  * Why a hook instead of a util module: every action interacts with React
  * Query + toast + Confirm dialog state, all of which are React-context-bound.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { type QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -228,7 +228,3 @@ export function useReviewActions(args: UseReviewActionsArgs) {
     handleFileUpload,
   };
 }
-
-/** Avoid an unused-warning when the page imports just the hook. */
-const _unused = useRef;
-void _unused;
