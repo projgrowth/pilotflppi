@@ -65,3 +65,55 @@ export async function clearOrphanedPipelineRows(firmId: string | null): Promise<
   if (error) throw error;
   return data?.length ?? 0;
 }
+
+/**
+ * Manually re-kick a stuck pipeline stage. The worker likely died (CPU limit,
+ * network blip) and never scheduled the next chunk. Posting a fresh edge
+ * function invocation lets it resume from the persisted manifest / DB state.
+ *
+ * Steps:
+ *   1. Clear `cancelled_at` so the new worker doesn't immediately halt.
+ *   2. Reset the stuck stage row to `pending` (clears error / started_at).
+ *   3. Invoke `run-review-pipeline` with the same stage + mode.
+ */
+export async function resumePipelineForReview(
+  planReviewId: string,
+  stage: string,
+): Promise<void> {
+  const { data: prev } = await supabase
+    .from("plan_reviews")
+    .select("ai_run_progress")
+    .eq("id", planReviewId)
+    .maybeSingle();
+  const progress =
+    (prev?.ai_run_progress as Record<string, unknown> | null) ?? {};
+  if ("cancelled_at" in progress) {
+    const { cancelled_at: _omit, ...rest } = progress as {
+      cancelled_at?: unknown;
+      [k: string]: unknown;
+    };
+    void _omit;
+    await supabase
+      .from("plan_reviews")
+      .update({ ai_run_progress: rest })
+      .eq("id", planReviewId);
+  }
+
+  await supabase
+    .from("review_pipeline_status")
+    .update({
+      status: "pending",
+      error_message: null,
+      started_at: null,
+      completed_at: null,
+    })
+    .eq("plan_review_id", planReviewId)
+    .eq("stage", stage);
+
+  const mode =
+    (progress as { mode?: string }).mode === "deep" ? "deep" : "core";
+  const { error } = await supabase.functions.invoke("run-review-pipeline", {
+    body: { plan_review_id: planReviewId, stage, mode },
+  });
+  if (error) throw error;
+}
