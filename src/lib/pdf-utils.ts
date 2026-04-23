@@ -209,6 +209,8 @@ export interface PreparedPageAsset {
   source_file_path: string;
   page_index: number;
   storage_path: string;
+  /** Optional path to a higher-DPI vision JPEG used by the AI pipeline. */
+  vision_storage_path?: string | null;
   status: "ready";
 }
 
@@ -246,6 +248,52 @@ export async function rasterizeAndUploadPages(
   }
 
   return pageAssetRows;
+}
+
+/**
+ * Higher-DPI raster for the AI vision pipeline.
+ *
+ * The display path uses 96 DPI / 0.72 quality for fast in-browser viewing,
+ * but Gemini does noticeably better OCR on title blocks + small notes when
+ * the image is closer to a real scan resolution. 150 DPI / 0.85 quality
+ * is the sweet spot — about 3× the byte size, but small text in code
+ * summaries and product approvals becomes legible to the model.
+ *
+ * Returns a `pageIndex → storage_path` map so the caller can patch
+ * `plan_review_page_assets.vision_storage_path` on the matching manifest
+ * rows. Best-effort: if rasterization or upload fails for any page, that
+ * page is simply skipped (the AI falls back to the 96 DPI display asset).
+ */
+export async function rasterizeAndUploadVisionPages(
+  reviewId: string,
+  files: Array<{ name: string; file: File; storagePath: string; pageCount: number }>,
+  uploadFn: (path: string, blob: Blob) => Promise<{ error: { message: string } | null }>,
+  opts: { startGlobalIndex?: number; dpi?: number; quality?: number } = {},
+): Promise<Map<number, string>> {
+  const dpi = opts.dpi ?? 150;
+  const quality = opts.quality ?? 0.85;
+  let nextGlobalPageIndex = opts.startGlobalIndex ?? 0;
+  const out = new Map<number, string>();
+
+  for (const uf of files) {
+    const isPdf = uf.file.type === "application/pdf" || uf.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf) continue;
+    let pages: Array<{ pageIndex: number; blob: Blob }> = [];
+    try {
+      pages = await renderPDFPagesToJpegs(uf.file, uf.pageCount, dpi, quality);
+    } catch {
+      nextGlobalPageIndex += uf.pageCount;
+      continue;
+    }
+    for (const page of pages) {
+      const baseName = uf.name.replace(/\.pdf$/i, "");
+      const pagePath = `plan-reviews/${reviewId}/pages-vision/${baseName}/p-${String(page.pageIndex).padStart(3, "0")}.jpg`;
+      const { error } = await uploadFn(pagePath, page.blob);
+      if (!error) out.set(nextGlobalPageIndex, pagePath);
+      nextGlobalPageIndex += 1;
+    }
+  }
+  return out;
 }
 
 /**
