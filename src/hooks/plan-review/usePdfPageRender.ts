@@ -182,9 +182,6 @@ export function usePdfPageRender() {
     pageImages,
     phase,
     totalPages,
-    /** Kept for backward compatibility with callers reading the cap-info banner.
-     *  Always returns null now (no cap). */
-    pageCapInfo: null as { total: number; rendered: number } | null,
     renderingPages,
     renderProgress,
     renderDocumentPages,

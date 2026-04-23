@@ -349,7 +349,7 @@ async function readSignedManifest(
 ): Promise<Array<{ file_path: string; signed_url: string }> | null> {
   const { data: rows } = await admin
     .from("plan_review_page_assets")
-    .select("page_index, storage_path, status")
+    .select("page_index, storage_path, status, cached_signed_url, cached_until")
     .eq("plan_review_id", planReviewId)
     .eq("status", "ready")
     .order("page_index", { ascending: true });
@@ -357,15 +357,50 @@ async function readSignedManifest(
     page_index: number;
     storage_path: string;
     status: string;
+    cached_signed_url: string | null;
+    cached_until: string | null;
   }>;
   if (ready.length === 0) return null;
+
+  // Reuse cached signed URLs that still have ≥10 minutes of life so 5 stages
+  // on a 78-page review aren't 5 × 78 fresh signed-URL calls.
+  const SIGN_TTL_SECONDS = 6 * 60 * 60; // 6h
+  const REUSE_MIN_REMAINING_MS = 10 * 60 * 1000; // 10 min
+  const nowMs = Date.now();
   const out: Array<{ file_path: string; signed_url: string }> = [];
+  const refreshed: Array<{ id?: never; storage_path: string; signed_url: string; expires_at: string }> = [];
+
   for (const r of ready) {
+    const expiresMs = r.cached_until ? new Date(r.cached_until).getTime() : 0;
+    if (r.cached_signed_url && expiresMs - nowMs > REUSE_MIN_REMAINING_MS) {
+      out.push({ file_path: r.storage_path, signed_url: r.cached_signed_url });
+      continue;
+    }
     const { data: signed } = await admin.storage
       .from("documents")
-      .createSignedUrl(r.storage_path, 60 * 60);
-    if (signed) out.push({ file_path: r.storage_path, signed_url: signed.signedUrl });
+      .createSignedUrl(r.storage_path, SIGN_TTL_SECONDS);
+    if (signed) {
+      out.push({ file_path: r.storage_path, signed_url: signed.signedUrl });
+      refreshed.push({
+        storage_path: r.storage_path,
+        signed_url: signed.signedUrl,
+        expires_at: new Date(nowMs + SIGN_TTL_SECONDS * 1000).toISOString(),
+      });
+    }
   }
+
+  // Best-effort batch update of the cache columns. Errors here are not fatal
+  // — worst case the next stage signs fresh URLs again.
+  if (refreshed.length > 0) {
+    for (const f of refreshed) {
+      await admin
+        .from("plan_review_page_assets")
+        .update({ cached_signed_url: f.signed_url, cached_until: f.expires_at })
+        .eq("plan_review_id", planReviewId)
+        .eq("storage_path", f.storage_path);
+    }
+  }
+
   return out;
 }
 
@@ -669,6 +704,9 @@ const SHEET_MAP_SCHEMA = {
             sheet_title: { type: "string" },
             discipline: {
               type: "string",
+              // "Other" removed: sheet_map already coerces unknowns to
+              // "General", and giving the model two synonyms produced
+              // inconsistent labels.
               enum: [
                 "General",
                 "Architectural",
@@ -680,7 +718,6 @@ const SHEET_MAP_SCHEMA = {
                 "Landscape",
                 "Life Safety",
                 "Fire Protection",
-                "Other",
               ],
             },
           },
@@ -1053,18 +1090,23 @@ function evaluateDnaHealth(
   const jurisdictionMismatch =
     !!dnaCounty && !!projCounty && dnaCounty !== projCounty;
 
+  // HARD-required fields. If any of these are missing the pipeline halts —
+  // running discipline review with the wrong county / occupancy / code
+  // edition produces wrong code citations on every finding.
+  const HARD_REQUIRED = ["county", "occupancy_classification", "fbc_edition"] as const;
+  const hardMissing = HARD_REQUIRED.filter((f) => criticalMissing.includes(f));
+
   let blocking = false;
   let block_reason: string | null = null;
-  if (criticalMissing.includes("county")) {
+  if (hardMissing.length > 0) {
     blocking = true;
-    block_reason = "County missing from extracted DNA — cannot apply jurisdiction-specific code.";
+    block_reason = `Required DNA fields missing: ${hardMissing.join(", ")}. Reviewer must fill these in before the AI can run.`;
   } else if (jurisdictionMismatch) {
     blocking = true;
     block_reason = `Extracted county (${dna.county}) does not match project county (${projectCounty}) — wrong code edition would be applied.`;
-  } else if (completeness < 0.5) {
-    blocking = true;
-    block_reason = `Only ${Math.round(completeness * 100)}% of critical DNA fields populated — findings would be unreliable.`;
   }
+  // 50% completeness rule was demoted to a soft signal — surfaced in the
+  // dashboard via critical_missing[] but no longer blocks the pipeline.
 
   return {
     completeness,
@@ -1182,16 +1224,36 @@ async function stageDisciplineReview(
   const failed: string[] = [];
   let totalFindings = 0;
 
-  // Per-discipline cap: keep payload + memory bounded. Within a discipline
-  // we still chunk into batches of DISCIPLINE_BATCH so all sheets get reviewed.
+  // Per-discipline budget. The DISCIPLINE_BATCH keeps each AI call's payload
+  // bounded; the ceiling is a safety stop only (real protection lives in the
+  // chunk-count cap below, which guards token/cost runaway on freak sets).
   const DISCIPLINE_BATCH = 8;
-  const MAX_SHEETS_PER_DISCIPLINE = 40;
+  const MAX_SHEETS_PER_DISCIPLINE = 200; // ≈ 25 chunks at 8 sheets/chunk
+  const MAX_CHUNKS_PER_DISCIPLINE = 18;  // hard time-bound: ~18 AI calls per discipline
 
   // Track coverage so we can persist a truthful review_coverage row.
   const byDiscipline: Record<string, { reviewed: number; total: number }> = {};
   let cappedAt: number | null = null;
 
+  // Per-chunk cancellation: if the user clicks Cancel mid-discipline_review
+  // we should NOT keep firing the next 9 AI calls. Reuse the same field the
+  // dispatcher reads.
+  const checkCancelled = async (): Promise<boolean> => {
+    const { data } = await admin
+      .from("plan_reviews")
+      .select("ai_run_progress")
+      .eq("id", planReviewId)
+      .maybeSingle();
+    const progress =
+      (data as { ai_run_progress?: Record<string, unknown> | null } | null)
+        ?.ai_run_progress ?? {};
+    return typeof progress.cancelled_at === "string" && progress.cancelled_at.length > 0;
+  };
+
+  let cancelledMidRun = false;
+
   for (const discipline of disciplinesToRun) {
+    if (cancelledMidRun) break;
     try {
       const disciplineSheets = routed.filter((s) => s.discipline === discipline);
       const allUrls = disciplineSheets
@@ -1211,7 +1273,26 @@ async function stageDisciplineReview(
       // Chunk by DISCIPLINE_BATCH so a 74-sheet Architectural set runs ~10
       // calls instead of 1 oversized call that the model can't handle.
       let disciplineFindings = 0;
+      let chunksRun = 0;
+      let lastReviewedSheets = 0;
+      const totalChunks = Math.ceil(cappedUrls.length / DISCIPLINE_BATCH);
       for (let cs = 0; cs < cappedUrls.length; cs += DISCIPLINE_BATCH) {
+        if (await checkCancelled()) {
+          cancelledMidRun = true;
+          break;
+        }
+        if (chunksRun >= MAX_CHUNKS_PER_DISCIPLINE) {
+          cappedAt = lastReviewedSheets;
+          await recordPipelineError(admin, {
+            planReviewId,
+            firmId,
+            stage: "discipline_review",
+            errorClass: "chunk_ceiling",
+            errorMessage: `${discipline}: stopped after ${chunksRun} chunks (~${lastReviewedSheets} sheets) to bound runtime.`,
+            metadata: { discipline, chunks_run: chunksRun, sheets_total: cappedUrls.length },
+          });
+          break;
+        }
         const chunkUrls = cappedUrls.slice(cs, cs + DISCIPLINE_BATCH);
         const chunkSheets = disciplineSheets.slice(cs, cs + DISCIPLINE_BATCH);
         const inserted = await runDisciplineChecks(admin, planReviewId, firmId, {
@@ -1224,9 +1305,20 @@ async function stageDisciplineReview(
           useType,
         });
         disciplineFindings += inserted;
+        chunksRun++;
+        lastReviewedSheets = cs + chunkSheets.length;
+        // Per-chunk audit row so the dashboard error tab shows progress.
+        await recordPipelineError(admin, {
+          planReviewId,
+          firmId,
+          stage: "discipline_review",
+          errorClass: "chunk_summary",
+          errorMessage: `${discipline}: chunk ${chunksRun}/${totalChunks} → ${inserted} finding${inserted === 1 ? "" : "s"} (sheets ${cs + 1}-${lastReviewedSheets}).`,
+          metadata: { discipline, chunk: chunksRun, total_chunks: totalChunks, findings: inserted },
+        });
       }
       totalFindings += disciplineFindings;
-      byDiscipline[discipline].reviewed = cappedUrls.length;
+      byDiscipline[discipline].reviewed = lastReviewedSheets;
     } catch (err) {
       console.error(`[discipline_review:${discipline}] failed:`, err);
       failed.push(discipline);
@@ -1244,6 +1336,30 @@ async function stageDisciplineReview(
         status: "open",
       });
     }
+  }
+
+  // If user cancelled mid-run, persist what we have and signal cancellation
+  // so the dispatcher's standard cancellation path runs.
+  if (cancelledMidRun) {
+    const partialTotal = Object.values(byDiscipline).reduce((s, v) => s + v.total, 0);
+    const partialReviewed = Object.values(byDiscipline).reduce((s, v) => s + v.reviewed, 0);
+    try {
+      await admin.from("review_coverage").upsert(
+        {
+          plan_review_id: planReviewId,
+          firm_id: firmId,
+          sheets_total: partialTotal,
+          sheets_reviewed: partialReviewed,
+          by_discipline: byDiscipline,
+          capped_at: cappedAt,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "plan_review_id" },
+      );
+    } catch (err) {
+      console.error("[discipline_review] failed to persist partial review_coverage:", err);
+    }
+    throw new Error("Cancelled by user");
   }
 
   // Persist truthful coverage so the workspace chip can show e.g. 78/78.
@@ -1486,20 +1602,37 @@ async function runDisciplineChecks(
   const findings = result?.findings ?? [];
   if (findings.length === 0) return 0;
 
-  // Find next available DEF number for this discipline within the review.
-  const { count: existingCount } = await admin
+  // Resolve the active prompt_version_id for this discipline so each finding
+  // is stamped with the prompt that produced it. Cached per worker so we
+  // don't refetch for every chunk in the same invocation.
+  const promptVersionId = await getActivePromptVersionId(admin, ctx.discipline);
+
+  // Compute the next def_number using MAX of existing rows for this
+  // (plan_review, discipline) pair. Combined with the unique index on
+  // (plan_review_id, def_number) and the upsert below, this keeps retries
+  // idempotent: the second attempt will either reuse the same numbers (no-op)
+  // or pick up where the first attempt left off.
+  const prefix = `DEF-${ctx.discipline.slice(0, 1).toUpperCase()}`;
+  const { data: existingRows } = await admin
     .from("deficiencies_v2")
-    .select("id", { count: "exact", head: true })
+    .select("def_number")
     .eq("plan_review_id", planReviewId)
-    .eq("discipline", ctx.discipline);
-  const baseIdx = (existingCount ?? 0) + 1;
+    .eq("discipline", ctx.discipline)
+    .like("def_number", `${prefix}%`);
+  let maxIdx = 0;
+  for (const r of (existingRows ?? []) as Array<{ def_number: string }>) {
+    const m = r.def_number?.match(/(\d+)$/);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (!isNaN(n) && n > maxIdx) maxIdx = n;
+    }
+  }
+  const baseIdx = maxIdx + 1;
 
   const rows = findings.map((f, i) => ({
     plan_review_id: planReviewId,
     firm_id: firmId,
-    def_number: `DEF-${ctx.discipline.slice(0, 1).toUpperCase()}${String(
-      baseIdx + i,
-    ).padStart(3, "0")}`,
+    def_number: `${prefix}${String(baseIdx + i).padStart(3, "0")}`,
     discipline: ctx.discipline,
     sheet_refs: f.sheet_refs ?? [],
     code_reference: f.code_section
@@ -1518,12 +1651,41 @@ async function runDisciplineChecks(
     confidence_score: Math.max(0, Math.min(1, f.confidence_score ?? 0.5)),
     confidence_basis: f.confidence_basis ?? "Vision-extracted",
     model_version: "google/gemini-2.5-flash",
+    prompt_version_id: promptVersionId,
     status: "open",
   }));
 
-  const { error } = await admin.from("deficiencies_v2").insert(rows);
+  // Idempotent insert: if a retry races us and inserts the same def_number,
+  // the unique index makes the duplicate a no-op instead of erroring out.
+  const { error } = await admin
+    .from("deficiencies_v2")
+    .upsert(rows, { onConflict: "plan_review_id,def_number", ignoreDuplicates: true });
   if (error) throw error;
   return rows.length;
+}
+
+// ---------- prompt versioning helpers ----------
+
+const _promptVersionCache = new Map<string, string | null>();
+
+async function getActivePromptVersionId(
+  admin: ReturnType<typeof createClient>,
+  promptKey: string,
+): Promise<string | null> {
+  if (_promptVersionCache.has(promptKey)) {
+    return _promptVersionCache.get(promptKey) ?? null;
+  }
+  const { data } = await admin
+    .from("prompt_versions")
+    .select("id")
+    .eq("prompt_key", promptKey)
+    .eq("is_active", true)
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const id = (data as { id?: string } | null)?.id ?? null;
+  _promptVersionCache.set(promptKey, id);
+  return id;
 }
 
 interface DuplicateGroup {
@@ -1678,15 +1840,38 @@ async function runCrossSheetConsistency(
   }>;
   if (allSheets.length < 2 || signedUrls.length < 2) return [];
 
-  // Cap at 8 sheets to keep the call within model limits / cost. Prefer sheets
-  // that are most likely to have cross-sheet relationships.
+  // Cap at 8 sheets to keep the call within model limits / cost. Pick by
+  // round-robin across discipline prefixes so a single-discipline-heavy set
+  // (e.g. 74 A-sheets, 0 S/M/E) doesn't fill all 8 slots with one discipline
+  // — the entire point of the cross-sheet pass is to find conflicts BETWEEN
+  // disciplines, so an A-only payload wastes the call.
   const PRIORITY_PREFIXES = ["A", "S", "M", "P", "E", "F", "L", "G"];
-  const ranked = [...allSheets].sort((a, b) => {
-    const ai = PRIORITY_PREFIXES.indexOf(a.sheet_ref.trim().toUpperCase()[0] ?? "Z");
-    const bi = PRIORITY_PREFIXES.indexOf(b.sheet_ref.trim().toUpperCase()[0] ?? "Z");
-    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-  });
-  const selected = ranked.slice(0, 8);
+  const buckets = new Map<string, typeof allSheets>();
+  for (const s of allSheets) {
+    const k = s.sheet_ref.trim().toUpperCase()[0] ?? "Z";
+    if (!buckets.has(k)) buckets.set(k, []);
+    buckets.get(k)!.push(s);
+  }
+  const selected: typeof allSheets = [];
+  for (let pass = 0; pass < 4 && selected.length < 8; pass++) {
+    for (const k of PRIORITY_PREFIXES) {
+      if (selected.length >= 8) break;
+      const b = buckets.get(k);
+      if (b && b[pass]) selected.push(b[pass]);
+    }
+  }
+  // If priority prefixes didn't fill 8 slots (unlabelled sheets only),
+  // top up from whatever else is in the buckets.
+  if (selected.length < 8) {
+    for (const [k, b] of buckets) {
+      if (PRIORITY_PREFIXES.includes(k)) continue;
+      for (const s of b) {
+        if (selected.length >= 8) break;
+        selected.push(s);
+      }
+      if (selected.length >= 8) break;
+    }
+  }
   const imageUrls = selected
     .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
     .filter(Boolean) as string[];
@@ -2342,10 +2527,12 @@ async function stageVerify(
   for (let start = 0; start < targets.length; start += BATCH) {
     const slice = targets.slice(start, start + BATCH);
 
-    // Aggregate page indices across the batch (capped to keep payload tight).
+    // Aggregate page indices across the batch. Cap at 8 (matches
+    // DISCIPLINE_BATCH payload size) so multi-sheet findings cited on 4-6
+    // sheets aren't silently truncated to the first 5.
     const pageSet = new Set<number>();
     for (const t of slice) for (const p of t.page_indices) pageSet.add(p);
-    const pages = Array.from(pageSet).slice(0, 5);
+    const pages = Array.from(pageSet).slice(0, Math.min(8, pageSet.size));
     const imageUrls = pages
       .map((p) => signed[p]?.signed_url)
       .filter(Boolean) as string[];
@@ -2889,19 +3076,39 @@ async function stageGroundCitations(
         );
         const aiBlob = `${def.finding} ${def.required_action}`;
         score = citationOverlapScore(aiBlob, hit.requirement_text);
-        status = score >= 0.18 ? "verified" : "mismatch";
+        // Tightened from 0.18 → 0.30: at 0.18 a finding only needed to share
+        // ~3 common words with the canonical text to "verify". Plus require
+        // that the AI text actually mentions the section number — otherwise
+        // the model is parroting a vaguely related code section.
+        const aiBlobLc = aiBlob.toLowerCase();
+        const sectionLc = hit.section.toLowerCase();
+        const mentionsSection = aiBlobLc.includes(sectionLc);
+        status = score >= 0.30 && mentionsSection ? "verified" : "mismatch";
       }
     }
     counts[status]++;
 
+    // For mismatch / not_found / hallucinated: route to human review so the
+    // reviewer sees the AI quoted a citation it couldn't substantiate.
+    const needsHumanReview = status !== "verified";
+    const update: Record<string, unknown> = {
+      citation_status: status,
+      citation_match_score: score,
+      citation_canonical_text: canonText,
+      citation_grounded_at: now,
+    };
+    if (needsHumanReview) {
+      update.requires_human_review = true;
+      update.human_review_reason =
+        status === "mismatch"
+          ? `Citation ${def.code_reference?.section ?? "?"} doesn't match the canonical FBC text — verify the section is correct.`
+          : status === "not_found"
+            ? `Citation ${def.code_reference?.section ?? "?"} not found in the FBC reference — verify the section number.`
+            : `No FBC section parseable from this finding — add or correct the citation.`;
+    }
     const { error: updErr } = await admin
       .from("deficiencies_v2")
-      .update({
-        citation_status: status,
-        citation_match_score: score,
-        citation_canonical_text: canonText,
-        citation_grounded_at: now,
-      })
+      .update(update)
       .eq("id", def.id);
     if (updErr) console.error("[ground_citations] update failed", def.id, updErr);
   }

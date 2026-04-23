@@ -340,111 +340,21 @@ export async function rasterizeAndUploadPagesResilient(
   return { succeeded, failures };
 }
 
-/**
- * Render a single PDF file at higher DPI for AI vision analysis.
- * Returns base64 PNGs only (display variant in renderPDFPagesToImages stays at 150 DPI).
- * 220 DPI gives the model meaningfully more pixel detail to localize against
- * without blowing up memory the way 300 DPI would.
- */
-export async function renderPDFPagesForVision(
-  file: File,
-  maxPages = 10,
-  dpi = 220
-): Promise<string[]> {
-  const images = await renderPDFPagesToImages(file, maxPages, dpi);
-  return images.map((img) => img.base64);
-}
+// renderPDFPagesForVision removed — superseded by browser-side resilient
+// rasterization in rasterizeAndUploadPagesResilient (used by uploadPlanReviewFiles
+// and reprepareInBrowser). The 10-page cap baked into this helper was already
+// blocking every plan review > 10 pages, and it had no remaining callers.
 
 /** Letters used for grid rows (top → bottom). Matches schema cell strings like "H7". */
 const GRID_ROW_LETTERS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"] as const;
 
-/**
- * Overlay a faint 10×10 percent grid on a base64 PNG. Each cell is labelled with
- * "<rowLetter><colDigit>" (e.g. "H7" = row 8 from top, column 8 from left).
- * Cell H7 corresponds to the image region x=70-80%, y=70-80%.
- *
- * The model is instructed to return a `grid_cell` per finding, which we use as
- * the primary anchor (the raw x/y is only a refinement within that cell).
- */
-async function overlayGridOnBase64(
-  base64: string,
-  opts: { lineColor?: string; labelColor?: string; labelBg?: string } = {}
-): Promise<string> {
-  const lineColor = opts.lineColor ?? "rgba(220,38,38,0.28)"; // faint red
-  const labelColor = opts.labelColor ?? "rgba(220,38,38,0.95)";
-  const labelBg = opts.labelBg ?? "rgba(255,255,255,0.85)";
+// overlayGridOnBase64 removed — only used by the deleted
+// renderPDFPagesForVisionWithGrid path. Pin placement still uses
+// gridCellToCenter() below for grid-cell → percent conversion.
 
-  const img = new Image();
-  await new Promise<void>((resolve, reject) => {
-    img.onload = () => resolve();
-    img.onerror = () => reject(new Error("Failed to load page image for grid overlay"));
-    img.src = base64;
-  });
-
-  const canvas = document.createElement("canvas");
-  canvas.width = img.naturalWidth;
-  canvas.height = img.naturalHeight;
-  const ctx = canvas.getContext("2d")!;
-  ctx.drawImage(img, 0, 0);
-
-  const w = canvas.width;
-  const h = canvas.height;
-  const cellW = w / 10;
-  const cellH = h / 10;
-
-  // Grid lines
-  ctx.strokeStyle = lineColor;
-  ctx.lineWidth = Math.max(1, Math.round(Math.min(w, h) / 1500));
-  ctx.beginPath();
-  for (let i = 1; i < 10; i++) {
-    const x = Math.round(i * cellW);
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, h);
-    const y = Math.round(i * cellH);
-    ctx.moveTo(0, y);
-    ctx.lineTo(w, y);
-  }
-  ctx.stroke();
-
-  // Labels — small, in the top-left corner of each cell, with white halo for readability
-  const fontPx = Math.max(14, Math.round(Math.min(cellW, cellH) * 0.18));
-  ctx.font = `600 ${fontPx}px ui-sans-serif, system-ui, -apple-system, "IBM Plex Sans", sans-serif`;
-  ctx.textBaseline = "top";
-  for (let row = 0; row < 10; row++) {
-    for (let col = 0; col < 10; col++) {
-      const label = `${GRID_ROW_LETTERS[row]}${col}`;
-      const x = col * cellW + 4;
-      const y = row * cellH + 2;
-      const metrics = ctx.measureText(label);
-      const padX = 3;
-      const padY = 1;
-      ctx.fillStyle = labelBg;
-      ctx.fillRect(x - padX, y - padY, metrics.width + padX * 2, fontPx + padY * 2);
-      ctx.fillStyle = labelColor;
-      ctx.fillText(label, x, y);
-    }
-  }
-
-  return canvas.toDataURL("image/png");
-}
-
-/**
- * Render PDF pages at vision DPI AND overlay a 10×10 labelled grid on each page.
- * The model uses the visible labels (e.g. "H7") to anchor each finding to a
- * known coordinate cell, so the worst-case pin error is bounded to one cell (~10%).
- */
-export async function renderPDFPagesForVisionWithGrid(
-  file: File,
-  maxPages = 10,
-  dpi = 220
-): Promise<string[]> {
-  const images = await renderPDFPagesToImages(file, maxPages, dpi);
-  const out: string[] = [];
-  for (const img of images) {
-    out.push(await overlayGridOnBase64(img.base64));
-  }
-  return out;
-}
+// renderPDFPagesForVisionWithGrid removed — same reason as renderPDFPagesForVision
+// above. The grid-overlay path was only used by the long-deleted server-side
+// rasterizer; vision pages are now uploaded as plain rasterized JPEGs.
 
 /**
  * Convert a grid cell label like "H7" to percent center coords (0-100).
