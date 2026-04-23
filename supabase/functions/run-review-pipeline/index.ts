@@ -3208,6 +3208,10 @@ Deno.serve(async (req) => {
     const plan_review_id = body?.plan_review_id;
     const requestedStage: Stage | undefined = body?.stage;
     const startFrom: Stage | undefined = body?.start_from;
+    const rawMode = typeof body?.mode === "string" ? body.mode : "core";
+    const mode: PipelineMode =
+      rawMode === "deep" || rawMode === "full" ? rawMode : "core";
+    const activeChain = stagesForMode(mode);
     const targetSource: string | null =
       typeof body?.target_source === "string" && body.target_source.length > 0
         ? body.target_source
