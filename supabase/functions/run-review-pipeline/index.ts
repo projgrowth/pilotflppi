@@ -9,7 +9,7 @@ import { createClient as _createClient } from "https://esm.sh/@supabase/supabase
 // MuPDF.js (WASM) — used to rasterize uploaded PDFs into per-page PNGs so
 // Gemini vision can consume them. Gemini's image_url field rejects raw PDF
 // URLs ("Unsupported image format"), so this conversion is mandatory.
-import * as mupdf from "https://esm.sh/mupdf@1.3.0";
+import * as mupdf from "npm:mupdf@1.3.0";
 import { composeDisciplineSystemPrompt } from "./discipline-experts.ts";
 
 // Untyped client wrapper — the edge function does not have access to generated
@@ -253,18 +253,21 @@ function disciplineForSheetFallback(sheetRef: string): string | null {
 const RASTER_SCALE = 2.083; // ~150 DPI
 const MAX_PAGES_PER_PDF = 200;
 
-async function rasterizePdf(pdfBytes: Uint8Array): Promise<Uint8Array[]> {
+async function rasterizePdfStreaming(
+  pdfBytes: Uint8Array,
+  onPage: (pageIndex: number, pngBytes: Uint8Array) => Promise<void>,
+): Promise<number> {
   const doc = mupdf.Document.openDocument(pdfBytes, "application/pdf");
   try {
     const pageCount = Math.min(doc.countPages(), MAX_PAGES_PER_PDF);
     const matrix = mupdf.Matrix.scale(RASTER_SCALE, RASTER_SCALE);
-    const pngs: Uint8Array[] = [];
     for (let i = 0; i < pageCount; i++) {
       const page = doc.loadPage(i);
       try {
         const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false);
         try {
-          pngs.push(pixmap.asPNG());
+          const png = pixmap.asPNG();
+          await onPage(i, png);
         } finally {
           pixmap.destroy();
         }
@@ -272,7 +275,7 @@ async function rasterizePdf(pdfBytes: Uint8Array): Promise<Uint8Array[]> {
         page.destroy();
       }
     }
-    return pngs;
+    return pageCount;
   } finally {
     doc.destroy();
   }
@@ -340,30 +343,28 @@ async function signedSheetUrls(
       }
       const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer());
 
-      let pngPages: Uint8Array[];
+      const uploaded: string[] = [];
       try {
-        pngPages = await rasterizePdf(pdfBytes);
+        await rasterizePdfStreaming(pdfBytes, async (i, pngBytes) => {
+          const pageName = `p-${String(i).padStart(3, "0")}.png`;
+          const fullPath = `${pagesDir}/${pageName}`;
+          const { error: upErr } = await admin.storage
+            .from("documents")
+            .upload(fullPath, pngBytes, {
+              contentType: "image/png",
+              upsert: true,
+            });
+          if (upErr) {
+            console.error(`[rasterize] upload failed for ${fullPath}:`, upErr);
+            return;
+          }
+          uploaded.push(fullPath);
+        });
       } catch (err) {
         console.error(`[rasterize] mupdf failed for ${filePath}:`, err);
         continue;
       }
-
-      const uploaded: string[] = [];
-      for (let i = 0; i < pngPages.length; i++) {
-        const pageName = `p-${String(i).padStart(3, "0")}.png`;
-        const fullPath = `${pagesDir}/${pageName}`;
-        const { error: upErr } = await admin.storage
-          .from("documents")
-          .upload(fullPath, pngPages[i], {
-            contentType: "image/png",
-            upsert: true,
-          });
-        if (upErr) {
-          console.error(`[rasterize] upload failed for ${fullPath}:`, upErr);
-          continue;
-        }
-        uploaded.push(fullPath);
-      }
+      uploaded.sort();
       pagePaths = uploaded;
     }
 
