@@ -1572,6 +1572,17 @@ async function stageDisciplineReview(
     console.error("[discipline_review] failed to persist review_coverage:", err);
   }
 
+  // Stage finished cleanly — clear discipline checkpoints so a future re-run
+  // (e.g., a manual rerun after reviewer disposition) starts fresh.
+  if (Object.keys(disciplineCheckpoints).length > 0) {
+    const cleared = { ...allCheckpoints };
+    delete (cleared as Record<string, unknown>).discipline_review;
+    await admin
+      .from("plan_reviews")
+      .update({ stage_checkpoints: cleared })
+      .eq("id", planReviewId);
+  }
+
   // LOW_YIELD guard: a multi-page review that produced 0 findings is almost
   // certainly a bad rasterize → empty DNA → AI saw nothing pattern. Refuse to
   // mark complete; surface as needs_human_review for manual disposition.
