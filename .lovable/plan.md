@@ -1,171 +1,100 @@
 
 
-# Plan-Review precision & reliability — round 4
+# Items #7, #8, #10 — Auto-recovery, gap re-rasterize, round-2 diff
 
-I traced the live code + the Porsche review's actual run. Here's the truth and what to do about it.
+Three independent reliability/efficiency wins. None of them affect AI prompts or the dashboard layout.
 
-## What the data says
+## 1. Auto-recover stuck reviews (#7)
 
-```text
-Porsche review 85919248
-  pages rasterized      : 78/78  ✅
-  sheets mapped         : 78 (74 Architectural, 4 General)  ✅
-  Architectural reviewed: 40/74  ❌  (capped, MAX_SHEETS_PER_DISCIPLINE = 40)
-  total findings        : 20    (all Architectural)
-  ai_check_status       : complete
-```
-
-The 78-page banner and rasterizer are fixed — the *cap* is what's still chopping the review. And several "completed" items from prior turns never landed in code. Here are the precise gaps and fixes.
-
-## 1. Lift `MAX_SHEETS_PER_DISCIPLINE` and make it adaptive
-
-**Bug**: `index.ts:1188` still hard-caps a discipline at 40 sheets. Porsche has 74 architectural sheets; 34 were never seen by the AI. The chunking already keeps payloads small (8 sheets/call) — there's no model-size reason to cap at 40.
+**Problem**: 7 reviews are sitting at `ai_check_status = 'pending'` with the oldest from April 16 — no error, no progress, just abandoned. Today these block the user from re-running the pipeline because the dispatcher won't restart a non-failed review.
 
 **Fix**:
-- Raise the ceiling to `MAX_SHEETS_PER_DISCIPLINE = 200` (covers any realistic plan set; 25 chunks × 8 = bounded).
-- Add a per-chunk timeout safety: if a single discipline exceeds 18 chunks (~150 sheets), break and write a `capped_at` note. Real protection lives in time, not sheet count.
-- Add structured per-chunk logging to `pipeline_error_log` (`stage: 'discipline_review'`, `error_class: 'chunk_summary'`) so we can see "chunk 1 of 10 → 3 findings" in dashboard error tab and prove every chunk actually ran.
+- New edge function **`reconcile-stuck-reviews`** (cron-triggered, every 5 min):
+  - Find reviews where `ai_check_status IN ('pending','running')` and `updated_at < now() - interval '15 minutes'`.
+  - For each: log a `pipeline_error_log` row (`stage='dispatch'`, `error_class='stuck_no_progress'`, metadata = last known stage + minutes idle).
+  - If `retry_count < 1` (read from the new metadata): flip `ai_check_status='pending'`, clear `cancelled_at` from `ai_run_progress`, and call `startPipeline()` to retry once.
+  - If already retried once: flip to `ai_check_status='failed'` with a clear reason in `ai_run_progress.failure_reason`. The dashboard already surfaces failed reviews.
+- Schedule it with `pg_cron` + `pg_net` (extensions exist already per project setup).
+- Add a small `<StuckRecoveryBanner />` on `PlanReviewDetail` that appears when `ai_run_progress.auto_recovered_at` is set, telling the user "we noticed this stalled and resumed it".
 
-## 2. Adversarial DNA gate — actually wire the previous turn's claim
+## 2. Gap-only re-rasterize (#8)
 
-**Bug**: A prior turn claimed it switched to a hard required-fields gate. The current code (`evaluateDnaHealth`, lines 1019-1075) still uses the old 50%-completeness rule and only blocks on `county`. Occupancy or FBC edition can be null and the pipeline runs anyway, producing wrong code citations.
+**Problem**: `reprepareInBrowser` today **deletes the entire `plan_review_page_assets` manifest** and re-renders all pages, even if only 1 of 78 actually failed. On a 78-page set that's 5 minutes of re-work for a 4-second problem.
 
-**Fix** (real this time):
-```ts
-const HARD_REQUIRED = ["county", "occupancy_classification", "fbc_edition"];
-const hardMissing = HARD_REQUIRED.filter((f) => criticalMissing.includes(f));
-if (hardMissing.length > 0) {
-  blocking = true;
-  block_reason = `Required DNA fields missing: ${hardMissing.join(", ")}.`;
-}
-```
-Keep the 50% rule as a soft warning surfaced in the dashboard, not a blocker. Use-type ("residential" vs "commercial") gets the same hard-required treatment because it routes the entire FBC vs FBCR prompt path.
+**Fix**: Add a **gap-detection mode** to `reprepareInBrowser`:
+1. Read `plan_reviews.ai_run_progress.expected_pages` (already populated by upload) and the current `plan_review_page_assets` rows.
+2. Compute `missingIndices = expectedRange \ existingPageIndices`.
+3. If `missingIndices.length === 0`: no-op, just kick the pipeline. If all pages missing: full re-rasterize (today's behavior).
+4. If partial: rasterize **only** the missing page indices using a new `rasterizePagesByIndex(file, indices, dpi)` helper added to `pdf-utils.ts` (uses pdf.js `getPage(i)` for each gap, doesn't render the rest).
+5. **Insert** (not delete-then-insert) the new manifest rows. The unique index from the last migration on `(plan_review_id, page_index)` (we'll add it) prevents collisions.
 
-## 3. Tighter citation grounding (also previously claimed, never landed)
+UI:
+- New `ReviewHealthStrip` chip "**77/78 pages ready**" with click → "Repair missing page" runs gap-only re-rasterize. Replaces the current toast-only error path.
+- Toast on success: "Repaired 1 of 78 pages" instead of "Re-prepared 78 pages".
 
-**Bug**: `citationOverlapScore` threshold at line 2892 is still `>= 0.18`. That's so loose a finding only needs to share three common words with the canonical text to "verify". Raises false confidence on every code-anchored finding.
+Migration:
+- `CREATE UNIQUE INDEX plan_review_page_assets_review_page_uniq ON plan_review_page_assets (plan_review_id, page_index);`
+- Dedupe any existing collisions first (none expected, but safe).
 
-**Fix**:
-- Threshold → `>= 0.30`.
-- Require that the AI text literally mentions the section number (`finding+required_action.toLowerCase().includes(hit.section.toLowerCase())`) before marking `verified` — otherwise mark `mismatch`.
-- For `mismatch`, set `requires_human_review = true` so reviewers see citations the AI quoted but didn't substantiate.
+## 3. Round-2 diff intelligence (#10)
 
-## 4. Prompt versioning — finish the loop
+**Problem**: When a resubmittal lands today (`round` increments), the pipeline runs from scratch on every page. We already have `previous_findings` populated and a `useRoundDiff` hook that detects unchanged sheets — but the **pipeline doesn't use that signal** to skip work.
 
-**State**: `prompt_versions` table exists, `deficiencies_v2.prompt_version_id` column + FK exist, but no insert path stamps it. Without this, every AI tweak is invisible to QA.
+**Fix** — three coordinated changes in `run-review-pipeline/index.ts`:
 
-**Fix**:
-- One-time seed: insert the current discipline-expert prompts as `prompt_versions` rows (one per discipline, status `active`).
-- `runDisciplineChecks`: at start, fetch `prompt_versions.id WHERE name = '<discipline>' AND status = 'active'` (cache in memory per worker).
-- Stamp `prompt_version_id` on each `deficiencies_v2` insert.
-- Surface the active version in the dashboard's project-DNA viewer so reviewers know which prompt round produced which finding.
+1. **New helper `computeChangedSheets(planReviewId, round)`** runs after `sheet_map`:
+   - Loads previous round's `sheet_map` snapshot from `plan_reviews.checklist_state.last_sheet_map` (we'll add this write at end of every successful run).
+   - Compares each new sheet's `sheet_ref + page_count + sha256(rasterized_jpeg)` against the prior snapshot.
+   - Returns `{unchanged: SheetRow[], changed: SheetRow[]}`.
 
-## 5. Idempotent finding inserts (race protection)
+2. **`stageDisciplineReview` on round ≥ 2**: only sends `changed` sheets to the AI. For each `unchanged` sheet, replay any prior round's findings against it as **carryover deficiencies** (status `open`, marked `metadata.carryover_from_round = N-1`). Reviewers see them in a separate "Carried over" filter chip.
 
-**Bug**: `runDisciplineChecks` computes `def_number` from a live `count()` then inserts. If two workers race (chunk retry + scheduled retry, common today because `NON_FATAL_RETRY_STAGES` retries 3×), we get duplicate `def_number`s. There's no unique constraint to stop it.
+3. **Letter generation**: split into "New this round" (changed sheets) + "Still open from round N-1" (carryover). Reviewers focus only on the new section.
 
-**Fix**:
-- Migration: `CREATE UNIQUE INDEX deficiencies_v2_review_def_uniq ON deficiencies_v2 (plan_review_id, def_number);`
-- In the insert path, switch to `.upsert(rows, { onConflict: "plan_review_id,def_number", ignoreDuplicates: true })`.
-- For the ID seed, switch from `count()` to `MAX(def_number)`-style next-id using a SELECT, scoped per `(plan_review_id, discipline)`, with a 3-attempt jitter retry on conflict.
+DB:
+- Add `metadata jsonb` column on `deficiencies_v2` (already exists? need to verify; if not, migration adds it).
+- Add `last_sheet_map jsonb` to `plan_reviews.checklist_state` write at end of `cross_check` stage. No schema change needed — it's part of existing JSONB.
 
-## 6. `stageVerify` page-image cap is still hard-coded to 5
-
-**Bug**: line 2348 — `Array.from(pageSet).slice(0, 5)`. Multi-sheet findings cited on 4-6 sheets get truncated. The previously claimed "derive from page_indices" change never shipped.
-
-**Fix**: replace `slice(0, 5)` with `slice(0, Math.min(8, pageSet.size))`. The 8-image ceiling matches `DISCIPLINE_BATCH` payload sizing; verification quality jumps for cross-sheet findings.
-
-## 7. Cross-sheet consistency — diversify selection
-
-**Bug**: `runCrossSheetConsistency` picks 8 sheets sorted by prefix `[A,S,M,P,E,F,L,G]`, so on Porsche (74 A's, 0 S/M/E) it sends 8 architectural sheets and never crosses disciplines. The whole point of cross-check is multi-discipline. Picks must round-robin by discipline.
-
-**Fix**:
-```ts
-// Group by discipline, then take up to 2 per discipline in priority order.
-const PRIORITY = ["A","S","M","P","E","F","L","G"];
-const buckets = new Map<string, typeof allSheets>();
-for (const s of allSheets) {
-  const k = s.sheet_ref.trim().toUpperCase()[0] ?? "Z";
-  if (!buckets.has(k)) buckets.set(k, []);
-  buckets.get(k)!.push(s);
-}
-const selected: typeof allSheets = [];
-for (let pass = 0; pass < 4 && selected.length < 8; pass++) {
-  for (const k of PRIORITY) {
-    if (selected.length >= 8) break;
-    const b = buckets.get(k);
-    if (b && b[pass]) selected.push(b[pass]);
-  }
-}
-```
-Result: 1 sheet per discipline first, then 2nd pass, etc. — guarantees real cross-discipline coverage when multiple disciplines exist, falls back gracefully on single-discipline sets.
-
-## 8. Per-chunk cancellation check
-
-**Bug**: cancellation is checked only between *stages*, not between *chunks within `discipline_review`*. A 10-chunk Architectural run keeps spending tokens for ~5 minutes after the user clicks Cancel.
-
-**Fix**: pass `isCancelled` into `stageDisciplineReview` (already in scope above) and check at the top of each `for (let cs = ...; cs += DISCIPLINE_BATCH)` iteration. On true: write a partial `review_coverage` row with current counts, throw a tagged `cancelled` error that the dispatcher already handles cleanly.
-
-## 9. Cache signed URLs in the DB
-
-**Bug**: every stage that needs page images calls `signedSheetUrls()` which signs all N URLs. The columns `cached_signed_url` and `cached_until` already exist on `plan_review_page_assets` (from a prior migration) but are never written or read. On a 78-page Porsche run, that's ~5 stages × 78 = 390 signed-URL calls when one set would do.
-
-**Fix**: in `readSignedManifest`, batch-update `cached_signed_url` + `cached_until = now() + 6h` when signing. On read: prefer cached URLs that are still valid; only re-sign expired rows.
-
-## 10. Surface partial-rasterize failures into the pipeline error log
-
-**Bug**: `rasterizeAndUploadPagesResilient` returns `failures[]` but `uploadPlanReviewFiles` only puts them in a toast. Once the user dismisses the toast there's no record. If 1 of 78 pages quietly failed, that finding can't be verified later because `signedUrls[idx]` is undefined.
-
-**Fix**:
-- Persist failures: write each `failures[]` entry as a `pipeline_error_log` row (`stage: 'upload'`, `error_class: 'rasterize_partial'`, metadata = `{file, page_index, reason}`).
-- On `prepare_pages`, if `page_assets count < expected_total` (`expected_total` = sum of `getPDFPageCount` per file, persisted into `plan_reviews.ai_run_progress.expected_pages` at upload time), throw `NEEDS_BROWSER_RASTERIZATION` like today — but with the missing page indices in the error message so the re-prepare flow only renders the gaps.
-
-## 11. Dead code sweep enabled by these changes
-
-```text
-DELETE
-  src/lib/pdf-utils.ts → renderPDFPagesForVision (10-page cap, no callers)
-  index.ts → references to removed MAX_DISCIPLINE_PAGES (already gone)
-  usePdfPageRender.ts → pageCapInfo property (always null, kept for "backward compat")
-EDIT
-  Drop SHEET_MAP_SCHEMA enum value "Other" — sheet_map already coerces to "General",
-  having both confuses the model and produces inconsistent labels.
-```
-
----
+UI:
+- `useRoundDiff` already exists; new `<RoundCarryoverPanel />` lists the carried-over findings on the workspace right panel as a collapsible group. New `FindingStatusFilter` chip "Carryover".
 
 ## Files changed
 
 ```text
-EDIT
-  supabase/functions/run-review-pipeline/index.ts
-    • MAX_SHEETS_PER_DISCIPLINE 40 → 200; per-chunk cancellation check
-    • evaluateDnaHealth: hard-block on county + occupancy + fbc_edition
-    • stageGroundCitations: threshold 0.18 → 0.30 + section-mention requirement
-    • runDisciplineChecks: stamp prompt_version_id; idempotent upsert
-    • stageVerify: page cap 5 → 8 (derived from pageSet.size)
-    • runCrossSheetConsistency: round-robin discipline selection
-    • readSignedManifest: persist + reuse cached_signed_url/cached_until
-  src/lib/plan-review-upload.ts
-    • Persist rasterize failures to pipeline_error_log
-    • Write expected_pages into ai_run_progress at upload time
-  src/hooks/plan-review/usePdfPageRender.ts
-    • Drop pageCapInfo (always null)
-
 CREATE
-  supabase/migrations/<ts>_def_unique_and_prompts.sql
-    • UNIQUE INDEX deficiencies_v2(plan_review_id, def_number)
-    • Seed prompt_versions rows for the 9 disciplines + cross-sheet + verify
+  supabase/functions/reconcile-stuck-reviews/index.ts
+  src/components/plan-review/StuckRecoveryBanner.tsx
+  src/components/plan-review/RoundCarryoverPanel.tsx
+  supabase/migrations/<ts>_page_asset_uniq_and_recovery.sql
+    • UNIQUE INDEX plan_review_page_assets_review_page_uniq
+    • pg_cron schedule for reconcile-stuck-reviews (every 5 min)
+
+EDIT
+  src/lib/reprepare-in-browser.ts
+    • Gap-detection mode: compute missing indices, render only those
+    • Insert (not delete) when partial; full replace only when 0 existing
+  src/lib/pdf-utils.ts
+    • New rasterizePagesByIndex(file, indices, dpi) helper
+  src/components/review-dashboard/ReviewHealthStrip.tsx
+    • New "X/Y pages ready" chip → click triggers gap repair
+  supabase/functions/run-review-pipeline/index.ts
+    • computeChangedSheets() helper
+    • stageDisciplineReview: skip unchanged sheets on round≥2, carryover prior findings
+    • End-of-run: write last_sheet_map into checklist_state
+    • Letter draft section split: New / Carried over
+  src/pages/PlanReviewDetail.tsx
+    • Mount RoundCarryoverPanel
+    • Mount StuckRecoveryBanner
+  src/hooks/plan-review/useFindingFilters.ts
+    • New "carryover" chip filter using metadata.carryover_from_round
 ```
 
-## Verification after edits
+## Verification
 
-- Re-run Porsche → `review_coverage.by_discipline.Architectural = {reviewed: 74, total: 74}`, capped_at = null.
-- Issue a duplicate `def_number` insert from a forced retry → upsert no-ops, no row dup.
-- Open a finding view → `prompt_version_id` populated, dashboard shows the active prompt name.
-- Force a missing-occupancy DNA → pipeline halts at `dna_extract` with clear `Required DNA fields missing` message instead of silently producing low-quality findings.
-- Click Cancel mid-discipline_review → next chunk doesn't fire, partial coverage row written.
-- Cross-sheet check on a multi-discipline set → log shows sheet selection includes A + S + M + E (not 8 A's).
+- Force-stale a `pending` review by touching `updated_at` 20 min back → cron run flips it to retry, second run flips to `failed` with `stuck_no_progress` reason.
+- Delete 1 page asset row from a completed review → health strip shows "77/78 pages ready", click → repair adds only that page (network shows 1 JPEG upload, not 78).
+- Submit a round-2 resubmittal where 2 of 74 architectural sheets changed → edge logs show `discipline_review` ran on 2 sheets, 72 carryover findings inserted, letter draft has separate "Carried over" section.
+- Existing reviews continue to work: round 1 is unaffected; reviews without `expected_pages` fall back to today's full-replace behavior.
 
-No additional UI changes; the existing CoverageChip already reads from `review_coverage`. No edge-function contract changes.
+No prompt changes, no auth changes, no breaking dashboard changes. Three additive features that compose cleanly with everything shipped in rounds 1-4.
 
