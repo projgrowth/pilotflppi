@@ -1339,43 +1339,10 @@ async function runDisciplineChecks(
     trigger_condition: string | null;
   }>;
 
-  const dnaSummary = ctx.dna
-    ? JSON.stringify(
-        {
-          occupancy: ctx.dna.occupancy_classification,
-          construction_type: ctx.dna.construction_type,
-          stories: ctx.dna.stories,
-          total_sq_ft: ctx.dna.total_sq_ft,
-          wind_speed_vult: ctx.dna.wind_speed_vult,
-          exposure_category: ctx.dna.exposure_category,
-          risk_category: ctx.dna.risk_category,
-          flood_zone: ctx.dna.flood_zone,
-          hvhz: ctx.dna.hvhz,
-          mixed_occupancy: ctx.dna.mixed_occupancy,
-          is_high_rise: ctx.dna.is_high_rise,
-          has_mezzanine: ctx.dna.has_mezzanine,
-          missing_fields: ctx.dna.missing_fields,
-        },
-        null,
-        2,
-      )
-    : "(not yet extracted)";
-
-  const jurSummary = ctx.jurisdiction
-    ? JSON.stringify(
-        {
-          county: ctx.jurisdiction.county,
-          fbc_edition: ctx.jurisdiction.fbc_edition,
-          hvhz: ctx.jurisdiction.hvhz,
-          coastal: ctx.jurisdiction.coastal,
-          flood_zone_critical: ctx.jurisdiction.flood_zone_critical,
-          high_volume: ctx.jurisdiction.high_volume,
-          notes: ctx.jurisdiction.notes,
-        },
-        null,
-        2,
-      )
-    : "(unknown jurisdiction)";
+  // dnaSummary / jurSummary / useTypeLine are pre-built once per
+  // stageDisciplineReview call (see ctx) — no per-chunk re-stringification.
+  const dnaSummary = ctx.dnaSummary;
+  const jurSummary = ctx.jurSummary;
 
   const checklistText = checklist.length
     ? checklist
