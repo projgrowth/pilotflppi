@@ -1,31 +1,53 @@
 import { useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Play, Loader2, FileDown, Layers, Sparkles, Square, Inbox, Wand2, AlertTriangle } from "lucide-react";
+import {
+  ArrowLeft,
+  Play,
+  Loader2,
+  FileDown,
+  Sparkles,
+  Square,
+  Inbox,
+  Wand2,
+  ChevronDown,
+} from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { PageHeader } from "@/components/PageHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import ReviewHealthStrip from "@/components/review-dashboard/ReviewHealthStrip";
 import DeficiencyList from "@/components/review-dashboard/DeficiencyList";
 import TriageInbox from "@/components/review-dashboard/TriageInbox";
-import HumanReviewQueue from "@/components/review-dashboard/HumanReviewQueue";
-import ProjectDNAViewer from "@/components/review-dashboard/ProjectDNAViewer";
-import DnaHealthBanner from "@/components/review-dashboard/DnaHealthBanner";
-import CitationDbBanner from "@/components/review-dashboard/CitationDbBanner";
-import SheetCoverageMap from "@/components/review-dashboard/SheetCoverageMap";
-import DeferredScopePanel from "@/components/review-dashboard/DeferredScopePanel";
-import DedupeAuditTrail from "@/components/review-dashboard/DedupeAuditTrail";
-import LetterQualityGate from "@/components/review-dashboard/LetterQualityGate";
-import ReviewerMemoryCard from "@/components/review-dashboard/ReviewerMemoryCard";
-import { useDeficienciesV2, useDeferredScope, useProjectDna, useSheetCoverage, usePipelineStatus } from "@/hooks/useReviewDashboard";
+import DashboardAlertStack, {
+  type DashboardAlert,
+} from "@/components/review-dashboard/DashboardAlertStack";
+import NextStepBar from "@/components/review-dashboard/NextStepBar";
+import FilterChips from "@/components/review-dashboard/FilterChips";
+import AuditCoveragePanel from "@/components/review-dashboard/AuditCoveragePanel";
+import { CRITICAL_DNA_FIELDS } from "@/components/review-dashboard/DnaHealthBanner";
+import { useLetterQualityCheck } from "@/hooks/useLetterQualityCheck";
+import {
+  useDeficienciesV2,
+  useDeferredScope,
+  useProjectDna,
+  useSheetCoverage,
+  usePipelineStatus,
+} from "@/hooks/useReviewDashboard";
 import { useFirmSettings } from "@/hooks/useFirmSettings";
 import { generateCountyReport } from "@/lib/county-report";
 import { determineReviewStatus } from "@/lib/review-status";
 import { cancelPipelineForReview } from "@/lib/pipeline-cancel";
 import { usePipelineErrorStream } from "@/hooks/usePipelineErrors";
 import { reprepareInBrowser } from "@/lib/reprepare-in-browser";
+import type { ChipFilter } from "@/hooks/useFilteredDeficiencies";
 
 interface ReviewWithProject {
   id: string;
@@ -48,12 +70,126 @@ export default function ReviewDashboard() {
   const [runningDeep, setRunningDeep] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [reprepping, setReprepping] = useState(false);
-  // Triage is now the default landing tab — surfaces priority items first.
   const [activeTab, setActiveTab] = useState("triage");
+  const [chipFilter, setChipFilter] = useState<ChipFilter>("all");
 
-  // One-click re-prepare for the needs_browser_rasterization error class.
-  // The server can't rasterize PDFs (CPU budget); the browser does it via
-  // pdf.js, writes the manifest, and restarts the pipeline.
+  // ── Data ────────────────────────────────────────────────────────────────
+  const { data: review } = useQuery({
+    queryKey: ["plan_review_dashboard", id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("plan_reviews")
+        .select(
+          "id, project_id, round, qc_status, comment_letter_draft, project:projects(name, address, jurisdiction, county)",
+        )
+        .eq("id", id!)
+        .maybeSingle();
+      if (error) throw error;
+      return data as unknown as ReviewWithProject | null;
+    },
+  });
+  const { data: dna } = useProjectDna(id);
+  const { data: defs = [] } = useDeficienciesV2(id);
+  const { data: sheets = [] } = useSheetCoverage(id);
+  const { data: deferredItems = [] } = useDeferredScope(id);
+  const { data: pipeRows = [] } = usePipelineStatus(id);
+  const { firmSettings } = useFirmSettings();
+  const { data: citationCount } = useQuery({
+    queryKey: ["fbc_code_sections_count"],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("fbc_code_sections")
+        .select("id", { count: "exact", head: true });
+      if (error) throw error;
+      return count ?? 0;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+  const letterCheck = useLetterQualityCheck({
+    deficiencies: defs,
+    letterDraft: review?.comment_letter_draft ?? null,
+  });
+
+  // ── Derived state ───────────────────────────────────────────────────────
+  const dedupeMergeCount = useMemo(() => {
+    const row = pipeRows.find((r) => r.stage === "dedupe");
+    const meta = (row as unknown as { metadata?: { groups_merged?: number } } | undefined)
+      ?.metadata;
+    return meta?.groups_merged ?? 0;
+  }, [pipeRows]);
+
+  const isPipelineActive = useMemo(
+    () => pipeRows.some((r) => r.status === "running" || r.status === "pending"),
+    [pipeRows],
+  );
+
+  const preparePagesErrored = useMemo(() => {
+    const row = pipeRows.find((r) => r.stage === "prepare_pages");
+    if (!row || row.status !== "error") return false;
+    const meta = (row as unknown as { metadata?: { error_class?: string } } | undefined)
+      ?.metadata;
+    const msg = (row.error_message ?? "").toLowerCase();
+    return (
+      meta?.error_class === "needs_browser_rasterization" ||
+      msg.includes("re-prepare") ||
+      msg.includes("haven't been prepared")
+    );
+  }, [pipeRows]);
+
+  const lastErrorStage = useMemo(() => {
+    if (isPipelineActive) return null;
+    const errored = pipeRows.find((r) => r.status === "error");
+    return errored?.stage ?? null;
+  }, [pipeRows, isPipelineActive]);
+
+  const status = useMemo(() => determineReviewStatus(defs), [defs]);
+  const jurisdictionMismatch =
+    !!dna &&
+    !!review?.project?.county &&
+    !!dna.county &&
+    dna.county.toLowerCase() !== review.project.county.toLowerCase();
+
+  // DNA blocker detection (mirrors DnaHealthBanner without dragging the whole banner in).
+  const dnaIssue = useMemo(() => {
+    if (!dna) return null;
+    const cm: string[] = [];
+    for (const f of CRITICAL_DNA_FIELDS) {
+      const v = (dna as unknown as Record<string, unknown>)[f];
+      if (v === null || v === undefined || v === "") cm.push(f);
+    }
+    const completeness =
+      (CRITICAL_DNA_FIELDS.length - cm.length) / CRITICAL_DNA_FIELDS.length;
+    const blocked = cm.includes("county") || jurisdictionMismatch || completeness < 0.5;
+    if (blocked) return { severity: "danger" as const, missing: cm };
+    if (cm.length > 0) return { severity: "warn" as const, missing: cm };
+    return null;
+  }, [dna, jurisdictionMismatch]);
+
+  // ── Filter chip counts ──────────────────────────────────────────────────
+  const liveDefs = useMemo(
+    () =>
+      defs.filter(
+        (d) =>
+          d.verification_status !== "overturned" &&
+          d.verification_status !== "superseded",
+      ),
+    [defs],
+  );
+  const chipCounts = useMemo(
+    () => ({
+      all: liveDefs.length,
+      needsEyes: liveDefs.filter((d) => d.requires_human_review).length,
+      lifeSafety: liveDefs.filter((d) => d.life_safety_flag || d.permit_blocker).length,
+      lowConfidence: liveDefs.filter(
+        (d) => typeof d.confidence_score === "number" && d.confidence_score < 0.7,
+      ).length,
+      deferred: liveDefs.filter((d) => d.status === "needs_info").length,
+    }),
+    [liveDefs],
+  );
+
+  // ── Recovery & pipeline actions ────────────────────────────────────────
   const handleReprepareInBrowser = async () => {
     if (!id || reprepping) return;
     setReprepping(true);
@@ -76,8 +212,6 @@ export default function ReviewDashboard() {
     }
   };
 
-  // Toast on pipeline error so reviewers don't have to refresh to find out.
-  // For NEEDS_BROWSER_RASTERIZATION, attach a one-click recovery action.
   usePipelineErrorStream(id, (err) => {
     const isNeedsBrowser = err.error_class === "needs_browser_rasterization";
     toast.error(`${err.stage.replace(/_/g, " ")} failed`, {
@@ -99,8 +233,6 @@ export default function ReviewDashboard() {
     const setter = mode === "deep" ? setRunningDeep : setRunning;
     setter(true);
     try {
-      // Clear any prior cancellation marker so the new run isn't aborted
-      // on its first heartbeat.
       await supabase
         .from("plan_reviews")
         .update({ ai_run_progress: { cancelled_at: null } })
@@ -116,8 +248,7 @@ export default function ReviewDashboard() {
       );
       qc.invalidateQueries({ queryKey: ["pipeline_status", id] });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Pipeline failed to start";
-      toast.error(msg);
+      toast.error(e instanceof Error ? e.message : "Pipeline failed to start");
     } finally {
       setter(false);
     }
@@ -138,62 +269,71 @@ export default function ReviewDashboard() {
     }
   };
 
-  const { data: review } = useQuery({
-    queryKey: ["plan_review_dashboard", id],
-    enabled: !!id,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("plan_reviews")
-        .select(
-          "id, project_id, round, qc_status, comment_letter_draft, project:projects(name, address, jurisdiction, county)",
-        )
-        .eq("id", id!)
-        .maybeSingle();
-      if (error) throw error;
-      return data as unknown as ReviewWithProject | null;
-    },
-  });
-
-  const { data: dna } = useProjectDna(id);
-  const { data: defs = [] } = useDeficienciesV2(id);
-  const { data: sheets = [] } = useSheetCoverage(id);
-  const { data: deferredItems = [] } = useDeferredScope(id);
-  const { data: pipeRows = [] } = usePipelineStatus(id);
-  const { firmSettings } = useFirmSettings();
-
-  const dedupeMergeCount = useMemo(() => {
-    const row = pipeRows.find((r) => r.stage === "dedupe");
-    const meta = (row as unknown as { metadata?: { groups_merged?: number } } | undefined)
-      ?.metadata;
-    return meta?.groups_merged ?? 0;
-  }, [pipeRows]);
-
-  const isPipelineActive = useMemo(
-    () => pipeRows.some((r) => r.status === "running" || r.status === "pending"),
-    [pipeRows],
-  );
-
-  // Detect the needs-browser-rasterization condition so the page header can
-  // expose a persistent recovery button (the toast is easy to miss/dismiss).
-  const preparePagesErrored = useMemo(() => {
-    const row = pipeRows.find((r) => r.stage === "prepare_pages");
-    if (!row || row.status !== "error") return false;
-    const meta = (row as unknown as { metadata?: { error_class?: string } } | undefined)
-      ?.metadata;
-    const msg = (row.error_message ?? "").toLowerCase();
-    return (
-      meta?.error_class === "needs_browser_rasterization" ||
-      msg.includes("re-prepare") ||
-      msg.includes("haven't been prepared")
-    );
-  }, [pipeRows]);
-
-  const status = useMemo(() => determineReviewStatus(defs), [defs]);
-  const jurisdictionMismatch =
-    !!dna &&
-    !!review?.project?.county &&
-    !!dna.county &&
-    dna.county.toLowerCase() !== review.project.county.toLowerCase();
+  // ── Build the alert stack from existing state ──────────────────────────
+  const alerts = useMemo<DashboardAlert[]>(() => {
+    const out: DashboardAlert[] = [];
+    if (preparePagesErrored) {
+      out.push({
+        id: "reprepare",
+        severity: "danger",
+        title: "Pages need to be re-prepared in your browser",
+        description:
+          "The server can't rasterize PDFs directly. Your browser will render them with pdf.js (10–30s).",
+        actionLabel: reprepping ? "Re-preparing…" : "Re-prepare in browser",
+        onAction: handleReprepareInBrowser,
+        busy: reprepping,
+        icon: Wand2,
+      });
+    }
+    if (dnaIssue?.severity === "danger") {
+      out.push({
+        id: "dna-blocked",
+        severity: "danger",
+        title: "Project DNA extraction incomplete — findings paused",
+        description: jurisdictionMismatch
+          ? `Extracted county "${dna?.county}" doesn't match project county "${review?.project?.county}".`
+          : `Missing critical fields: ${dnaIssue.missing.slice(0, 3).join(", ")}`,
+        actionLabel: "Fix in Project DNA",
+        onAction: () => setActiveTab("audit"),
+      });
+    } else if (dnaIssue?.severity === "warn") {
+      out.push({
+        id: "dna-warn",
+        severity: "warn",
+        title: "Project DNA partially extracted",
+        description: `${dnaIssue.missing.length} field(s) missing — findings may be incomplete.`,
+        actionLabel: "Open Project DNA",
+        onAction: () => setActiveTab("audit"),
+      });
+    }
+    if (letterCheck.errorCount > 0) {
+      out.push({
+        id: "letter-blocking",
+        severity: "warn",
+        title: `${letterCheck.errorCount} blocking letter issue${letterCheck.errorCount === 1 ? "" : "s"}`,
+        description: "Resolve before generating the contractor letter.",
+      });
+    }
+    if (citationCount === 0) {
+      out.push({
+        id: "citations",
+        severity: "info",
+        title: "FBC citation database not seeded",
+        description:
+          "Citation grounding unavailable — all findings show as unverified until seeded.",
+      });
+    }
+    return out;
+  }, [
+    preparePagesErrored,
+    reprepping,
+    dnaIssue,
+    jurisdictionMismatch,
+    dna?.county,
+    review?.project?.county,
+    letterCheck.errorCount,
+    citationCount,
+  ]);
 
   const handleGenerateReport = () => {
     if (!review?.project) {
@@ -225,10 +365,11 @@ export default function ReviewDashboard() {
   if (!id) return null;
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-6 p-6">
-      <div className="flex items-center justify-between">
+    <div className="mx-auto w-full max-w-7xl space-y-4 p-6">
+      {/* Header — primary action right, secondary in a Re-run dropdown */}
+      <div className="flex items-center justify-between gap-3">
         <PageHeader
-          title="Review Dashboard"
+          title="Triage"
           subtitle={
             review?.project
               ? `${review.project.name} · Round ${review.round}`
@@ -236,26 +377,17 @@ export default function ReviewDashboard() {
           }
         />
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            onClick={handleGenerateReport}
-            disabled={!review?.project}
-          >
-            <FileDown className="mr-1 h-4 w-4" />
-            Generate Report
-          </Button>
-          <Button asChild variant="default" size="sm">
-            <Link to={`/plan-review/${id}`}>
-              <ArrowLeft className="mr-1 h-4 w-4" /> Back to workspace
-            </Link>
-          </Button>
+          {lastErrorStage && (
+            <span className="text-2xs text-destructive">
+              Last run errored at <span className="font-mono">{lastErrorStage}</span>
+            </span>
+          )}
           {isPipelineActive && (
             <Button
               size="sm"
               variant="destructive"
               onClick={cancelPipeline}
               disabled={cancelling}
-              title="Stop the running pipeline"
             >
               {cancelling ? (
                 <Loader2 className="mr-1 h-4 w-4 animate-spin" />
@@ -265,141 +397,108 @@ export default function ReviewDashboard() {
               {cancelling ? "Cancelling…" : "Cancel"}
             </Button>
           )}
-          {/* Re-run analysis is a secondary action — the wizard handles the
-              first run automatically. Keep this for follow-up rounds where
-              the reviewer uploads new sheets. */}
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => runPipeline("core")}
-            disabled={running}
-            title="Re-run the core analysis pipeline"
-          >
-            {running ? (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-            ) : (
-              <Play className="mr-1 h-4 w-4" />
-            )}
-            {running ? "Running…" : "Re-run Core"}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline" disabled={running || runningDeep}>
+                {running || runningDeep ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <Play className="mr-1 h-4 w-4" />
+                )}
+                Re-run
+                <ChevronDown className="ml-1 h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => runPipeline("core")} disabled={running}>
+                <Play className="mr-2 h-3.5 w-3.5" />
+                Re-run Core
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => runPipeline("deep")} disabled={runningDeep}>
+                <Sparkles className="mr-2 h-3.5 w-3.5" />
+                Run Deep QA
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button asChild size="sm" variant="outline">
+            <Link to={`/plan-review/${id}`}>
+              <ArrowLeft className="mr-1 h-4 w-4" /> Workspace
+            </Link>
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => runPipeline("deep")}
-            disabled={runningDeep}
-            title="Run Deep QA: verify, citations, cross-check, deferred scope, prioritize"
-          >
-            {runningDeep ? (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="mr-1 h-4 w-4" />
-            )}
-            {runningDeep ? "Deep QA…" : "Run Deep QA"}
+          <Button size="sm" onClick={handleGenerateReport} disabled={!review?.project}>
+            <FileDown className="mr-1 h-4 w-4" />
+            Generate Report
           </Button>
         </div>
       </div>
 
-      {preparePagesErrored && (
-        <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
-          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-          <div className="flex-1 space-y-1">
-            <div className="text-sm font-semibold text-destructive">
-              Pages need to be re-prepared in your browser
-            </div>
-            <p className="text-sm text-muted-foreground">
-              The server can't rasterize PDFs directly — your browser will download the source files,
-              render them with pdf.js, and restart the pipeline. This usually takes 10–30 seconds.
-            </p>
-          </div>
-          <Button
-            size="sm"
-            variant="default"
-            onClick={handleReprepareInBrowser}
-            disabled={reprepping}
-          >
-            {reprepping ? (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-            ) : (
-              <Wand2 className="mr-1 h-4 w-4" />
-            )}
-            {reprepping ? "Re-preparing…" : "Re-prepare in browser"}
-          </Button>
+      {/* Single-slot alert stack — replaces 4 stacked banners */}
+      <DashboardAlertStack alerts={alerts} />
+
+      {/* Sticky health strip — always reachable */}
+      {review?.project && (
+        <div className="sticky top-0 z-20 -mx-6 bg-background/95 px-6 py-1 backdrop-blur">
+          <ReviewHealthStrip
+            planReviewId={id}
+            status={status}
+            projectName={review.project.name}
+            projectAddress={review.project.address}
+            jurisdiction={review.project.jurisdiction || review.project.county}
+          />
         </div>
       )}
 
-      {review?.project && (
-        <DnaHealthBanner
-          planReviewId={id}
-          projectCounty={review.project.county}
-          onJumpToDna={() => setActiveTab("dna")}
-        />
-      )}
-
-      <CitationDbBanner />
-
-      {review?.project && (
-        <ReviewHealthStrip
-          planReviewId={id}
-          status={status}
-          projectName={review.project.name}
-          projectAddress={review.project.address}
-          jurisdiction={review.project.jurisdiction || review.project.county}
-        />
-      )}
-
-      <ReviewerMemoryCard planReviewId={id} />
-
-      <LetterQualityGate
-        planReviewId={id}
-        letterDraft={review?.comment_letter_draft ?? null}
-        onJumpToFinding={() => setActiveTab("triage")}
+      {/* Single-CTA next-step bar */}
+      <NextStepBar
+        pipelineRows={pipeRows.map((r) => ({ stage: r.stage, status: r.status }))}
+        deficiencies={defs.map((d) => ({
+          reviewer_disposition: d.reviewer_disposition,
+          verification_status: d.verification_status,
+          status: d.status,
+        }))}
+        letterDraft={review?.comment_letter_draft}
+        qcStatus={review?.qc_status}
+        onTriage={() => setActiveTab("triage")}
+        onGenerateLetter={() => setActiveTab("findings")}
+        onReviewLetter={() => setActiveTab("findings")}
       />
 
+      {/* Three top-level tabs only */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList>
           <TabsTrigger value="triage">
             <Inbox className="mr-1 h-3.5 w-3.5" />
             Triage
+            {chipCounts.needsEyes > 0 && (
+              <span className="ml-1.5 rounded-full bg-amber-500/20 px-1.5 font-mono text-2xs text-amber-700 dark:text-amber-400">
+                {chipCounts.needsEyes}
+              </span>
+            )}
           </TabsTrigger>
-          <TabsTrigger value="deficiencies">All Findings</TabsTrigger>
-          <TabsTrigger value="human">Human Review</TabsTrigger>
-          <TabsTrigger value="deferred">
-            Deferred Scope{deferredItems.length > 0 ? ` (${deferredItems.length})` : ""}
-          </TabsTrigger>
-          <TabsTrigger value="audit">
-            <Layers className="mr-1 h-3.5 w-3.5" />
-            Dedupe Audit{dedupeMergeCount > 0 ? ` (${dedupeMergeCount})` : ""}
-          </TabsTrigger>
-          <TabsTrigger value="dna">Project DNA</TabsTrigger>
-          <TabsTrigger value="coverage">Sheet Coverage</TabsTrigger>
+          <TabsTrigger value="findings">All findings</TabsTrigger>
+          <TabsTrigger value="audit">Audit & Coverage</TabsTrigger>
         </TabsList>
+
         <TabsContent value="triage" className="mt-4">
           <TriageInbox planReviewId={id} />
         </TabsContent>
-        <TabsContent value="deficiencies" className="mt-4">
-          <DeficiencyList planReviewId={id} />
-        </TabsContent>
-        <TabsContent value="human" className="mt-4">
-          <HumanReviewQueue planReviewId={id} />
-        </TabsContent>
-        <TabsContent value="deferred" className="mt-4">
-          <DeferredScopePanel planReviewId={id} />
-        </TabsContent>
-        <TabsContent value="audit" className="mt-4">
-          <DedupeAuditTrail
+
+        <TabsContent value="findings" className="mt-4 space-y-4">
+          <FilterChips active={chipFilter} onChange={setChipFilter} counts={chipCounts} />
+          <DeficiencyList
             planReviewId={id}
-            onJump={() => setActiveTab("deficiencies")}
+            chipFilter={chipFilter === "all" ? undefined : chipFilter}
           />
         </TabsContent>
-        <TabsContent value="dna" className="mt-4">
-          <ProjectDNAViewer
+
+        <TabsContent value="audit" className="mt-4">
+          <AuditCoveragePanel
             planReviewId={id}
             jurisdictionMismatch={jurisdictionMismatch}
-            onAfterRerun={() => setActiveTab("triage")}
+            dedupeMergeCount={dedupeMergeCount}
+            onJumpToFindings={() => setActiveTab("findings")}
+            onAfterDnaRerun={() => setActiveTab("triage")}
           />
-        </TabsContent>
-        <TabsContent value="coverage" className="mt-4">
-          <SheetCoverageMap planReviewId={id} />
         </TabsContent>
       </Tabs>
     </div>
