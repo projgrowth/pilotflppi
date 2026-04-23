@@ -377,7 +377,9 @@ export default function PipelineActivity() {
                   key={a.planReviewId}
                   activity={a}
                   onCancel={handleCancel}
+                  onResume={handleResume}
                   cancelling={cancellingId === a.planReviewId}
+                  resuming={resumingId === a.planReviewId}
                 />
               ))}
             </section>
