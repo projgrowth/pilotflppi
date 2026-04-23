@@ -1182,36 +1182,51 @@ async function stageDisciplineReview(
   const failed: string[] = [];
   let totalFindings = 0;
 
+  // Per-discipline cap: keep payload + memory bounded. Within a discipline
+  // we still chunk into batches of DISCIPLINE_BATCH so all sheets get reviewed.
+  const DISCIPLINE_BATCH = 8;
+  const MAX_SHEETS_PER_DISCIPLINE = 40;
+
+  // Track coverage so we can persist a truthful review_coverage row.
+  const byDiscipline: Record<string, { reviewed: number; total: number }> = {};
+  let cappedAt: number | null = null;
+
   for (const discipline of disciplinesToRun) {
     try {
       const disciplineSheets = routed.filter((s) => s.discipline === discipline);
-      // Cap discipline image payload to keep AI request body and edge worker
-      // memory under control. ~10 pages per discipline still gives the model
-      // plenty of context for finding-grade review.
-      const MAX_DISCIPLINE_PAGES = 10;
-      const disciplineImageUrls = (disciplineSheets
+      const allUrls = disciplineSheets
         .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
-        .filter(Boolean) as string[]).slice(0, MAX_DISCIPLINE_PAGES);
+        .filter(Boolean) as string[];
 
-      // No sheets routed → skip silently in core mode (the dashboard's
-      // discipline filter already shows the discipline as untouched).
-      // Reduces DB churn and removes noise findings that the user
-      // historically had to dismiss for every project that didn't include
-      // every discipline.
-      if (disciplineImageUrls.length === 0) {
-        continue;
+      byDiscipline[discipline] = { reviewed: 0, total: disciplineSheets.length };
+
+      // Skip silently if no sheets routed to this discipline.
+      if (allUrls.length === 0) continue;
+
+      const cappedUrls = allUrls.slice(0, MAX_SHEETS_PER_DISCIPLINE);
+      if (allUrls.length > MAX_SHEETS_PER_DISCIPLINE) {
+        cappedAt = MAX_SHEETS_PER_DISCIPLINE;
       }
 
-      const inserted = await runDisciplineChecks(admin, planReviewId, firmId, {
-        discipline,
-        disciplineSheets,
-        disciplineImageUrls,
-        generalImageUrls,
-        dna,
-        jurisdiction,
-        useType,
-      });
-      totalFindings += inserted;
+      // Chunk by DISCIPLINE_BATCH so a 74-sheet Architectural set runs ~10
+      // calls instead of 1 oversized call that the model can't handle.
+      let disciplineFindings = 0;
+      for (let cs = 0; cs < cappedUrls.length; cs += DISCIPLINE_BATCH) {
+        const chunkUrls = cappedUrls.slice(cs, cs + DISCIPLINE_BATCH);
+        const chunkSheets = disciplineSheets.slice(cs, cs + DISCIPLINE_BATCH);
+        const inserted = await runDisciplineChecks(admin, planReviewId, firmId, {
+          discipline,
+          disciplineSheets: chunkSheets,
+          disciplineImageUrls: chunkUrls,
+          generalImageUrls,
+          dna,
+          jurisdiction,
+          useType,
+        });
+        disciplineFindings += inserted;
+      }
+      totalFindings += disciplineFindings;
+      byDiscipline[discipline].reviewed = cappedUrls.length;
     } catch (err) {
       console.error(`[discipline_review:${discipline}] failed:`, err);
       failed.push(discipline);
@@ -1230,6 +1245,29 @@ async function stageDisciplineReview(
       });
     }
   }
+
+  // Persist truthful coverage so the workspace chip can show e.g. 78/78.
+  const sheetsTotal = Object.values(byDiscipline).reduce((s, v) => s + v.total, 0);
+  const sheetsReviewed = Object.values(byDiscipline).reduce((s, v) => s + v.reviewed, 0);
+  try {
+    await admin
+      .from("review_coverage")
+      .upsert(
+        {
+          plan_review_id: planReviewId,
+          firm_id: firmId,
+          sheets_total: sheetsTotal,
+          sheets_reviewed: sheetsReviewed,
+          by_discipline: byDiscipline,
+          capped_at: cappedAt,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "plan_review_id" },
+      );
+  } catch (err) {
+    console.error("[discipline_review] failed to persist review_coverage:", err);
+  }
+
   return { failed_disciplines: failed, total_findings: totalFindings };
 }
 
