@@ -30,13 +30,26 @@ export function StuckRecoveryBanner({
   aiCheckStatus,
   failureReason,
 }: Props) {
+  const dismissKey = autoRecoveredAt
+    ? `stuck-recovery-dismissed:${planReviewId}:${autoRecoveredAt}`
+    : null;
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    if (!dismissKey) {
+      setDismissed(false);
+      return;
+    }
+    setDismissed(localStorage.getItem(dismissKey) === "1");
+  }, [dismissKey]);
+
   // ---- needs_user_action variant (not dismissible — blocks progress) ----
   if (aiCheckStatus === "needs_user_action") {
     return (
-      <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs">
-        <AlertTriangle className="h-4 w-4 flex-shrink-0 text-amber-600 dark:text-amber-400" />
+      <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs">
+        <AlertTriangle className="h-4 w-4 flex-shrink-0 text-warning" />
         <div className="min-w-0 flex-1">
-          <div className="font-medium text-amber-700 dark:text-amber-300">
+          <div className="font-medium text-warning-foreground">
             Action needed: finish preparing pages
           </div>
           <div className="mt-0.5 text-muted-foreground">
@@ -51,10 +64,10 @@ export function StuckRecoveryBanner({
   // ---- needs_human_review variant (not dismissible — needs disposition) ----
   if (aiCheckStatus === "needs_human_review") {
     return (
-      <div className="flex items-start gap-2 rounded-md border border-orange-500/40 bg-orange-500/5 px-3 py-2 text-xs">
-        <AlertCircle className="h-4 w-4 flex-shrink-0 text-orange-600 dark:text-orange-400" />
+      <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs">
+        <AlertCircle className="h-4 w-4 flex-shrink-0 text-destructive" />
         <div className="min-w-0 flex-1">
-          <div className="font-medium text-orange-700 dark:text-orange-300">
+          <div className="font-medium text-destructive">
             Manual review required
           </div>
           <div className="mt-0.5 text-muted-foreground">
@@ -67,16 +80,6 @@ export function StuckRecoveryBanner({
   }
 
   // ---- auto-recovery success variant (dismissible) ----
-  const dismissKey = autoRecoveredAt
-    ? `stuck-recovery-dismissed:${planReviewId}:${autoRecoveredAt}`
-    : null;
-  const [dismissed, setDismissed] = useState(false);
-
-  useEffect(() => {
-    if (!dismissKey) return;
-    setDismissed(localStorage.getItem(dismissKey) === "1");
-  }, [dismissKey]);
-
   if (!autoRecoveredAt || dismissed) return null;
 
   const when = new Date(autoRecoveredAt);
@@ -88,10 +91,10 @@ export function StuckRecoveryBanner({
   });
 
   return (
-    <div className="flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs">
-      <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-emerald-600 dark:text-emerald-400" />
+    <div className="flex items-start gap-2 rounded-md border border-success/30 bg-success/5 px-3 py-2 text-xs">
+      <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-success" />
       <div className="min-w-0 flex-1">
-        <div className="font-medium text-emerald-700 dark:text-emerald-300">
+        <div className="font-medium text-success">
           Pipeline auto-resumed
         </div>
         <div className="mt-0.5 text-muted-foreground">
@@ -104,7 +107,7 @@ export function StuckRecoveryBanner({
       <Button
         size="sm"
         variant="ghost"
-        className="-mr-1 -mt-0.5 h-6 px-1.5 text-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-700 dark:text-emerald-400"
+        className="-mr-1 -mt-0.5 h-6 px-1.5 text-success hover:bg-success/10"
         onClick={() => {
           if (dismissKey) localStorage.setItem(dismissKey, "1");
           setDismissed(true);
