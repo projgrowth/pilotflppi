@@ -36,7 +36,6 @@ export type ChipFilter =
 export interface FilterOptions {
   hideOverturned?: boolean;
   showSuperseded?: boolean;
-  onlyHumanReview?: boolean;
   groupBy?: "discipline" | "none";
   /** Inline chip filter applied AFTER the basic visibility filters. */
   chip?: ChipFilter;
@@ -51,7 +50,6 @@ export interface FilteredDeficiencies {
     total: number;
     visible: number;
     hidden: number;
-    humanReview: number;
   };
 }
 
@@ -66,7 +64,6 @@ export function useFilteredDeficiencies(
   const {
     hideOverturned = true,
     showSuperseded = false,
-    onlyHumanReview = false,
     groupBy = "discipline",
     chip,
   } = opts;
@@ -80,9 +77,6 @@ export function useFilteredDeficiencies(
     }
     if (!showSuperseded) {
       visible = visible.filter((d) => d.verification_status !== "superseded");
-    }
-    if (onlyHumanReview) {
-      visible = visible.filter((d) => d.requires_human_review);
     }
     if (chip === "needs-eyes") {
       visible = visible.filter((d) => d.requires_human_review);
@@ -118,8 +112,7 @@ export function useFilteredDeficiencies(
         total: all.length,
         visible: sorted.length,
         hidden: all.length - visible.length,
-        humanReview: all.filter((d) => d.requires_human_review).length,
       },
     };
-  }, [defs, hideOverturned, showSuperseded, onlyHumanReview, groupBy, chip, isLoading]);
+  }, [defs, hideOverturned, showSuperseded, groupBy, chip, isLoading]);
 }
