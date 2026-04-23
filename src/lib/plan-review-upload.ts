@@ -30,14 +30,22 @@ export interface UploadPlanReviewArgs {
   existingPageCount: number | null;
   files: File[];
   userId: string | null;
+  /** Optional progress callback so the UI can render a persistent bar. */
+  onProgress?: (p: { phase: string; prepared: number; expected: number }) => void;
 }
 
 export interface UploadPlanReviewResult {
   acceptedCount: number;
   pageAssetCount: number;
   pipelineStarted: boolean;
+  /** True when rasterization succeeded for <80% of expected pages. */
+  partialRasterize: boolean;
+  expectedPages: number;
   warnings: string[];
 }
+
+/** Below this success ratio we refuse to start the pipeline. */
+const MIN_RASTERIZE_RATIO = 0.8;
 
 export async function uploadPlanReviewFiles(
   args: UploadPlanReviewArgs,
