@@ -561,7 +561,8 @@ async function rasterizeNextChunk(
       continue;
     }
     const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer());
-
+    const isFirstChunkForSource = doneSet.size === 0;
+    const mupdf = await getMupdf();
     const doc = mupdf.Document.openDocument(pdfBytes, "application/pdf");
     let rasterized = 0;
     let totalPages = 0;
@@ -585,7 +586,8 @@ async function rasterizeNextChunk(
 
       // Find the next contiguous chunk of missing pages for this PDF.
       const targets: number[] = [];
-      for (let i = 0; i < totalPages && targets.length < RASTERIZE_CHUNK; i++) {
+      const chunkBudget = isFirstChunkForSource ? RASTERIZE_CHUNK_COLD_START : RASTERIZE_CHUNK;
+      for (let i = 0; i < totalPages && targets.length < chunkBudget; i++) {
         if (!doneSet.has(i)) targets.push(i);
       }
       chunkPlannedSize = targets.length;
@@ -595,7 +597,11 @@ async function rasterizeNextChunk(
       const pagesDir = `${dir}/pages`;
 
       // Adaptive DPI: large PDFs render at ~80 DPI to keep per-page CPU low.
-      const scale = totalPages > LARGE_PDF_THRESHOLD ? RASTER_SCALE_LARGE : RASTER_SCALE;
+      const scale = isFirstChunkForSource
+        ? RASTER_SCALE_COLD
+        : totalPages > LARGE_PDF_THRESHOLD
+          ? RASTER_SCALE_LARGE
+          : RASTER_SCALE;
       const matrix = mupdf.Matrix.scale(scale, scale);
 
       // Render serially (MuPDF is single-threaded), buffer JPEGs in memory,
