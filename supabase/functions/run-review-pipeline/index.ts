@@ -416,15 +416,28 @@ async function signedSheetUrls(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
   _firmId: string | null = null,
+  /**
+   * Optional filter — when supplied, only sign URLs for these page indices.
+   * Avoids signing 78 URLs in a stage that only needs 8 (e.g. a single
+   * discipline_review chunk). The full manifest is still cached separately
+   * so a later stage that DOES need everything reuses prior work.
+   */
+  pageIndices?: number[],
 ): Promise<Array<{ file_path: string; signed_url: string }>> {
   void _firmId;
   const cached = _pageManifestCache.get(planReviewId);
-  if (cached) return cached;
+  if (cached) {
+    if (!pageIndices || pageIndices.length === 0) return cached;
+    const set = new Set(pageIndices);
+    return cached.filter((_, idx) => set.has(idx));
+  }
 
   const fromDb = await readSignedManifest(admin, planReviewId);
   if (fromDb && fromDb.length > 0) {
     _pageManifestCache.set(planReviewId, fromDb);
-    return fromDb;
+    if (!pageIndices || pageIndices.length === 0) return fromDb;
+    const set = new Set(pageIndices);
+    return fromDb.filter((_, idx) => set.has(idx));
   }
 
   // Legacy fallback: pre-manifest reviews stored pages under `<dir>/pages/`.
@@ -1219,6 +1232,52 @@ async function stageDisciplineReview(
   const failed: string[] = [];
   let totalFindings = 0;
 
+  // ── Hoist per-stage prompt context ─────────────────────────────────────
+  // dnaSummary / jurSummary / useTypeLine never change across the chunks
+  // and disciplines below. Build them once instead of stringifying ~80
+  // times (10 chunks × 9 disciplines, worst case).
+  const dnaSummary = dna
+    ? JSON.stringify(
+        {
+          occupancy: dna.occupancy_classification,
+          construction_type: dna.construction_type,
+          stories: dna.stories,
+          total_sq_ft: dna.total_sq_ft,
+          wind_speed_vult: dna.wind_speed_vult,
+          exposure_category: dna.exposure_category,
+          risk_category: dna.risk_category,
+          flood_zone: dna.flood_zone,
+          hvhz: dna.hvhz,
+          mixed_occupancy: dna.mixed_occupancy,
+          is_high_rise: dna.is_high_rise,
+          has_mezzanine: dna.has_mezzanine,
+          missing_fields: dna.missing_fields,
+        },
+        null,
+        2,
+      )
+    : "(not yet extracted)";
+  const jurSummary = jurisdiction
+    ? JSON.stringify(
+        {
+          county: jurisdiction.county,
+          fbc_edition: jurisdiction.fbc_edition,
+          hvhz: jurisdiction.hvhz,
+          coastal: jurisdiction.coastal,
+          flood_zone_critical: jurisdiction.flood_zone_critical,
+          high_volume: jurisdiction.high_volume,
+          notes: jurisdiction.notes,
+        },
+        null,
+        2,
+      )
+    : "(unknown jurisdiction)";
+  const useTypeLine = useType === "residential"
+    ? `## Project Use Type\nRESIDENTIAL — apply FBC Residential (FBCR), NOT FBC Building. Skip commercial accessibility (FBC Ch.11). Use IRC/FBCR-style code references.\n\n`
+    : useType === "commercial"
+      ? `## Project Use Type\nCOMMERCIAL — apply FBC Building (not FBCR). Accessibility (FBC Ch.11/ADA) and commercial life-safety apply.\n\n`
+      : ``;
+
   // Per-discipline batching replaces the old MAX_DISCIPLINE_PAGES = 10 cap.
   // Architectural with 74 sheets becomes ~10 calls of 8 sheets each so every
   // sheet is reviewed exactly once. Hard ceiling per discipline keeps a
@@ -1256,6 +1315,9 @@ async function stageDisciplineReview(
           dna,
           jurisdiction,
           useType,
+          dnaSummary,
+          jurSummary,
+          useTypeLine,
         });
         totalFindings += inserted;
         byDiscipline[discipline].reviewed += chunk.length;
