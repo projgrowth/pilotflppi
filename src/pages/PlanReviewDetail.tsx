@@ -489,6 +489,24 @@ export default function PlanReviewDetail() {
 
   const runAICheck = async () => {
     if (!review || aiRunning) return;
+
+    // Re-Analyze on a review that already has findings is destructive: it
+    // replaces the current results and burns ~2-4 minutes of model time. The
+    // button looks identical with 0 vs 47 findings, so a misclick used to be
+    // silent and expensive. Confirm when there's something to lose.
+    if (findings.length > 0) {
+      const ok = await confirm({
+        title: `Re-analyze ${findings.length} finding${findings.length === 1 ? "" : "s"}?`,
+        description:
+          "This will replace the current results and take 2-4 minutes. Any reviewer notes on existing findings will be kept, but the findings themselves will be regenerated.",
+        confirmLabel: "Re-analyze",
+        cancelLabel: "Keep current results",
+        variant: "destructive",
+        rememberKey: "reanalyze-with-findings",
+      });
+      if (!ok) return;
+    }
+
     setAiRunning(true);
     setAiCompleteFlash(null);
     // Drop cached terminal-stage status so the freshly-mounted stepper doesn't
