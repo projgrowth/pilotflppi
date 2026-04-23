@@ -46,7 +46,16 @@ export default function ReviewDashboard() {
   const [running, setRunning] = useState(false);
   const [runningDeep, setRunningDeep] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [activeTab, setActiveTab] = useState("deficiencies");
+  // Triage is now the default landing tab — surfaces priority items first.
+  const [activeTab, setActiveTab] = useState("triage");
+
+  // Toast on pipeline error so reviewers don't have to refresh to find out.
+  usePipelineErrorStream(id, (err) => {
+    toast.error(`${err.stage.replace(/_/g, " ")} failed`, {
+      description: err.error_message?.slice(0, 140) ?? "Unknown error",
+      duration: 8000,
+    });
+  });
 
   const runPipeline = async (mode: "core" | "deep" = "core") => {
     if (!id) return;
