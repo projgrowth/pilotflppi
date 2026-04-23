@@ -95,6 +95,8 @@ export default function PlanReviewDetail() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [lintIssues, setLintIssues] = useState<LintIssue[]>([]);
   const [showLintDialog, setShowLintDialog] = useState(false);
+  const [aiRunning, setAiRunning] = useState(false);
+  const [aiCompleteFlash, setAiCompleteFlash] = useState<number | null>(null);
   const letterHydratedRef = useRef<string | null>(null);
 
   // Autosave the comment letter to the review row, debounced.
