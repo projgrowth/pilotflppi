@@ -634,6 +634,34 @@ export default function PlanReviewDetail() {
         onOpenDashboard={openDashboard}
       />
 
+      {preparePagesErrored && (
+        <div className="shrink-0 border-b border-destructive/30 bg-destructive/5 px-4 py-2 flex items-center gap-3">
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
+          <div className="flex-1 min-w-0">
+            <span className="text-2xs font-semibold text-destructive uppercase tracking-wide mr-2">
+              Pages not prepared
+            </span>
+            <span className="text-xs text-foreground/80">
+              The server can't rasterize PDFs — your browser will render them locally and restart the pipeline.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="default"
+            onClick={handleReprepareInBrowser}
+            disabled={reprepping}
+            className="h-7 text-xs"
+          >
+            {reprepping ? (
+              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Wand2 className="mr-1 h-3.5 w-3.5" />
+            )}
+            {reprepping ? "Re-preparing…" : "Re-prepare in browser"}
+          </Button>
+        </div>
+      )}
+
       {/* Page-cap banner: surface silent 10-page truncation honestly */}
       {pageCapInfo && pageCapInfo.total > pageCapInfo.rendered && (
         <div className="shrink-0 border-b bg-warning/10 px-4 py-1.5 flex items-center gap-2">
