@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Play, Loader2, FileDown, Layers } from "lucide-react";
+import { ArrowLeft, Play, Loader2, FileDown, Layers, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { PageHeader } from "@/components/PageHeader";
@@ -40,27 +40,29 @@ export default function ReviewDashboard() {
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
   const [running, setRunning] = useState(false);
+  const [runningDeep, setRunningDeep] = useState(false);
   const [activeTab, setActiveTab] = useState("deficiencies");
 
-  const runPipeline = async () => {
+  const runPipeline = async (mode: "core" | "deep" = "core") => {
     if (!id) return;
-    setRunning(true);
+    const setter = mode === "deep" ? setRunningDeep : setRunning;
+    setter(true);
     try {
       const { error } = await supabase.functions.invoke("run-review-pipeline", {
-        body: { plan_review_id: id },
+        body: { plan_review_id: id, mode },
       });
       if (error) throw error;
-
-      // Function returns 202 Accepted immediately and runs the pipeline in
-      // the background. Realtime status rows will drive the stepper UI; we
-      // just need to invalidate the query so the stepper subscribes.
-      toast.success("Analysis started — watch the stepper for live progress");
+      toast.success(
+        mode === "deep"
+          ? "Deep QA started — verify, citations, cross-check, deferred scope, prioritize"
+          : "Core analysis started — watch the stepper for live progress",
+      );
       qc.invalidateQueries({ queryKey: ["pipeline_status", id] });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Pipeline failed to start";
       toast.error(msg);
     } finally {
-      setRunning(false);
+      setter(false);
     }
   };
 

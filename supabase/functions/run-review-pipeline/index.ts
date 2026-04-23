@@ -33,6 +33,9 @@ type Stage =
   | "prioritize"
   | "complete";
 
+// Full canonical stage list (kept for backward-compat callers passing
+// `start_from`). Default execution uses CORE_STAGES; opt-in DEEP_STAGES
+// runs the heavier QA passes after core finishes.
 const STAGES: Stage[] = [
   "upload",
   "prepare_pages",
@@ -47,6 +50,39 @@ const STAGES: Stage[] = [
   "prioritize",
   "complete",
 ];
+
+// Core Review = the minimum precise pipeline. Fast time-to-results.
+// `prepare_pages` here is a manifest-validation fast-pass (the wizard
+// pre-rasterizes in the browser); it does NOT loop through MuPDF chunks
+// in the default path.
+const CORE_STAGES: Stage[] = [
+  "upload",
+  "prepare_pages",
+  "sheet_map",
+  "dna_extract",
+  "discipline_review",
+  "dedupe",
+  "complete",
+];
+
+// Deep QA = optional secondary pass. Runs only when explicitly invoked
+// with mode='deep'. Reuses existing core artifacts (deficiencies,
+// project_dna, sheet_coverage) — does not re-run discipline_review.
+const DEEP_STAGES: Stage[] = [
+  "verify",
+  "ground_citations",
+  "cross_check",
+  "deferred_scope",
+  "prioritize",
+];
+
+type PipelineMode = "core" | "deep" | "full";
+
+function stagesForMode(mode: PipelineMode): Stage[] {
+  if (mode === "deep") return DEEP_STAGES;
+  if (mode === "full") return STAGES;
+  return CORE_STAGES;
+}
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -1428,23 +1464,12 @@ async function stageDisciplineReview(
         .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
         .filter(Boolean) as string[]).slice(0, MAX_DISCIPLINE_PAGES);
 
-      // No sheets routed → log a single human-review item and continue.
+      // No sheets routed → skip silently in core mode (the dashboard's
+      // discipline filter already shows the discipline as untouched).
+      // Reduces DB churn and removes noise findings that the user
+      // historically had to dismiss for every project that didn't include
+      // every discipline.
       if (disciplineImageUrls.length === 0) {
-        await admin.from("deficiencies_v2").insert({
-          plan_review_id: planReviewId,
-          firm_id: firmId,
-          def_number: `DEF-${discipline.slice(0, 1).toUpperCase()}001`,
-          discipline,
-          finding: `No ${discipline} sheets identified in submittal.`,
-          required_action: `Confirm whether ${discipline} scope applies; if so, request the missing sheets.`,
-          priority: "medium",
-          requires_human_review: true,
-          human_review_reason: "No sheets routed to this discipline (AI title-block + prefix fallback both empty).",
-          human_review_method: "Reviewer: confirm scope and request missing sheets if applicable.",
-          confidence_score: 0.3,
-          confidence_basis: "Sheet routing produced no inputs for this discipline.",
-          status: "open",
-        });
         continue;
       }
 
@@ -3128,7 +3153,7 @@ async function stageGroundCitations(
 function scheduleNextStage(
   planReviewId: string,
   nextStage: Stage,
-  extra?: { target_source?: string | null },
+  extra?: { target_source?: string | null; mode?: PipelineMode },
 ) {
   const url = `${SUPABASE_URL}/functions/v1/run-review-pipeline`;
   // Don't await — return immediately and let waitUntil keep this socket alive
@@ -3144,6 +3169,7 @@ function scheduleNextStage(
       plan_review_id: planReviewId,
       stage: nextStage,
       target_source: extra?.target_source ?? null,
+      mode: extra?.mode ?? "core",
       _internal: true,
     }),
   })
@@ -3171,6 +3197,10 @@ Deno.serve(async (req) => {
     const plan_review_id = body?.plan_review_id;
     const requestedStage: Stage | undefined = body?.stage;
     const startFrom: Stage | undefined = body?.start_from;
+    const rawMode = typeof body?.mode === "string" ? body.mode : "core";
+    const mode: PipelineMode =
+      rawMode === "deep" || rawMode === "full" ? rawMode : "core";
+    const activeChain = stagesForMode(mode);
     const targetSource: string | null =
       typeof body?.target_source === "string" && body.target_source.length > 0
         ? body.target_source
@@ -3227,13 +3257,18 @@ Deno.serve(async (req) => {
     const firmId = (pr as { firm_id: string | null }).firm_id;
 
     // Resolve which single stage this invocation runs.
-    // - First call (no `stage`, no `start_from`): seed pending rows for ALL
-    //   stages and run `upload` first.
-    // - First call with `start_from`: seed only the trailing stages, run `start_from`.
-    // - Self-invoke (`stage` set): run exactly that stage.
+    // - First call (no `stage`, no `start_from`): seed pending rows for the
+    //   active mode's chain and run its first stage.
+    // - First call with `start_from`: seed only the trailing stages of the
+    //   FULL chain (legacy partial reruns).
+    // - Self-invoke (`stage` set): run exactly that stage. The mode comes
+    //   along on the body so advancement stays within the same chain.
     let stageToRun: Stage;
     if (requestedStage) {
       stageToRun = requestedStage;
+      // Make sure the requested stage at least has a pending row so the
+      // dashboard can render it even if this is the first time we touch it.
+      await setStage(admin, plan_review_id, firmId, stageToRun, { status: "pending" });
     } else if (startFrom) {
       stageToRun = startFrom;
       const idx = STAGES.indexOf(startFrom);
@@ -3242,8 +3277,8 @@ Deno.serve(async (req) => {
         await setStage(admin, plan_review_id, firmId, s, { status: "pending" });
       }
     } else {
-      stageToRun = "upload";
-      for (const s of STAGES) {
+      stageToRun = activeChain[0];
+      for (const s of activeChain) {
         await setStage(admin, plan_review_id, firmId, s, { status: "pending" });
       }
     }
@@ -3301,6 +3336,7 @@ Deno.serve(async (req) => {
                 : remaining[0] ?? null;
             scheduleNextStage(plan_review_id, "prepare_pages", {
               target_source: nextTarget,
+              mode,
             });
             return;
           }
@@ -3324,10 +3360,13 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Advance to the next stage in the canonical order.
-        const idx = STAGES.indexOf(stageToRun);
-        const next = STAGES[idx + 1];
-        if (next) scheduleNextStage(plan_review_id, next);
+        // Advance within the active mode chain (Core or Deep). When a
+        // self-invoke for a single stage finishes, we still advance using
+        // the mode the caller passed — so re-running an arbitrary stage
+        // never accidentally drags the user back into the old long pipeline.
+        const idx = activeChain.indexOf(stageToRun);
+        const next = idx >= 0 ? activeChain[idx + 1] : undefined;
+        if (next) scheduleNextStage(plan_review_id, next, { mode });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         await setStage(admin, plan_review_id, firmId, stageToRun, {
@@ -3341,9 +3380,9 @@ Deno.serve(async (req) => {
           stageToRun === "prepare_pages" ||
           stageToRun === "dna_extract";
         if (!isFatal) {
-          const idx = STAGES.indexOf(stageToRun);
-          const next = STAGES[idx + 1];
-          if (next) scheduleNextStage(plan_review_id, next);
+          const idx = activeChain.indexOf(stageToRun);
+          const next = idx >= 0 ? activeChain[idx + 1] : undefined;
+          if (next) scheduleNextStage(plan_review_id, next, { mode });
         }
       }
     };
@@ -3360,7 +3399,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ ok: true, accepted: true, plan_review_id, stage: stageToRun }),
+      JSON.stringify({ ok: true, accepted: true, plan_review_id, stage: stageToRun, mode }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 202,
