@@ -189,6 +189,66 @@ export async function renderPDFPagesToJpegs(
 }
 
 /**
+ * Browser-side pre-rasterization for plan-review uploads.
+ *
+ * Renders each PDF in `files` to JPEGs and uploads them under
+ * `plan-reviews/<reviewId>/pages/<basename>/p-NNN.jpg`. Returns the manifest
+ * rows ready for upsert into `plan_review_page_assets`.
+ *
+ * The wizard and the inline drop-zone both call this so that the edge
+ * function's `prepare_pages` stage stays a fast no-op (the manifest is
+ * already populated when it runs). When this fails or isn't available,
+ * the edge function still rasterizes server-side as a fallback.
+ *
+ * Caller is responsible for upserting the returned `pageAssets` into
+ * `plan_review_page_assets` and updating `plan_reviews.ai_run_progress`
+ * with `{ pre_rasterized: true, pre_rasterized_pages: N }`.
+ */
+export interface PreparedPageAsset {
+  plan_review_id: string;
+  source_file_path: string;
+  page_index: number;
+  storage_path: string;
+  status: "ready";
+}
+
+export async function rasterizeAndUploadPages(
+  reviewId: string,
+  files: Array<{ name: string; file: File; storagePath: string; pageCount: number }>,
+  uploadFn: (path: string, blob: Blob) => Promise<{ error: { message: string } | null }>,
+  opts: { dpi?: number; quality?: number; startGlobalIndex?: number } = {},
+): Promise<PreparedPageAsset[]> {
+  const dpi = opts.dpi ?? 96;
+  const quality = opts.quality ?? 0.72;
+  let nextGlobalPageIndex = opts.startGlobalIndex ?? 0;
+  const pageAssetRows: PreparedPageAsset[] = [];
+
+  for (const uf of files) {
+    const isPdf = uf.file.type === "application/pdf" || uf.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf) continue;
+    const pageJpegs = await renderPDFPagesToJpegs(uf.file, uf.pageCount, dpi, quality);
+    for (const page of pageJpegs) {
+      const baseName = uf.name.replace(/\.pdf$/i, "");
+      const pagePath = `plan-reviews/${reviewId}/pages/${baseName}/p-${String(page.pageIndex).padStart(3, "0")}.jpg`;
+      const { error: pageUploadError } = await uploadFn(pagePath, page.blob);
+      if (pageUploadError) {
+        throw new Error(`Failed to upload page ${page.pageIndex + 1} for ${uf.name}: ${pageUploadError.message}`);
+      }
+      pageAssetRows.push({
+        plan_review_id: reviewId,
+        source_file_path: uf.storagePath,
+        page_index: nextGlobalPageIndex,
+        storage_path: pagePath,
+        status: "ready",
+      });
+      nextGlobalPageIndex += 1;
+    }
+  }
+
+  return pageAssetRows;
+}
+
+/**
  * Render a single PDF file at higher DPI for AI vision analysis.
  * Returns base64 PNGs only (display variant in renderPDFPagesToImages stays at 150 DPI).
  * 220 DPI gives the model meaningfully more pixel detail to localize against
