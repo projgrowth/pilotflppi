@@ -349,22 +349,59 @@ async function readSignedManifest(
 ): Promise<Array<{ file_path: string; signed_url: string }> | null> {
   const { data: rows } = await admin
     .from("plan_review_page_assets")
-    .select("page_index, storage_path, status")
+    .select("page_index, storage_path, vision_storage_path, status, cached_signed_url, cached_until")
     .eq("plan_review_id", planReviewId)
     .eq("status", "ready")
     .order("page_index", { ascending: true });
   const ready = (rows ?? []) as Array<{
     page_index: number;
     storage_path: string;
+    vision_storage_path: string | null;
     status: string;
+    cached_signed_url: string | null;
+    cached_until: string | null;
   }>;
   if (ready.length === 0) return null;
   const out: Array<{ file_path: string; signed_url: string }> = [];
+  const now = Date.now();
+  // 6h TTL — the pipeline finishes well within this window, and re-runs reuse
+  // the same URLs without paying the ~75-call signing cost on big sets.
+  const TTL_SEC = 60 * 60 * 6;
+  const refreshUpdates: Array<{ page_index: number; cached_signed_url: string; cached_until: string }> = [];
   for (const r of ready) {
+    // Prefer the higher-DPI vision asset for AI calls when present.
+    const sourcePath = r.vision_storage_path ?? r.storage_path;
+    const cachedValid =
+      r.cached_signed_url &&
+      r.cached_until &&
+      new Date(r.cached_until).getTime() > now + 5 * 60 * 1000; // ≥5min remaining
+    if (cachedValid) {
+      out.push({ file_path: sourcePath, signed_url: r.cached_signed_url! });
+      continue;
+    }
     const { data: signed } = await admin.storage
       .from("documents")
-      .createSignedUrl(r.storage_path, 60 * 60);
-    if (signed) out.push({ file_path: r.storage_path, signed_url: signed.signedUrl });
+      .createSignedUrl(sourcePath, TTL_SEC);
+    if (signed) {
+      out.push({ file_path: sourcePath, signed_url: signed.signedUrl });
+      refreshUpdates.push({
+        page_index: r.page_index,
+        cached_signed_url: signed.signedUrl,
+        cached_until: new Date(now + TTL_SEC * 1000).toISOString(),
+      });
+    }
+  }
+  // Best-effort cache write — never block the pipeline on it.
+  if (refreshUpdates.length > 0) {
+    Promise.all(
+      refreshUpdates.map((u) =>
+        admin
+          .from("plan_review_page_assets")
+          .update({ cached_signed_url: u.cached_signed_url, cached_until: u.cached_until })
+          .eq("plan_review_id", planReviewId)
+          .eq("page_index", u.page_index),
+      ),
+    ).catch((err) => console.error("[manifest-cache] refresh failed:", err));
   }
   return out;
 }
