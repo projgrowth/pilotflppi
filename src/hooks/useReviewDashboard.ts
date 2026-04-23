@@ -83,6 +83,35 @@ export const PIPELINE_STAGES: { key: PipelineStage; label: string }[] = [
   { key: "complete", label: "Complete" },
 ];
 
+// Default first-pass pipeline. Mirrors CORE_STAGES on the edge function and
+// is the only thing the dashboard's stepper renders by default. Keeping the
+// list short eliminates the "hidden work" gap that made the UI feel stalled.
+export const CORE_STAGE_KEYS: PipelineStage[] = [
+  "upload",
+  "prepare_pages",
+  "sheet_map",
+  "dna_extract",
+  "discipline_review",
+  "dedupe",
+  "complete",
+];
+
+// Optional Deep QA pass — runs only when the user explicitly invokes it
+// from the dashboard. Reuses core artifacts.
+export const DEEP_STAGE_KEYS: PipelineStage[] = [
+  "verify",
+  "ground_citations",
+  "cross_check",
+  "deferred_scope",
+  "prioritize",
+];
+
+export type PipelineMode = "core" | "deep";
+
+export function stagesForPipelineMode(mode: PipelineMode): PipelineStage[] {
+  return mode === "deep" ? DEEP_STAGE_KEYS : CORE_STAGE_KEYS;
+}
+
 export interface PipelineRow {
   id: string;
   plan_review_id: string;
