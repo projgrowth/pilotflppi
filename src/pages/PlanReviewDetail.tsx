@@ -76,7 +76,7 @@ export default function PlanReviewDetail() {
   const { findingStatuses, updateFindingStatus } = useFindingStatuses(review, user?.id, refetchHistory);
 
   // ── PDF rendering ──────────────────────────────────────────────────────
-  const { pageImages, pageCapInfo, renderingPages, renderProgress, renderDocumentPages, resetPages } =
+  const { pageImages, renderingPages, renderProgress, renderDocumentPages, resetPages } =
     usePdfPageRender();
 
   // ── Pipeline error recovery ───────────────────────────────────────────

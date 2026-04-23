@@ -115,11 +115,8 @@ export function usePdfPageRender() {
       // 3. BACKGROUND pass — render remaining pages, append in order, idle-scheduled.
       if (renderedSoFar < total) {
         setPhase("background");
-        // Run async but don't await — return eager images immediately.
-        const remaining = total - renderedSoFar;
         let bgRenderedSoFar = renderedSoFar;
         let bgBaseGlobal = 0;
-        let alreadyRenderedInThisFile = 0;
         let leftToSkip = renderedSoFar;
 
         // Build per-file work descriptors (startPage, count).

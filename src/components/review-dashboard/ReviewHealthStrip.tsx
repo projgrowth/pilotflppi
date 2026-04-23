@@ -27,6 +27,7 @@ import VerificationBanner from "./VerificationBanner";
 import ReviewerMemoryCard from "./ReviewerMemoryCard";
 import CrossCheckBanner from "./CrossCheckBanner";
 import ReviewSummaryHeader from "./ReviewSummaryHeader";
+import CoverageChip from "./CoverageChip";
 
 interface Props {
   planReviewId: string;
@@ -230,6 +231,8 @@ export default function ReviewHealthStrip({
             jurisdiction={jurisdiction}
           />
         </Chip>
+
+        <CoverageChip planReviewId={planReviewId} />
 
         <span className="ml-auto text-2xs font-mono text-muted-foreground">
           Sheets {presentSheets}/{expectedSheets}
