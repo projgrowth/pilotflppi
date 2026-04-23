@@ -95,6 +95,8 @@ export default function PlanReviewDetail() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [lintIssues, setLintIssues] = useState<LintIssue[]>([]);
   const [showLintDialog, setShowLintDialog] = useState(false);
+  const [aiRunning, setAiRunning] = useState(false);
+  const [aiCompleteFlash, setAiCompleteFlash] = useState<number | null>(null);
   const letterHydratedRef = useRef<string | null>(null);
 
   // Autosave the comment letter to the review row, debounced.
@@ -418,6 +420,31 @@ export default function PlanReviewDetail() {
   const hasFindings = findings.length > 0;
   const openDashboard = () => navigate(`/plan-review/${review.id}/dashboard`);
 
+  const runAICheck = async () => {
+    if (!review || aiRunning) return;
+    setAiRunning(true);
+    setAiCompleteFlash(null);
+    try {
+      const { error } = await supabase.functions.invoke("run-review-pipeline", {
+        body: { plan_review_id: review.id },
+      });
+      if (error) throw error;
+      toast.message("Analysis started", { description: "Watch progress in the topbar." });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to start analysis";
+      toast.error(msg);
+      setAiRunning(false);
+    }
+  };
+
+  const handlePipelineComplete = () => {
+    queryClient.invalidateQueries({ queryKey: ["plan-review-findings-v2", review?.id] });
+    queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+    setAiRunning(false);
+    setAiCompleteFlash(findings.length);
+    setTimeout(() => setAiCompleteFlash(null), 3000);
+  };
+
   const findingsListProps = {
     findings,
     filteredFindings: f.filtered,
@@ -553,14 +580,16 @@ export default function PlanReviewDetail() {
         round={review.round}
         reviewId={review.id}
         daysLeft={daysLeft}
-        aiRunning={false}
-        aiCompleteFlash={null}
+        aiRunning={aiRunning}
+        aiCompleteFlash={aiCompleteFlash}
         hasFindings={hasFindings}
         rounds={projectRounds}
         onBack={() => navigate("/plan-review")}
-        onRunAICheck={openDashboard}
+        onRunAICheck={runAICheck}
         onNavigateRound={(rid) => navigate(`/plan-review/${rid}`)}
         onNewRound={createNewRound}
+        onPipelineComplete={handlePipelineComplete}
+        onOpenDashboard={openDashboard}
       />
 
       {/* Page-cap banner: surface silent 10-page truncation honestly */}
