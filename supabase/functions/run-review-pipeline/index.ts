@@ -1426,16 +1426,16 @@ async function runDisciplineChecks(
   // common failure modes + wording/evidence guidance + shared review rules.
   const systemPrompt = composeDisciplineSystemPrompt(ctx.discipline);
 
-  // Use-type prefix tells the expert which FBC code path applies before they
-  // start reading sheets — prevents commercial-coded findings on residential.
-  const useTypeLine = ctx.useType === "residential"
-    ? `## Project Use Type\nRESIDENTIAL — apply FBC Residential (FBCR), NOT FBC Building. Skip commercial accessibility (FBC Ch.11). Use IRC/FBCR-style code references.\n\n`
-    : ctx.useType === "commercial"
-      ? `## Project Use Type\nCOMMERCIAL — apply FBC Building (not FBCR). Accessibility (FBC Ch.11/ADA) and commercial life-safety apply.\n\n`
-      : ``;
-
+  // Use-type prefix is pre-built once in stageDisciplineReview (ctx.useTypeLine).
   const userText =
-    useTypeLine +
+    ctx.useTypeLine +
+    `## Project DNA\n${dnaSummary}\n\n` +
+    `## Jurisdiction\n${jurSummary}\n\n` +
+    `## Sheets routed to ${ctx.discipline}\n${sheetIndex || "(none)"}\n\n` +
+    `## Mandatory ${ctx.discipline} checklist\n${checklistText}` +
+    memoryBlock +
+    `\n\nAnalyze the attached pages (general-notes pages first, then ${ctx.discipline} sheets). ` +
+    `Return findings via submit_discipline_findings.`;
     `## Project DNA\n${dnaSummary}\n\n` +
     `## Jurisdiction\n${jurSummary}\n\n` +
     `## Sheets routed to ${ctx.discipline}\n${sheetIndex || "(none)"}\n\n` +
