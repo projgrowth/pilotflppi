@@ -6,10 +6,6 @@
 // continues to the next stage where possible.
 
 import { createClient as _createClient } from "https://esm.sh/@supabase/supabase-js@2.74.0";
-// MuPDF.js (WASM) — used to rasterize uploaded PDFs into per-page PNGs so
-// Gemini vision can consume them. Gemini's image_url field rejects raw PDF
-// URLs ("Unsupported image format"), so this conversion is mandatory.
-import * as mupdf from "npm:mupdf@1.3.0";
 import { composeDisciplineSystemPrompt } from "./discipline-experts.ts";
 
 // Untyped client wrapper — the edge function does not have access to generated
@@ -259,6 +255,7 @@ function disciplineForSheetFallback(sheetRef: string): string | null {
 // stages instead of all at once.
 const RASTER_SCALE = 1.528; // ~110 DPI — small/medium PDFs
 const RASTER_SCALE_LARGE = 1.111; // ~80 DPI — used when a PDF has > LARGE_PDF_THRESHOLD pages
+const RASTER_SCALE_COLD = 0.833; // ~60 DPI — cold-start rescue mode for the very first chunk of a PDF
 const LARGE_PDF_THRESHOLD = 40;
 const MAX_PAGES_PER_PDF = 80;
 // JPEG quality used by asJPEG(). 75 is plenty for vision models reading
@@ -271,6 +268,7 @@ const RASTER_JPEG_QUALITY = 75;
 // cold workers; warm workers (rare) finish faster than the round-trip cost
 // of an extra invocation, so this is the right floor.
 const RASTERIZE_CHUNK = 4;
+const RASTERIZE_CHUNK_COLD_START = 1;
 // Parallel concurrency for storage uploads + manifest writes within a chunk.
 // MuPDF rasterization itself stays serial (single-threaded WASM).
 const RASTER_UPLOAD_CONCURRENCY = 6;
@@ -279,10 +277,20 @@ const RASTER_UPLOAD_CONCURRENCY = 6;
 const PAGE_ASSET_RE = /^p-\d{3,}\.(png|jpe?g)$/;
 const PAGE_ASSET_INDEX_RE = /p-(\d{3,})\.(png|jpe?g)$/;
 
+let mupdfModulePromise: Promise<any> | null = null;
+
+async function getMupdf() {
+  if (!mupdfModulePromise) {
+    mupdfModulePromise = import("npm:mupdf@1.3.0");
+  }
+  return await mupdfModulePromise;
+}
+
 async function rasterizePdfStreaming(
   pdfBytes: Uint8Array,
   onPage: (pageIndex: number, jpegBytes: Uint8Array) => Promise<void>,
 ): Promise<number> {
+  const mupdf = await getMupdf();
   const doc = mupdf.Document.openDocument(pdfBytes, "application/pdf");
   try {
     const pageCount = Math.min(doc.countPages(), MAX_PAGES_PER_PDF);
@@ -553,7 +561,8 @@ async function rasterizeNextChunk(
       continue;
     }
     const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer());
-
+    const isFirstChunkForSource = doneSet.size === 0;
+    const mupdf = await getMupdf();
     const doc = mupdf.Document.openDocument(pdfBytes, "application/pdf");
     let rasterized = 0;
     let totalPages = 0;
@@ -577,7 +586,8 @@ async function rasterizeNextChunk(
 
       // Find the next contiguous chunk of missing pages for this PDF.
       const targets: number[] = [];
-      for (let i = 0; i < totalPages && targets.length < RASTERIZE_CHUNK; i++) {
+      const chunkBudget = isFirstChunkForSource ? RASTERIZE_CHUNK_COLD_START : RASTERIZE_CHUNK;
+      for (let i = 0; i < totalPages && targets.length < chunkBudget; i++) {
         if (!doneSet.has(i)) targets.push(i);
       }
       chunkPlannedSize = targets.length;
@@ -587,7 +597,11 @@ async function rasterizeNextChunk(
       const pagesDir = `${dir}/pages`;
 
       // Adaptive DPI: large PDFs render at ~80 DPI to keep per-page CPU low.
-      const scale = totalPages > LARGE_PDF_THRESHOLD ? RASTER_SCALE_LARGE : RASTER_SCALE;
+      const scale = isFirstChunkForSource
+        ? RASTER_SCALE_COLD
+        : totalPages > LARGE_PDF_THRESHOLD
+          ? RASTER_SCALE_LARGE
+          : RASTER_SCALE;
       const matrix = mupdf.Matrix.scale(scale, scale);
 
       // Render serially (MuPDF is single-threaded), buffer JPEGs in memory,
@@ -653,7 +667,12 @@ async function rasterizeNextChunk(
           .from("plan_review_page_assets")
           .upsert(manifestRows, { onConflict: "plan_review_id,page_index" });
         if (insErr) console.error(`[prepare_pages] bulk manifest upsert failed:`, insErr);
-        else rasterized = manifestRows.length;
+        else {
+          rasterized = manifestRows.length;
+          for (const rp of rendered) {
+            if (uploadOk.has(rp.globalIndex)) doneSet.add(rp.localIndex);
+          }
+        }
       }
 
       // Determine if this PDF still has more pages to do after this chunk.
@@ -821,6 +840,37 @@ async function stagePreparePages(
   firmId: string | null,
   targetSource?: string | null,
 ) {
+  const { data: review } = await admin
+    .from("plan_reviews")
+    .select("ai_run_progress")
+    .eq("id", planReviewId)
+    .maybeSingle();
+  const progress = (review as { ai_run_progress?: Record<string, unknown> | null } | null)?.ai_run_progress ?? {};
+  const expectedPreparedPages =
+    typeof progress.pre_rasterized_pages === "number" ? progress.pre_rasterized_pages : 0;
+  const { count: existingPreparedPages } = await admin
+    .from("plan_review_page_assets")
+    .select("id", { count: "exact", head: true })
+    .eq("plan_review_id", planReviewId)
+    .eq("status", "ready");
+
+  if (
+    progress.pre_rasterized === true &&
+    expectedPreparedPages > 0 &&
+    (existingPreparedPages ?? 0) >= expectedPreparedPages
+  ) {
+    _pageManifestCache.delete(planReviewId);
+    return {
+      rasterized: 0,
+      source: null,
+      target_source: targetSource ?? null,
+      remaining_sources: [],
+      needs_more_chunks: false,
+      pre_rasterized: true,
+      prepared_pages: existingPreparedPages ?? 0,
+    };
+  }
+
   const result = await rasterizeNextChunk(admin, planReviewId, firmId, targetSource);
   // Clear the per-invocation cache so the next worker re-reads from DB.
   _pageManifestCache.delete(planReviewId);

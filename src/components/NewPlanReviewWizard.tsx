@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { callAI } from "@/lib/ai";
-import { renderTitleBlock, validatePDFHeader, getPDFPageCount } from "@/lib/pdf-utils";
+import { renderTitleBlock, renderPDFPagesToJpegs, validatePDFHeader, getPDFPageCount } from "@/lib/pdf-utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -82,6 +82,8 @@ const MAX_TOTAL_PAGES = 120;
 // AI title-block extraction is best-effort. If the `ai` edge function is
 // slow or failing, fall back to manual entry instead of hanging Step 1.
 const EXTRACTION_TIMEOUT_MS = 20_000;
+const CLIENT_PAGE_RASTER_DPI = 96;
+const CLIENT_PAGE_RASTER_QUALITY = 0.72;
 
 interface UploadedFile {
  name: string;
@@ -387,8 +389,16 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  setCreatedReviewId(review.id);
  setCreatedProjectId(projectId);
 
- // Upload files to storage
+  // Upload files to storage
  const fileUrls: string[] = [];
+  const pageAssetRows: Array<{
+    plan_review_id: string;
+    source_file_path: string;
+    page_index: number;
+    storage_path: string;
+    status: "ready";
+  }> = [];
+  let nextGlobalPageIndex = 0;
  for (const uf of uploadedFiles) {
  const path = `plan-reviews/${review.id}/${uf.name}`;
  const { error: uploadError } = await supabase.storage
@@ -400,13 +410,44 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  }
  // Store the path, not a public URL — bucket is private
  fileUrls.push(path);
+
+  if (uf.file.type === "application/pdf" || uf.name.toLowerCase().endsWith(".pdf")) {
+    const pageJpegs = await renderPDFPagesToJpegs(
+      uf.file,
+      uf.pageCount,
+      CLIENT_PAGE_RASTER_DPI,
+      CLIENT_PAGE_RASTER_QUALITY,
+    );
+    for (const page of pageJpegs) {
+      const pagePath = `plan-reviews/${review.id}/pages/${uf.name.replace(/\.pdf$/i, "")}/p-${String(page.pageIndex).padStart(3, "0")}.jpg`;
+      const { error: pageUploadError } = await supabase.storage
+        .from("documents")
+        .upload(pagePath, page.blob, { upsert: true, contentType: "image/jpeg" });
+      if (pageUploadError) {
+        throw new Error(`Failed to upload page ${page.pageIndex + 1} for ${uf.name}: ${pageUploadError.message}`);
+      }
+      pageAssetRows.push({
+        plan_review_id: review.id,
+        source_file_path: path,
+        page_index: nextGlobalPageIndex,
+        storage_path: pagePath,
+        status: "ready",
+      });
+      nextGlobalPageIndex += 1;
+    }
+  }
  }
 
   // Update plan_review with file URLs
  if (fileUrls.length > 0) {
  await supabase
  .from("plan_reviews")
- .update({ file_urls: fileUrls })
+  .update({
+    file_urls: fileUrls,
+    ai_run_progress: pageAssetRows.length > 0
+      ? { pre_rasterized: true, pre_rasterized_pages: pageAssetRows.length }
+      : undefined,
+  })
  .eq("id", review.id);
 
  // Also insert into plan_review_files so the pipeline can find them
@@ -422,6 +463,15 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  if (prfErr) {
  toast.error(`Failed to register files for pipeline: ${prfErr.message}`);
  }
+
+  if (pageAssetRows.length > 0) {
+    const { error: assetErr } = await supabase
+      .from("plan_review_page_assets")
+      .upsert(pageAssetRows, { onConflict: "plan_review_id,page_index" });
+    if (assetErr) {
+      throw new Error(`Failed to register prepared pages: ${assetErr.message}`);
+    }
+  }
  }
 
  queryClient.invalidateQueries({ queryKey: ["plan-reviews"] });

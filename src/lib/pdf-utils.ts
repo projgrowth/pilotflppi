@@ -152,6 +152,42 @@ export async function renderPDFPagesToImages(
   return images;
 }
 
+export async function renderPDFPagesToJpegs(
+  file: File,
+  maxPages = 10,
+  dpi = 110,
+  quality = 0.75,
+): Promise<Array<{ pageIndex: number; blob: Blob }>> {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const totalPages = Math.min(pdf.numPages, maxPages);
+  const pages: Array<{ pageIndex: number; blob: Blob }> = [];
+
+  for (let i = 0; i < totalPages; i++) {
+    const page = await pdf.getPage(i + 1);
+    const viewport = page.getViewport({ scale: dpi / 72 });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext("2d")!;
+
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((next) => {
+        if (next) resolve(next);
+        else reject(new Error(`Failed to encode page ${i + 1} as JPEG`));
+      }, "image/jpeg", quality);
+    });
+
+    pages.push({ pageIndex: i, blob });
+    canvas.width = 0;
+    canvas.height = 0;
+  }
+
+  return pages;
+}
+
 /**
  * Render a single PDF file at higher DPI for AI vision analysis.
  * Returns base64 PNGs only (display variant in renderPDFPagesToImages stays at 150 DPI).
