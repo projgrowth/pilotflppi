@@ -15,6 +15,7 @@ import { cancelPipelineForReview, clearOrphanedPipelineRows, resumePipelineForRe
 import { useFirmId } from "@/hooks/useFirmId";
 import { CORE_STAGES, DEEP_STAGES, shortStageLabel } from "@/lib/pipeline-stages";
 import { useRecentPipelineErrors } from "@/hooks/usePipelineErrors";
+import { CostTimingPanel } from "@/components/pipeline/CostTimingPanel";
 import { cn } from "@/lib/utils";
 
 function formatErrorTime(iso: string): string {
