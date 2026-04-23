@@ -18,7 +18,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useParams, useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { streamAI } from "@/lib/ai";
 import { useFirmSettings } from "@/hooks/useFirmSettings";
@@ -58,6 +58,7 @@ import { usePipelineStatus } from "@/hooks/useReviewDashboard";
 import { reprepareInBrowser } from "@/lib/reprepare-in-browser";
 import { StuckRecoveryBanner } from "@/components/plan-review/StuckRecoveryBanner";
 import { RoundCarryoverPanel } from "@/components/plan-review/RoundCarryoverPanel";
+import { UploadProgressBar } from "@/components/plan-review/UploadProgressBar";
 import { Wand2, AlertTriangle, Loader2 } from "lucide-react";
 
 type RightPanelMode = "findings" | "checklist" | "completeness" | "letter" | "county";
@@ -98,6 +99,23 @@ export default function PlanReviewDetail() {
       msg.includes("haven't been prepared")
     );
   })();
+
+  // Live page-asset count drives the "needs preparation" banner — when files
+  // are uploaded but no rasterized pages exist yet, the pipeline cannot run
+  // and we need to nudge the user to prepare before they hit "Re-Analyze".
+  const { data: pageAssetCount = 0 } = useQuery({
+    queryKey: ["plan-review-page-asset-count", id],
+    queryFn: async () => {
+      if (!id) return 0;
+      const { count } = await supabase
+        .from("plan_review_page_assets")
+        .select("id", { count: "exact", head: true })
+        .eq("plan_review_id", id);
+      return count ?? 0;
+    },
+    enabled: !!id,
+    refetchInterval: 5000,
+  });
   const handleReprepareInBrowser = useCallback(async () => {
     if (!id || reprepping) return;
     setReprepping(true);
@@ -143,6 +161,11 @@ export default function PlanReviewDetail() {
   const [showLintDialog, setShowLintDialog] = useState(false);
   const [aiRunning, setAiRunning] = useState(false);
   const [aiCompleteFlash, setAiCompleteFlash] = useState<number | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{
+    phase: string;
+    prepared: number;
+    expected: number;
+  } | null>(null);
   const letterHydratedRef = useRef<string | null>(null);
 
   // Autosave the comment letter to the review row, debounced.
@@ -193,6 +216,7 @@ export default function PlanReviewDetail() {
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || !review) return;
     setUploading(true);
+    setUploadProgress({ phase: "Starting…", prepared: 0, expected: 0 });
     try {
       const { uploadPlanReviewFiles } = await import("@/lib/plan-review-upload");
       const { count: existingPageCount } = await supabase
@@ -207,13 +231,19 @@ export default function PlanReviewDetail() {
         existingPageCount: existingPageCount ?? 0,
         files: Array.from(files),
         userId: user?.id ?? null,
+        onProgress: (p) => setUploadProgress(p),
       });
 
       // Surface every meaningful issue from the upload pipeline. The previous
       // code swallowed pipeline-invoke failures with a console.warn, so the
       // user thought the upload had succeeded when nothing was running.
       for (const w of result.warnings) toast.warning(w);
-      if (!result.pipelineStarted) {
+      if (result.partialRasterize) {
+        toast.error(
+          `Only ${result.pageAssetCount} of ${result.expectedPages} pages prepared. Click "Prepare pages now" to retry the gaps before analyzing.`,
+          { duration: 8000 },
+        );
+      } else if (!result.pipelineStarted) {
         toast.error("Pipeline did not start — click Re-run on the dashboard.", {
           action: {
             label: "Open dashboard",
@@ -229,6 +259,7 @@ export default function PlanReviewDetail() {
       }
 
       queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+      queryClient.invalidateQueries({ queryKey: ["plan-review-page-asset-count", id] });
       hasAutoRendered.current = false;
       resetPages();
       setUploadSuccess(true);
@@ -237,8 +268,24 @@ export default function PlanReviewDetail() {
       toast.error(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   };
+
+  // Block tab close while upload/rasterization is in flight — closing now
+  // would leave the server holding a PDF with no page assets, which used to
+  // require manual `reprepareInBrowser` recovery 20 minutes later.
+  useEffect(() => {
+    if (!uploading) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue =
+        "Pages are still being prepared. Closing now will require you to re-open the project to finish.";
+      return e.returnValue;
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [uploading]);
 
   const createNewRound = () => {
     // New rounds belong on the v2 dashboard so deficiencies_v2 carries forward
@@ -443,6 +490,24 @@ export default function PlanReviewDetail() {
 
   const runAICheck = async () => {
     if (!review || aiRunning) return;
+
+    // Re-Analyze on a review that already has findings is destructive: it
+    // replaces the current results and burns ~2-4 minutes of model time. The
+    // button looks identical with 0 vs 47 findings, so a misclick used to be
+    // silent and expensive. Confirm when there's something to lose.
+    if (findings.length > 0) {
+      const ok = await confirm({
+        title: `Re-analyze ${findings.length} finding${findings.length === 1 ? "" : "s"}?`,
+        description:
+          "This will replace the current results and take 2-4 minutes. Any reviewer notes on existing findings will be kept, but the findings themselves will be regenerated.",
+        confirmLabel: "Re-analyze",
+        cancelLabel: "Keep current results",
+        variant: "destructive",
+        rememberKey: "reanalyze-with-findings",
+      });
+      if (!ok) return;
+    }
+
     setAiRunning(true);
     setAiCompleteFlash(null);
     // Drop cached terminal-stage status so the freshly-mounted stepper doesn't
@@ -611,9 +676,17 @@ export default function PlanReviewDetail() {
         onOpenDashboard={openDashboard}
       />
 
+      <UploadProgressBar
+        uploading={uploading}
+        prepared={uploadProgress?.prepared ?? 0}
+        expected={uploadProgress?.expected ?? 0}
+        phase={uploadProgress?.phase}
+      />
+
       {preparePagesErrored && (
         <div className="shrink-0 border-b border-destructive/30 bg-destructive/5 px-4 py-2 flex items-center gap-3">
           <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
+
           <div className="flex-1 min-w-0">
             <span className="text-2xs font-semibold text-destructive uppercase tracking-wide mr-2">
               Pages not prepared
@@ -654,6 +727,9 @@ export default function PlanReviewDetail() {
               recoveryCount={typeof progress.auto_recovery_count === "number" ? progress.auto_recovery_count : undefined}
               aiCheckStatus={status}
               failureReason={typeof progress.failure_reason === "string" ? progress.failure_reason : null}
+              needsPreparation={fileUrls.length > 0 && pageAssetCount === 0 && !uploading}
+              onPrepareNow={handleReprepareInBrowser}
+              preparingNow={reprepping}
             />
           </div>
         );

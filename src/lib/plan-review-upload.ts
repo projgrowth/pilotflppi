@@ -30,21 +30,31 @@ export interface UploadPlanReviewArgs {
   existingPageCount: number | null;
   files: File[];
   userId: string | null;
+  /** Optional progress callback so the UI can render a persistent bar. */
+  onProgress?: (p: { phase: string; prepared: number; expected: number }) => void;
 }
 
 export interface UploadPlanReviewResult {
   acceptedCount: number;
   pageAssetCount: number;
   pipelineStarted: boolean;
+  /** True when rasterization succeeded for <80% of expected pages. */
+  partialRasterize: boolean;
+  expectedPages: number;
   warnings: string[];
 }
+
+/** Below this success ratio we refuse to start the pipeline. */
+const MIN_RASTERIZE_RATIO = 0.8;
 
 export async function uploadPlanReviewFiles(
   args: UploadPlanReviewArgs,
 ): Promise<UploadPlanReviewResult> {
-  const { reviewId, round, existingFileUrls, existingPageCount, files, userId } =
+  const { reviewId, round, existingFileUrls, existingPageCount, files, userId, onProgress } =
     args;
   const warnings: string[] = [];
+
+  onProgress?.({ phase: "Validating PDFs…", prepared: 0, expected: 0 });
 
   const acceptedFiles: File[] = [];
   for (const f of files) {
@@ -66,6 +76,7 @@ export async function uploadPlanReviewFiles(
   }
 
   // 1. Upload PDFs.
+  onProgress?.({ phase: "Uploading PDFs…", prepared: 0, expected: 0 });
   const newFilePaths: string[] = [];
   for (const file of acceptedFiles) {
     const path = `plan-reviews/${reviewId}/round-${round}/${file.name}`;
@@ -111,6 +122,11 @@ export async function uploadPlanReviewFiles(
           totalExpectedPages += pageCount;
         }
       }
+      onProgress?.({
+        phase: "Preparing pages in your browser…",
+        prepared: 0,
+        expected: totalExpectedPages,
+      });
       const { succeeded, failures } = await rasterizeAndUploadPagesResilient(
         reviewId,
         pairs,
@@ -128,6 +144,11 @@ export async function uploadPlanReviewFiles(
         pageIndex: f.pageIndex,
         reason: f.reason ?? "unknown",
       }));
+      onProgress?.({
+        phase: "Finalizing…",
+        prepared: succeeded.length,
+        expected: totalExpectedPages,
+      });
       if (failures.length > 0) {
         const byFile = new Map<string, number>();
         for (const f of failures) byFile.set(f.fileName, (byFile.get(f.fileName) ?? 0) + 1);
@@ -202,18 +223,34 @@ export async function uploadPlanReviewFiles(
     }
   }
 
-  // 6. Kick off the pipeline. This is the step previously swallowed by a
-  // console.warn — surface it now so the user knows when nothing started.
-  const pipeline = await startPipeline(reviewId, "core");
-  if (!pipeline.ok) {
-    warnings.push(`Pipeline did not start: ${pipeline.message}`);
+  // 6. Decide whether to start the pipeline. We refuse on a partial manifest
+  // (<80% rasterized) — running on incomplete pages is the silent-failure
+  // precursor we just spent rounds 1-6 cleaning up after. Caller surfaces a
+  // "Prepare pages first" CTA via the partialRasterize flag.
+  const successRatio =
+    totalExpectedPages > 0 ? pageAssetRows.length / totalExpectedPages : 1;
+  const partialRasterize =
+    totalExpectedPages > 0 && successRatio < MIN_RASTERIZE_RATIO;
+
+  let pipelineStarted = false;
+  if (partialRasterize) {
+    warnings.push(
+      `Pipeline NOT started — only ${pageAssetRows.length} of ${totalExpectedPages} pages prepared. Use "Prepare pages now" to retry the gaps.`,
+    );
+  } else {
+    const pipeline = await startPipeline(reviewId, "core");
+    if (!pipeline.ok) {
+      warnings.push(`Pipeline did not start: ${pipeline.message}`);
+    }
+    pipelineStarted = pipeline.ok;
   }
-  const pipelineStarted = pipeline.ok;
 
   return {
     acceptedCount: newFilePaths.length,
     pageAssetCount: pageAssetRows.length,
     pipelineStarted,
+    partialRasterize,
+    expectedPages: totalExpectedPages,
     warnings,
   };
 }
