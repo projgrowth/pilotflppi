@@ -2,14 +2,14 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Activity, AlertTriangle, ExternalLink, Loader2, Square, Trash2 } from "lucide-react";
+import { Activity, AlertTriangle, ExternalLink, Loader2, Play, Square, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import FppEmptyState from "@/components/shared/FppEmptyState";
 import { useAllActivePipelines, type ReviewActivity } from "@/hooks/useAllActivePipelines";
-import { cancelPipelineForReview, clearOrphanedPipelineRows } from "@/lib/pipeline-cancel";
+import { cancelPipelineForReview, clearOrphanedPipelineRows, resumePipelineForReview } from "@/lib/pipeline-cancel";
 import { useFirmId } from "@/hooks/useFirmId";
 import { cn } from "@/lib/utils";
 
@@ -86,15 +86,21 @@ function MiniStepper({ activity }: { activity: ReviewActivity }) {
 function ActivityRow({
   activity,
   onCancel,
+  onResume,
   cancelling,
+  resuming,
 }: {
   activity: ReviewActivity;
   onCancel: (id: string) => void;
+  onResume: (id: string, stage: string) => void;
   cancelling: boolean;
+  resuming: boolean;
 }) {
   const project = activity.meta?.project;
   const round = activity.meta?.round ?? 1;
   const current = activity.current;
+  const canResume =
+    activity.isStuck && current?.status === "running" && !!current.stage;
 
   return (
     <Card className="overflow-hidden">
@@ -135,6 +141,21 @@ function ActivityRow({
                 Open
               </Link>
             </Button>
+            {canResume && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onResume(activity.planReviewId, current!.stage)}
+                disabled={resuming}
+              >
+                {resuming ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                ) : (
+                  <Play className="h-3.5 w-3.5 mr-1" />
+                )}
+                Resume
+              </Button>
+            )}
             <Button
               size="sm"
               variant="destructive"
@@ -194,6 +215,20 @@ export default function PipelineActivity() {
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [cancellingAll, setCancellingAll] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [resumingId, setResumingId] = useState<string | null>(null);
+
+  const handleResume = async (planReviewId: string, stage: string) => {
+    setResumingId(planReviewId);
+    try {
+      await resumePipelineForReview(planReviewId, stage);
+      toast.success(`Resumed ${stage.replace(/_/g, " ")}`);
+      qc.invalidateQueries({ queryKey: ["pipeline-activity-all"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to resume");
+    } finally {
+      setResumingId(null);
+    }
+  };
 
   const active = useMemo(() => data.filter((a) => a.hasActive), [data]);
   const recent = useMemo(() => data.filter((a) => !a.hasActive), [data]);
