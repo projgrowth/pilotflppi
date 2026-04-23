@@ -432,6 +432,9 @@ export default function PlanReviewDetail() {
     if (!review || aiRunning) return;
     setAiRunning(true);
     setAiCompleteFlash(null);
+    // Drop cached terminal-stage status so the freshly-mounted stepper doesn't
+    // immediately see stale "complete" from the previous run and fire onComplete.
+    queryClient.removeQueries({ queryKey: ["pipeline_status", review.id] });
     try {
       const { error } = await supabase.functions.invoke("run-review-pipeline", {
         body: { plan_review_id: review.id },
@@ -445,13 +448,16 @@ export default function PlanReviewDetail() {
     }
   };
 
-  const handlePipelineComplete = () => {
+  const handlePipelineComplete = useCallback(() => {
+    // Idempotent: if we're not currently running, ignore. Defends against any
+    // future regression of the stepper firing onComplete more than once.
+    if (!aiRunning) return;
     queryClient.invalidateQueries({ queryKey: ["plan-review-findings-v2", review?.id] });
     queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
     setAiRunning(false);
     setAiCompleteFlash(findings.length);
     setTimeout(() => setAiCompleteFlash(null), 3000);
-  };
+  }, [aiRunning, queryClient, review?.id, id, findings.length]);
 
   const findingsListProps = {
     findings,

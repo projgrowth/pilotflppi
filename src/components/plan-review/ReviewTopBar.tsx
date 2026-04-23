@@ -117,9 +117,9 @@ export function ReviewTopBar({
         <DeadlineRing daysElapsed={30 - daysLeft} totalDays={30} size={30} />
 
         {aiRunning ? (
-          <Popover open>
+          <Popover open={aiRunning} onOpenChange={() => { /* allow user-dismiss; pipeline keeps running */ }} modal={false}>
             <PopoverTrigger asChild>{button}</PopoverTrigger>
-            <PopoverContent align="end" className="w-80 p-3" sideOffset={8}>
+            <PopoverContent align="end" className="w-80 p-3" sideOffset={8} onOpenAutoFocus={(e) => e.preventDefault()}>
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-xs font-semibold">Analyzing plans</span>
                 {onOpenDashboard && (

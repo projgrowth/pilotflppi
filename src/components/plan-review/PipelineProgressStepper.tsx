@@ -102,11 +102,20 @@ export function PipelineProgressStepper({
     return m;
   }, [rows]);
 
-  // Fire onComplete once when the terminal stage of the active mode lands.
-  const completeRow = byStage.get(terminalKey);
-  if (completeRow?.status === "complete" && onComplete) {
-    queueMicrotask(onComplete);
-  }
+  // Fire onComplete exactly once per pipeline-completion transition.
+  // Latch on the terminal row's started_at so a fresh run (new started_at)
+  // re-arms the callback. Using an effect (not render-body queueMicrotask)
+  // prevents an invalidation→refetch→render→fire loop that crashed mobile.
+  const firedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    const row = byStage.get(terminalKey);
+    const key = row?.started_at ?? null;
+    if (row?.status === "complete" && onComplete && firedForRef.current !== key) {
+      firedForRef.current = key;
+      onComplete();
+    }
+    if (row?.status !== "complete") firedForRef.current = null;
+  }, [byStage, terminalKey, onComplete]);
 
   const stages = compact
     ? PIPELINE_STAGES.filter((s) => visibleKeys.includes(s.key))
