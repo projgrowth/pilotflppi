@@ -453,7 +453,8 @@ async function rasterizeNextChunk(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
   firmId: string | null,
-): Promise<{ done: boolean; rasterized: number; source?: string }> {
+  targetSource?: string | null,
+): Promise<{ done: boolean; rasterized: number; source?: string; remaining_sources?: string[] }> {
   const { data: files, error } = await admin
     .from("plan_review_files")
     .select("file_path")
@@ -491,7 +492,15 @@ async function rasterizeNextChunk(
     0,
   );
 
-  for (const f of (files ?? []) as Array<{ file_path: string }>) {
+  const allFiles = (files ?? []) as Array<{ file_path: string }>;
+  // If a target source was passed, restrict the search to that file. This lets
+  // the dispatcher fork two parallel `prepare_pages` workers, each pinned to a
+  // different PDF, without them fighting over the same chunk.
+  const orderedFiles = targetSource
+    ? allFiles.filter((f) => f.file_path === targetSource)
+    : allFiles;
+
+  for (const f of orderedFiles) {
     const filePath = f.file_path;
     const isPdf = filePath.toLowerCase().endsWith(".pdf");
     const doneSet = doneBySource.get(filePath) ?? new Set<number>();
@@ -515,12 +524,14 @@ async function rasterizeNextChunk(
             { onConflict: "plan_review_id,page_index" },
           );
         nextGlobal++;
-        return { done: false, rasterized: 1, source: filePath };
+        const remaining = computeRemainingSources(allFiles, doneBySource, filePath, true);
+        return { done: remaining.length === 0, rasterized: 1, source: filePath, remaining_sources: remaining };
       }
       continue;
     }
 
-    // Download just enough metadata to know the page count.
+    // Download the PDF ONCE, open MuPDF ONCE — reuse the same handle for both
+    // page-count and rasterization. Saves a full PDF re-parse per chunk.
     const { data: pdfBlob, error: dlErr } = await admin.storage
       .from("documents")
       .download(filePath);
@@ -529,70 +540,62 @@ async function rasterizeNextChunk(
       continue;
     }
     const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer());
+
     const doc = mupdf.Document.openDocument(pdfBytes, "application/pdf");
+    let rasterized = 0;
     let totalPages = 0;
+    let stillHasMore = false;
+    let chunkPlannedSize = 0;
     try {
       totalPages = Math.min(doc.countPages(), MAX_PAGES_PER_PDF);
-    } finally {
-      doc.destroy();
-    }
 
-    // All pages already done?
-    let allDone = true;
-    for (let i = 0; i < totalPages; i++) {
-      if (!doneSet.has(i)) {
-        allDone = false;
-        break;
+      // All pages already done?
+      let allDone = true;
+      for (let i = 0; i < totalPages; i++) {
+        if (!doneSet.has(i)) {
+          allDone = false;
+          break;
+        }
       }
-    }
-    if (allDone) continue;
+      if (allDone) {
+        doc.destroy();
+        continue;
+      }
 
-    // Find the next contiguous chunk of missing pages for this PDF.
-    const targets: number[] = [];
-    for (let i = 0; i < totalPages && targets.length < RASTERIZE_CHUNK; i++) {
-      if (!doneSet.has(i)) targets.push(i);
-    }
+      // Find the next contiguous chunk of missing pages for this PDF.
+      const targets: number[] = [];
+      for (let i = 0; i < totalPages && targets.length < RASTERIZE_CHUNK; i++) {
+        if (!doneSet.has(i)) targets.push(i);
+      }
+      chunkPlannedSize = targets.length;
 
-    const lastSlash = filePath.lastIndexOf("/");
-    const dir = lastSlash >= 0 ? filePath.slice(0, lastSlash) : "";
-    const pagesDir = `${dir}/pages`;
+      const lastSlash = filePath.lastIndexOf("/");
+      const dir = lastSlash >= 0 ? filePath.slice(0, lastSlash) : "";
+      const pagesDir = `${dir}/pages`;
 
-    const doc2 = mupdf.Document.openDocument(pdfBytes, "application/pdf");
-    const matrix = mupdf.Matrix.scale(RASTER_SCALE, RASTER_SCALE);
-    let rasterized = 0;
-    try {
+      const matrix = mupdf.Matrix.scale(RASTER_SCALE, RASTER_SCALE);
+
+      // Render serially (MuPDF is single-threaded), buffer PNGs in memory,
+      // then upload + manifest in parallel batches. Storage and Postgres
+      // absorb the concurrency easily and this collapses ~6s of serial waits
+      // into ~1s for a 24-page chunk.
+      type RenderedPage = { localIndex: number; globalIndex: number; png: Uint8Array; storagePath: string };
+      const rendered: RenderedPage[] = [];
       for (const i of targets) {
-        const page = doc2.loadPage(i);
+        const page = doc.loadPage(i);
         try {
           const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false);
           try {
             const png = pixmap.asPNG();
             const pageName = `p-${String(i).padStart(3, "0")}.png`;
             const fullPath = `${pagesDir}/${pageName}`;
-            const { error: upErr } = await admin.storage
-              .from("documents")
-              .upload(fullPath, png, { contentType: "image/png", upsert: true });
-            if (upErr) {
-              console.error(`[prepare_pages] upload failed for ${fullPath}:`, upErr);
-              continue;
-            }
-            await admin
-              .from("plan_review_page_assets")
-              .upsert(
-                [
-                  {
-                    plan_review_id: planReviewId,
-                    firm_id: firmId,
-                    source_file_path: filePath,
-                    page_index: nextGlobal,
-                    storage_path: fullPath,
-                    status: "ready",
-                  },
-                ],
-                { onConflict: "plan_review_id,page_index" },
-              );
+            rendered.push({
+              localIndex: i,
+              globalIndex: nextGlobal,
+              png,
+              storagePath: fullPath,
+            });
             nextGlobal++;
-            rasterized++;
           } finally {
             pixmap.destroy();
           }
@@ -600,27 +603,89 @@ async function rasterizeNextChunk(
           page.destroy();
         }
       }
+
+      // Parallel uploads in batches of RASTER_UPLOAD_CONCURRENCY.
+      const uploadOk = new Set<number>();
+      for (let b = 0; b < rendered.length; b += RASTER_UPLOAD_CONCURRENCY) {
+        const batch = rendered.slice(b, b + RASTER_UPLOAD_CONCURRENCY);
+        await Promise.all(
+          batch.map(async (rp) => {
+            const { error: upErr } = await admin.storage
+              .from("documents")
+              .upload(rp.storagePath, rp.png, { contentType: "image/png", upsert: true });
+            if (upErr) {
+              console.error(`[prepare_pages] upload failed for ${rp.storagePath}:`, upErr);
+              return;
+            }
+            uploadOk.add(rp.globalIndex);
+          }),
+        );
+      }
+
+      // Bulk-upsert manifest rows in a single round-trip.
+      const manifestRows = rendered
+        .filter((rp) => uploadOk.has(rp.globalIndex))
+        .map((rp) => ({
+          plan_review_id: planReviewId,
+          firm_id: firmId,
+          source_file_path: filePath,
+          page_index: rp.globalIndex,
+          storage_path: rp.storagePath,
+          status: "ready",
+        }));
+      if (manifestRows.length > 0) {
+        const { error: insErr } = await admin
+          .from("plan_review_page_assets")
+          .upsert(manifestRows, { onConflict: "plan_review_id,page_index" });
+        if (insErr) console.error(`[prepare_pages] bulk manifest upsert failed:`, insErr);
+        else rasterized = manifestRows.length;
+      }
+
+      // Determine if this PDF still has more pages to do after this chunk.
+      for (let i = 0; i < totalPages; i++) {
+        if (!doneSet.has(i) && !targets.includes(i)) {
+          stillHasMore = true;
+          break;
+        }
+      }
     } finally {
-      doc2.destroy();
+      doc.destroy();
     }
 
-    // Determine if this PDF still has more pages to do after this chunk.
-    let stillHasMore = false;
-    for (let i = 0; i < totalPages; i++) {
-      if (!doneSet.has(i) && !targets.includes(i)) {
-        stillHasMore = true;
-        break;
-      }
-    }
-    return {
-      done: !stillHasMore && filePath === (files ?? [])[(files ?? []).length - 1]?.file_path,
-      rasterized,
-      source: filePath,
-    };
+    void chunkPlannedSize;
+    const remaining = computeRemainingSources(allFiles, doneBySource, filePath, !stillHasMore);
+    const overallDone = !stillHasMore && remaining.length === 0;
+    return { done: overallDone, rasterized, source: filePath, remaining_sources: remaining };
   }
 
-  // Nothing left to do across all files.
-  return { done: true, rasterized: 0 };
+  // Nothing left to do across the requested scope.
+  return { done: true, rasterized: 0, remaining_sources: [] };
+}
+
+/**
+ * Returns the list of source file paths that still have un-rasterized pages
+ * AFTER the current chunk completes. Used by the dispatcher to decide whether
+ * to fork a parallel `prepare_pages` worker on a different PDF.
+ */
+function computeRemainingSources(
+  allFiles: Array<{ file_path: string }>,
+  doneBySource: Map<string, Set<number>>,
+  justFinishedPath: string,
+  justFinishedSourceFullyDone: boolean,
+): string[] {
+  const remaining: string[] = [];
+  for (const f of allFiles) {
+    if (f.file_path === justFinishedPath) {
+      if (!justFinishedSourceFullyDone) remaining.push(f.file_path);
+      continue;
+    }
+    // We can't know the page count of other PDFs without opening them, but
+    // any PDF with zero manifest entries OR fewer than its (unknown) total
+    // is a candidate. We treat absence/short manifest as "has work".
+    const done = doneBySource.get(f.file_path);
+    if (!done || done.size === 0) remaining.push(f.file_path);
+  }
+  return remaining;
 }
 
 
