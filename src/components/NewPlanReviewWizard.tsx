@@ -442,7 +442,12 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  if (fileUrls.length > 0) {
  await supabase
  .from("plan_reviews")
- .update({ file_urls: fileUrls })
+  .update({
+    file_urls: fileUrls,
+    ai_run_progress: pageAssetRows.length > 0
+      ? { pre_rasterized: true, pre_rasterized_pages: pageAssetRows.length }
+      : undefined,
+  })
  .eq("id", review.id);
 
  // Also insert into plan_review_files so the pipeline can find them
