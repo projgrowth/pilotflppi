@@ -1464,23 +1464,12 @@ async function stageDisciplineReview(
         .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
         .filter(Boolean) as string[]).slice(0, MAX_DISCIPLINE_PAGES);
 
-      // No sheets routed → log a single human-review item and continue.
+      // No sheets routed → skip silently in core mode (the dashboard's
+      // discipline filter already shows the discipline as untouched).
+      // Reduces DB churn and removes noise findings that the user
+      // historically had to dismiss for every project that didn't include
+      // every discipline.
       if (disciplineImageUrls.length === 0) {
-        await admin.from("deficiencies_v2").insert({
-          plan_review_id: planReviewId,
-          firm_id: firmId,
-          def_number: `DEF-${discipline.slice(0, 1).toUpperCase()}001`,
-          discipline,
-          finding: `No ${discipline} sheets identified in submittal.`,
-          required_action: `Confirm whether ${discipline} scope applies; if so, request the missing sheets.`,
-          priority: "medium",
-          requires_human_review: true,
-          human_review_reason: "No sheets routed to this discipline (AI title-block + prefix fallback both empty).",
-          human_review_method: "Reviewer: confirm scope and request missing sheets if applicable.",
-          confidence_score: 0.3,
-          confidence_basis: "Sheet routing produced no inputs for this discipline.",
-          status: "open",
-        });
         continue;
       }
 
