@@ -15,7 +15,7 @@ export async function startPipeline(
   planReviewId: string,
   mode: "core" | "deep" = "core",
   stage?: string,
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<{ ok: boolean; message?: string }> {
   try {
     const { data: prev } = await supabase
       .from("plan_reviews")
