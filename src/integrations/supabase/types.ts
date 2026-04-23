@@ -1184,6 +1184,50 @@ export type Database = {
           },
         ]
       }
+      pipeline_error_log: {
+        Row: {
+          attempt_count: number
+          created_at: string
+          error_class: string
+          error_message: string
+          firm_id: string | null
+          id: string
+          metadata: Json
+          plan_review_id: string
+          stage: string
+        }
+        Insert: {
+          attempt_count?: number
+          created_at?: string
+          error_class?: string
+          error_message?: string
+          firm_id?: string | null
+          id?: string
+          metadata?: Json
+          plan_review_id: string
+          stage: string
+        }
+        Update: {
+          attempt_count?: number
+          created_at?: string
+          error_class?: string
+          error_message?: string
+          firm_id?: string | null
+          id?: string
+          metadata?: Json
+          plan_review_id?: string
+          stage?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pipeline_error_log_plan_review_id_fkey"
+            columns: ["plan_review_id"]
+            isOneToOne: false
+            referencedRelation: "plan_reviews"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       plan_review_files: {
         Row: {
           file_path: string

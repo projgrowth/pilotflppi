@@ -1597,14 +1597,15 @@ async function runDisciplineChecks(
   const occupancy = (ctx.dna?.occupancy_classification as string | null) ?? null;
   const constructionType = (ctx.dna?.construction_type as string | null) ?? null;
   const fbcEdition = (ctx.dna?.fbc_edition as string | null) ?? null;
+  // Reliability score: rejection_count - confirm_count. A pattern reviewers
+  // later confirmed (high confirm_count) stops being injected as a warning.
   let patternQuery = admin
     .from("correction_patterns")
-    .select("id, pattern_summary, original_finding, code_reference, reason_notes, rejection_count, occupancy_classification, construction_type")
+    .select("id, pattern_summary, original_finding, code_reference, reason_notes, rejection_count, confirm_count, occupancy_classification, construction_type")
     .eq("discipline", ctx.discipline)
     .eq("is_active", true)
-    .order("rejection_count", { ascending: false })
     .order("last_seen_at", { ascending: false })
-    .limit(20);
+    .limit(40);
   if (firmId) patternQuery = patternQuery.eq("firm_id", firmId);
   const { data: patternsData } = await patternQuery;
   const patterns = (patternsData ?? []) as Array<{
@@ -1614,12 +1615,17 @@ async function runDisciplineChecks(
     code_reference: { section?: string } | null;
     reason_notes: string;
     rejection_count: number;
+    confirm_count: number;
     occupancy_classification: string | null;
     construction_type: string | null;
   }>;
-  // Filter for project-DNA relevance: prefer patterns matching this project's
-  // occupancy and construction type. Patterns with no DNA context are always included.
-  const relevantPatterns = patterns.filter((p) =>
+  // Score = rejections − confirmations. Drop anything ≤ 0 (the AI was right
+  // more often than wrong) and sort by score so the noisiest patterns lead.
+  const scored = patterns
+    .map((p) => ({ ...p, score: (p.rejection_count ?? 0) - (p.confirm_count ?? 0) }))
+    .filter((p) => p.score > 0)
+    .sort((a, b) => b.score - a.score);
+  const relevantPatterns = scored.filter((p) =>
     (!p.occupancy_classification || p.occupancy_classification === occupancy) &&
     (!p.construction_type || p.construction_type === constructionType)
   ).slice(0, 12);

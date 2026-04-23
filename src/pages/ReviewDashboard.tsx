@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Play, Loader2, FileDown, Layers, Sparkles, Square } from "lucide-react";
+import { ArrowLeft, Play, Loader2, FileDown, Layers, Sparkles, Square, Inbox } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { PageHeader } from "@/components/PageHeader";
@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import ReviewHealthStrip from "@/components/review-dashboard/ReviewHealthStrip";
 import DeficiencyList from "@/components/review-dashboard/DeficiencyList";
+import TriageInbox from "@/components/review-dashboard/TriageInbox";
 import HumanReviewQueue from "@/components/review-dashboard/HumanReviewQueue";
 import ProjectDNAViewer from "@/components/review-dashboard/ProjectDNAViewer";
 import DnaHealthBanner from "@/components/review-dashboard/DnaHealthBanner";
@@ -17,11 +18,13 @@ import SheetCoverageMap from "@/components/review-dashboard/SheetCoverageMap";
 import DeferredScopePanel from "@/components/review-dashboard/DeferredScopePanel";
 import DedupeAuditTrail from "@/components/review-dashboard/DedupeAuditTrail";
 import LetterQualityGate from "@/components/review-dashboard/LetterQualityGate";
+import ReviewerMemoryCard from "@/components/review-dashboard/ReviewerMemoryCard";
 import { useDeficienciesV2, useDeferredScope, useProjectDna, useSheetCoverage, usePipelineStatus } from "@/hooks/useReviewDashboard";
 import { useFirmSettings } from "@/hooks/useFirmSettings";
 import { generateCountyReport } from "@/lib/county-report";
 import { determineReviewStatus } from "@/lib/review-status";
 import { cancelPipelineForReview } from "@/lib/pipeline-cancel";
+import { usePipelineErrorStream } from "@/hooks/usePipelineErrors";
 
 interface ReviewWithProject {
   id: string;
@@ -43,7 +46,16 @@ export default function ReviewDashboard() {
   const [running, setRunning] = useState(false);
   const [runningDeep, setRunningDeep] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [activeTab, setActiveTab] = useState("deficiencies");
+  // Triage is now the default landing tab — surfaces priority items first.
+  const [activeTab, setActiveTab] = useState("triage");
+
+  // Toast on pipeline error so reviewers don't have to refresh to find out.
+  usePipelineErrorStream(id, (err) => {
+    toast.error(`${err.stage.replace(/_/g, " ")} failed`, {
+      description: err.error_message?.slice(0, 140) ?? "Unknown error",
+      duration: 8000,
+    });
+  });
 
   const runPipeline = async (mode: "core" | "deep" = "core") => {
     if (!id) return;
@@ -255,15 +267,21 @@ export default function ReviewDashboard() {
         />
       )}
 
+      <ReviewerMemoryCard planReviewId={id} />
+
       <LetterQualityGate
         planReviewId={id}
         letterDraft={review?.comment_letter_draft ?? null}
-        onJumpToFinding={() => setActiveTab("deficiencies")}
+        onJumpToFinding={() => setActiveTab("triage")}
       />
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList>
-          <TabsTrigger value="deficiencies">Deficiencies</TabsTrigger>
+          <TabsTrigger value="triage">
+            <Inbox className="mr-1 h-3.5 w-3.5" />
+            Triage
+          </TabsTrigger>
+          <TabsTrigger value="deficiencies">All Findings</TabsTrigger>
           <TabsTrigger value="human">Human Review</TabsTrigger>
           <TabsTrigger value="deferred">
             Deferred Scope{deferredItems.length > 0 ? ` (${deferredItems.length})` : ""}
@@ -275,6 +293,9 @@ export default function ReviewDashboard() {
           <TabsTrigger value="dna">Project DNA</TabsTrigger>
           <TabsTrigger value="coverage">Sheet Coverage</TabsTrigger>
         </TabsList>
+        <TabsContent value="triage" className="mt-4">
+          <TriageInbox planReviewId={id} />
+        </TabsContent>
         <TabsContent value="deficiencies" className="mt-4">
           <DeficiencyList planReviewId={id} />
         </TabsContent>
@@ -294,7 +315,7 @@ export default function ReviewDashboard() {
           <ProjectDNAViewer
             planReviewId={id}
             jurisdictionMismatch={jurisdictionMismatch}
-            onAfterRerun={() => setActiveTab("deficiencies")}
+            onAfterRerun={() => setActiveTab("triage")}
           />
         </TabsContent>
         <TabsContent value="coverage" className="mt-4">

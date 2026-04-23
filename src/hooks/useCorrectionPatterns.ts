@@ -192,6 +192,32 @@ export async function deletePattern(patternId: string) {
 }
 
 /**
+ * Normalise a discipline label so AI-emitted variants ("Mechanical") match
+ * stored ones ("MEP", "mechanical"). Without this, `recordPatternConfirmation`
+ * silently misses 100% of MEP-class patterns.
+ */
+export function normalizeDiscipline(raw: string): string[] {
+  const t = raw.trim().toLowerCase();
+  // Each input → the set of stored labels we should match against.
+  const groups: Record<string, string[]> = {
+    mechanical: ["mechanical", "mep", "hvac"],
+    electrical: ["electrical", "mep"],
+    plumbing: ["plumbing", "mep"],
+    mep: ["mep", "mechanical", "electrical", "plumbing"],
+    structural: ["structural", "struct"],
+    architectural: ["architectural", "arch"],
+    "fire protection": ["fire protection", "fire", "life safety"],
+    fire: ["fire", "fire protection", "life safety"],
+    "life safety": ["life safety", "fire", "fire protection"],
+    accessibility: ["accessibility", "ada"],
+    energy: ["energy", "energy code"],
+    civil: ["civil", "site"],
+    site: ["site", "civil"],
+  };
+  return groups[t] ?? [t];
+}
+
+/**
  * Record a reviewer CONFIRMATION as positive signal on any matching pattern.
  * When a reviewer confirms a finding that matches an existing correction pattern
  * (same discipline + code section), increment confirm_count so the reliability
@@ -200,6 +226,9 @@ export async function deletePattern(patternId: string) {
  * deficiencies the AI correctly identifies.
  *
  * Call this alongside updating reviewer_disposition = 'confirm' on a deficiency.
+ *
+ * Returns the pattern id that was credited, or null if no match. Throws on
+ * actual DB errors so callers can decide whether to surface them.
  */
 export async function recordPatternConfirmation(input: {
   planReviewId: string;
@@ -207,30 +236,43 @@ export async function recordPatternConfirmation(input: {
     discipline: string;
     code_reference: { code?: string; section?: string; edition?: string } | null;
   };
-}) {
+}): Promise<string | null> {
   const codeSection = input.deficiency.code_reference?.section ?? null;
-  if (!codeSection) return; // can't match without a section anchor
+  if (!codeSection) return null; // can't match without a section anchor
 
-  // Find matching pattern (same discipline + code section within firm scope via RLS).
-  const { data } = await db
+  const disciplineCandidates = normalizeDiscipline(input.deficiency.discipline);
+
+  // Find matching pattern: any discipline alias + same code section, active,
+  // within firm scope via RLS. We pick the pattern with the highest
+  // rejection_count so the most "trained" pattern gets the positive signal.
+  const { data, error: selectErr } = await db
     .from("correction_patterns")
-    .select("id, confirm_count")
-    .eq("discipline", input.deficiency.discipline)
+    .select("id, confirm_count, rejection_count")
+    .in("discipline", disciplineCandidates)
     .filter("code_reference->>section", "eq", codeSection)
     .eq("is_active", true)
-    .maybeSingle();
+    .order("rejection_count", { ascending: false })
+    .limit(1);
 
-  if (!data) return; // no pattern to credit — this is a genuinely new find
+  if (selectErr) throw selectErr;
+  const match = (data?.[0] ?? null) as {
+    id: string;
+    confirm_count: number;
+    rejection_count: number;
+  } | null;
+
+  if (!match) return null; // genuinely new find, nothing to credit
 
   const { error } = await db
     .from("correction_patterns")
     .update({
-      confirm_count: (data.confirm_count ?? 0) + 1,
+      confirm_count: (match.confirm_count ?? 0) + 1,
       last_seen_at: new Date().toISOString(),
     })
-    .eq("id", data.id);
+    .eq("id", match.id);
 
   if (error) throw error;
+  return match.id;
 }
 
 export function useInvalidateCorrectionPatterns() {
