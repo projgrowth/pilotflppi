@@ -340,7 +340,7 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
  // --- Kick off the pipeline (extracted so the Retry button can re-use it) ---
  const invokePipeline = async (planReviewId: string) => {
    const { error } = await supabase.functions.invoke("run-review-pipeline", {
-     body: { plan_review_id: planReviewId },
+     body: { plan_review_id: planReviewId, mode: "core" },
    });
    if (error) throw error;
  };
