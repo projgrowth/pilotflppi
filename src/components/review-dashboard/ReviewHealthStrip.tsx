@@ -164,6 +164,20 @@ export default function ReviewHealthStrip({
     (s) => s.expected && s.status === "present",
   ).length;
 
+  // Pages-ready signal: when prepare_pages stage metadata reports an
+  // expected_pages total and we have fewer manifest rows than expected,
+  // surface a repair chip. We approximate "manifest rows" with sheet_coverage
+  // count since they're written 1:1 by sheet_map. Prior to sheet_map the
+  // chip uses prepare_pages.metadata directly.
+  const preparePagesMeta = useMemo(() => {
+    const row = pipeRows.find((r) => r.stage === "prepare_pages");
+    return ((row as unknown as { metadata?: { expected_pages?: number; pre_rasterized_pages?: number } } | undefined)
+      ?.metadata ?? {}) as { expected_pages?: number; pre_rasterized_pages?: number };
+  }, [pipeRows]);
+  const expectedPages = preparePagesMeta.expected_pages ?? expectedSheets;
+  const readyPages = sheets.length > 0 ? sheets.length : (preparePagesMeta.pre_rasterized_pages ?? 0);
+  const hasPageGap = expectedPages > 0 && readyPages > 0 && readyPages < expectedPages;
+
   return (
     <div className="rounded-lg border bg-card shadow-sm">
       {/* Row 1 — identity + status pill + stage */}
