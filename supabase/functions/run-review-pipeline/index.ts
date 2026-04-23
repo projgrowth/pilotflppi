@@ -298,10 +298,74 @@ async function rasterizePdfStreaming(
  * Sheet_coverage.page_index values are GLOBAL across all uploaded files —
  * matching the order this function returns.
  */
+/**
+ * In-memory cache keyed by plan_review_id, scoped to a single edge invocation.
+ * Multiple stages call signedSheetUrls() — caching avoids repeated storage
+ * listing, repeated rasterization checks, and repeated URL signing on the
+ * same page set.
+ */
+const _pageManifestCache = new Map<
+  string,
+  Array<{ file_path: string; signed_url: string }>
+>();
+
+/**
+ * Read the persisted page manifest from public.plan_review_page_assets and
+ * sign each row's storage_path. Returns null if the manifest is empty so the
+ * caller can fall back to building it.
+ */
+async function readSignedManifest(
+  admin: ReturnType<typeof createClient>,
+  planReviewId: string,
+): Promise<Array<{ file_path: string; signed_url: string }> | null> {
+  const { data: rows } = await admin
+    .from("plan_review_page_assets")
+    .select("page_index, storage_path, status")
+    .eq("plan_review_id", planReviewId)
+    .eq("status", "ready")
+    .order("page_index", { ascending: true });
+  const ready = (rows ?? []) as Array<{
+    page_index: number;
+    storage_path: string;
+    status: string;
+  }>;
+  if (ready.length === 0) return null;
+  const out: Array<{ file_path: string; signed_url: string }> = [];
+  for (const r of ready) {
+    const { data: signed } = await admin.storage
+      .from("documents")
+      .createSignedUrl(r.storage_path, 60 * 60);
+    if (signed) out.push({ file_path: r.storage_path, signed_url: signed.signedUrl });
+  }
+  return out;
+}
+
+/**
+ * Ensure each plan_review_files row has rasterized PNG pages in storage at
+ * `<dir>/pages/p-NNN.png`, then return one entry per page (in upload order
+ * across all files) suitable for vision input.
+ *
+ * Caching strategy:
+ *   1. Per-invocation in-memory cache (fastest — used across stages of one run)
+ *   2. plan_review_page_assets DB manifest (persists across runs/restarts)
+ *   3. Storage listing of `<dir>/pages/` (legacy — covers reviews created
+ *      before the manifest was introduced)
+ *   4. Cold path: download PDF + rasterize via MuPDF, then persist manifest
+ */
 async function signedSheetUrls(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
+  firmId: string | null = null,
 ): Promise<Array<{ file_path: string; signed_url: string }>> {
+  const cached = _pageManifestCache.get(planReviewId);
+  if (cached) return cached;
+
+  const fromDb = await readSignedManifest(admin, planReviewId);
+  if (fromDb && fromDb.length > 0) {
+    _pageManifestCache.set(planReviewId, fromDb);
+    return fromDb;
+  }
+
   const { data: files, error } = await admin
     .from("plan_review_files")
     .select("file_path")
@@ -310,6 +374,15 @@ async function signedSheetUrls(
   if (error) throw error;
 
   const out: Array<{ file_path: string; signed_url: string }> = [];
+  const manifestRows: Array<{
+    plan_review_id: string;
+    firm_id: string | null;
+    source_file_path: string;
+    page_index: number;
+    storage_path: string;
+    status: string;
+  }> = [];
+  let globalPageIndex = 0;
 
   for (const f of (files ?? []) as Array<{ file_path: string }>) {
     const filePath = f.file_path;
@@ -320,7 +393,18 @@ async function signedSheetUrls(
       const { data: signed } = await admin.storage
         .from("documents")
         .createSignedUrl(filePath, 60 * 60);
-      if (signed) out.push({ file_path: filePath, signed_url: signed.signedUrl });
+      if (signed) {
+        out.push({ file_path: filePath, signed_url: signed.signedUrl });
+        manifestRows.push({
+          plan_review_id: planReviewId,
+          firm_id: firmId,
+          source_file_path: filePath,
+          page_index: globalPageIndex,
+          storage_path: filePath,
+          status: "ready",
+        });
+        globalPageIndex++;
+      }
       continue;
     }
 
@@ -329,7 +413,7 @@ async function signedSheetUrls(
     const dir = lastSlash >= 0 ? filePath.slice(0, lastSlash) : "";
     const pagesDir = `${dir}/pages`;
 
-    // Cheap existence check: list the pages folder.
+    // Cheap existence check: list the pages folder (legacy reviews).
     const { data: existing } = await admin.storage
       .from("documents")
       .list(pagesDir, { limit: 1000, sortBy: { column: "name", order: "asc" } });
@@ -377,17 +461,40 @@ async function signedSheetUrls(
       pagePaths = uploaded;
     }
 
-    // Sign each page URL.
+    // Sign each page URL and queue a manifest row.
     for (const p of pagePaths) {
       const { data: signed } = await admin.storage
         .from("documents")
         .createSignedUrl(p, 60 * 60);
-      if (signed) out.push({ file_path: p, signed_url: signed.signedUrl });
+      if (signed) {
+        out.push({ file_path: p, signed_url: signed.signedUrl });
+        manifestRows.push({
+          plan_review_id: planReviewId,
+          firm_id: firmId,
+          source_file_path: filePath,
+          page_index: globalPageIndex,
+          storage_path: p,
+          status: "ready",
+        });
+        globalPageIndex++;
+      }
     }
   }
 
+  // Persist the manifest so future runs / future stages skip storage listing.
+  if (manifestRows.length > 0) {
+    const { error: insErr } = await admin
+      .from("plan_review_page_assets")
+      .upsert(manifestRows, { onConflict: "plan_review_id,page_index" });
+    if (insErr) console.error("[manifest] persist failed:", insErr);
+  }
+
+  _pageManifestCache.set(planReviewId, out);
   return out;
 }
+
+// Suppress unused warning — kept for potential future incremental rasterization.
+void RASTERIZE_CHUNK;
 
 
 const FINDINGS_SCHEMA = {
