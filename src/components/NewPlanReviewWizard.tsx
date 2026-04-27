@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils";
 import { isHVHZ, getCountyLabel } from "@/lib/county-utils";
 import { geocodeAddress } from "@/lib/geocode";
 import { PipelineProgressStepper } from "@/components/plan-review/PipelineProgressStepper";
+import { PagePrepProgress } from "@/components/plan-review/PagePrepProgress";
 
 const FLORIDA_COUNTIES = [
  "miami-dade", "broward", "palm-beach", "hillsborough", "orange", "duval",
