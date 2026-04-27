@@ -839,6 +839,13 @@ export async function stageDisciplineReview(
       totalFindings += disciplineFindings;
       byDiscipline[discipline].reviewed = byDiscipline[discipline].reviewed + lastReviewedSheets;
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      // Bubble watchdog/timeout errors to the dispatcher so it reschedules
+      // the whole stage with resume — don't degrade the discipline to a
+      // human-review placeholder.
+      if (errMsg.startsWith("STALL_TIMEOUT") || errMsg.startsWith("SOFT_TIMEOUT")) {
+        throw err;
+      }
       console.error(`[discipline_review:${discipline}] failed:`, err);
       failed.push(discipline);
       await admin.from("deficiencies_v2").insert({
