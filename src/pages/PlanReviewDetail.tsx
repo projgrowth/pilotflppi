@@ -425,6 +425,14 @@ export default function PlanReviewDetail() {
     setAiRunning(false);
     setAiCompleteFlash(findings.length);
     setTimeout(() => setAiCompleteFlash(null), 3000);
+    // Auto-jump the right panel to findings (only if user is on a non-findings
+    // tab) and surface a one-time toast so the completion isn't easy to miss.
+    setRightPanel((prev) => (prev === "findings" ? prev : "findings"));
+    toast.success(
+      findings.length > 0
+        ? `Review complete — ${findings.length} finding${findings.length === 1 ? "" : "s"}`
+        : "Review complete — no findings",
+    );
   }, [aiRunning, queryClient, review?.id, id, findings.length]);
 
   if (isLoading) {
