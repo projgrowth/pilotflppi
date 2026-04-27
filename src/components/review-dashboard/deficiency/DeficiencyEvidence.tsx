@@ -86,6 +86,18 @@ export default function DeficiencyEvidence({ planReviewId, def }: Props) {
           </div>
         )}
 
+        {/* Server-attached page thumbnail (lazy-resigned). Shows the full
+            sheet the AI was looking at, with a one-click full-size view.
+            Renders honestly when the AI's sheet ref couldn't be located. */}
+        {open && (
+          <AutoEvidenceThumb
+            planReviewId={planReviewId}
+            evidenceCropUrl={def.evidence_crop_url ?? null}
+            evidenceCropMeta={(def.evidence_crop_meta ?? null) as Record<string, unknown> | null}
+            sheetRefs={def.sheet_refs ?? []}
+          />
+        )}
+
         {/* Lazy-render visual snippet only when the panel is open. Picks the first
             sheet_ref + first evidence quote for context. "Pin to letter" persists
             the crop for embedding in the exported comment letter. */}
