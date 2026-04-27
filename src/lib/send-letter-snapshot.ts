@@ -86,7 +86,7 @@ export async function sendCommentLetter(
   };
   const { data: snap, error: snapErr } = await supabase
     .from("comment_letter_snapshots")
-    .insert(insertRow)
+    .insert([insertRow])
     .select("id, sent_at")
     .single();
 
