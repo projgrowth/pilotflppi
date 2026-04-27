@@ -183,7 +183,7 @@ export interface DeficiencyV2Row {
   verification_status: "unverified" | "verified" | "overturned" | "modified" | "superseded" | "needs_human";
   verification_notes: string;
   model_version?: string | null;
-  citation_status?: "unverified" | "verified" | "mismatch" | "not_found" | "hallucinated";
+  citation_status?: "unverified" | "verified" | "verified_stub" | "mismatch" | "not_found" | "hallucinated" | "no_citation_required";
   citation_match_score?: number | null;
   citation_canonical_text?: string | null;
   citation_grounded_at?: string | null;
