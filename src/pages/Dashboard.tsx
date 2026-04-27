@@ -1,360 +1,46 @@
-import { useMemo, useEffect, useState } from "react";
-import { useAuth } from "@/contexts/AuthContext";
+import { useMemo } from "react";
+import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { StatusChip } from "@/components/StatusChip";
+import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/EmptyState";
-import { useProjects, getDaysElapsed, type Project } from "@/hooks/useProjects";
-import { useReviewFlagCounts } from "@/hooks/useReviewData";
-import { useInspections } from "@/hooks/useInspections";
-import { useCountUp } from "@/hooks/useCountUp";
-import ConfidenceBar from "@/components/shared/ConfidenceBar";
-import DaysActiveBadge from "@/components/shared/DaysActiveBadge";
-import SkeletonRow from "@/components/shared/SkeletonRow";
-import { supabase } from "@/integrations/supabase/client";
-import { useQuery } from "@tanstack/react-query";
-import { useRevenueStats, useInvoices } from "@/hooks/useInvoices";
 import { PageHeader } from "@/components/PageHeader";
-import {
-  FileText, CheckCircle, ClipboardCheck, AlertTriangle,
-  Calendar, Zap, Eye, MessageSquare, FileCheck, Clipboard,
-  ChevronUp, ChevronDown, Plus, DollarSign, Clock, TrendingUp,
-} from "lucide-react";
-import { format, formatDistanceToNow, addDays, isToday, isTomorrow, isPast } from "date-fns";
-import { useNavigate } from "react-router-dom";
+import { useProjects, getDaysElapsed } from "@/hooks/useProjects";
+import { useAllActivePipelines } from "@/hooks/useAllActivePipelines";
+import { useFirmId } from "@/hooks/useFirmId";
+import { supabase } from "@/integrations/supabase/client";
+import { shortStageLabel } from "@/lib/pipeline-stages";
+import { Plus, Activity, AlertTriangle, ChevronRight, Clipboard, FileText, Eye } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 
-/* ── KPI Card ── */
-function DashKpi({
-  icon: Icon, iconColor, label, value, subRow, delay = 0,
-}: {
-  icon: React.ElementType; iconColor: string; label: string; value: number; subRow?: React.ReactNode; delay?: number;
-}) {
-  const displayed = useCountUp(value, 800, delay);
-  return (
-    <Card className="shadow-subtle">
-      <CardContent className="p-6 relative">
-        <Icon className="absolute top-5 right-5 h-6 w-6" style={{ color: iconColor }} />
-        <p className="text-5xl font-bold tracking-tight text-foreground">{displayed}</p>
-        <p className="text-sm font-medium text-muted-foreground uppercase tracking-widest mt-1">{label}</p>
-        {subRow && <p className="text-xs font-mono text-muted-foreground/80 mt-2">{subRow}</p>}
-      </CardContent>
-    </Card>
-  );
-}
-
-/* ── Active Reviews Table ── */
-type SortKey = "days" | "confidence" | "jurisdiction" | "stage";
-
-function ActiveReviewsQueue({ projects, navigate, latestReviews }: { projects: Project[]; navigate: (p: string) => void; latestReviews?: Record<string, string> }) {
-  const [sortKey, setSortKey] = useState<SortKey>("days");
-  const [sortAsc, setSortAsc] = useState(false);
-
-  const rows = useMemo(() => {
-    const activeStatuses = ["intake", "plan_review", "comments_sent", "resubmitted"];
-    const filtered = (projects || []).filter((p) => activeStatuses.includes(p.status));
-    return filtered
-      .map((p) => ({ ...p, daysActive: getDaysElapsed(p.notice_filed_at || p.created_at) }))
-      .sort((a, b) => {
-        let cmp = 0;
-        if (sortKey === "days") cmp = a.daysActive - b.daysActive;
-        else if (sortKey === "jurisdiction") cmp = (a.jurisdiction || "").localeCompare(b.jurisdiction || "");
-        else if (sortKey === "stage") cmp = (a.status || "").localeCompare(b.status || "");
-        return sortAsc ? cmp : -cmp;
-      });
-  }, [projects, sortKey, sortAsc]);
-
-  const toggleSort = (key: SortKey) => {
-    if (sortKey === key) setSortAsc(!sortAsc);
-    else { setSortKey(key); setSortAsc(false); }
-  };
-
-  const SortIcon = ({ k }: { k: SortKey }) =>
-    sortKey === k ? (sortAsc ? <ChevronUp className="h-3 w-3 inline ml-0.5" /> : <ChevronDown className="h-3 w-3 inline ml-0.5" />) : null;
-
-  if (rows.length === 0) {
-    return (
-      <EmptyState
-        icon={Clipboard}
-        title="No active reviews"
-        description="Upload a plan set to begin your first AI-assisted review"
-        actionLabel="Start New Review"
-        onAction={() => navigate("/review")}
-      />
-    );
-  }
-
-  return (
-    <Card className="shadow-subtle overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              <th className="text-left px-4 py-3">Project</th>
-              <th className="text-left px-4 py-3 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort("jurisdiction")}>
-                Jurisdiction<SortIcon k="jurisdiction" />
-              </th>
-              <th className="text-left px-4 py-3 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort("stage")}>
-                Stage<SortIcon k="stage" />
-              </th>
-              <th className="text-left px-4 py-3 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort("confidence")}>
-                AI Conf.<SortIcon k="confidence" />
-              </th>
-              <th className="text-left px-4 py-3 cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort("days")}>
-                Days<SortIcon k="days" />
-              </th>
-              <th className="text-right px-4 py-3">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {rows.slice(0, 15).map((p) => (
-              <tr
-                key={p.id}
-                className="hover:bg-muted/30 cursor-pointer transition-colors"
-                onClick={() => { const rid = latestReviews?.[p.id]; navigate(rid ? `/plan-review/${rid}` : `/review/${p.id}`); }}
-              >
-                <td className="px-4 py-3">
-                  <p className="font-medium truncate max-w-[200px]">{p.name}</p>
-                  <p className="text-xs text-muted-foreground truncate">{p.address}</p>
-                </td>
-                <td className="px-4 py-3 text-xs text-muted-foreground">{p.jurisdiction || p.county || "—"}</td>
-                <td className="px-4 py-3"><StatusChip status={p.status} /></td>
-                <td className="px-4 py-3"><ConfidenceBar score={0} /></td>
-                <td className="px-4 py-3"><DaysActiveBadge days={p.daysActive} /></td>
-                <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex items-center justify-end gap-1">
-                    <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="View review" onClick={() => { const rid = latestReviews?.[p.id]; navigate(rid ? `/plan-review/${rid}` : `/review/${p.id}`); }}>
-                      <Eye className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="View project" onClick={() => navigate(`/projects/${p.id}`)}>
-                      <MessageSquare className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="View documents" onClick={() => navigate(`/documents`)}>
-                      <FileCheck className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
-}
-
-/* ── Upcoming Deadlines Panel ── */
-function DeadlinesPanel({ projects, navigate }: { projects: Project[]; navigate: (p: string) => void }) {
-  const items = useMemo(() => {
-    const now = new Date();
-    const upcoming = (projects || [])
-      .filter((p) => p.deadline_at && !["certificate_issued", "cancelled", "on_hold"].includes(p.status))
-      .map((p) => ({ ...p, deadlineDate: new Date(p.deadline_at!) }))
-      .filter((p) => p.deadlineDate >= addDays(now, -1) && p.deadlineDate <= addDays(now, 7))
-      .sort((a, b) => a.deadlineDate.getTime() - b.deadlineDate.getTime())
-      .slice(0, 8);
-    return upcoming;
-  }, [projects]);
-
-  const getDayLabel = (d: Date) => {
-    if (isToday(d)) return "TODAY";
-    if (isTomorrow(d)) return "TOMORROW";
-    return format(d, "EEE").toUpperCase();
-  };
-
-  const getDotColor = (d: Date) => {
-    if (isPast(d) && !isToday(d)) return "bg-destructive";
-    if (isToday(d)) return "bg-warning";
-    return "bg-accent";
-  };
-
-  return (
-    <Card className="shadow-subtle">
-      <div className="px-5 py-4 border-b flex items-center gap-2">
-        <Calendar className="h-4 w-4 text-muted-foreground" />
-        <span className="text-[15px] font-semibold text-foreground">Upcoming Deadlines</span>
-      </div>
-      <CardContent className="p-5">
-        {items.length === 0 ? (
-          <p className="text-xs text-muted-foreground text-center py-4">No upcoming deadlines</p>
-        ) : (
-          <div className="space-y-3">
-            {items.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-start gap-3 cursor-pointer hover:bg-muted/30 -mx-2 px-2 py-1 rounded transition-colors"
-                onClick={() => navigate(`/projects/${item.id}`)}
-              >
-                <span className="text-xs font-mono text-muted-foreground uppercase w-[70px] pt-0.5 shrink-0">
-                  {getDayLabel(item.deadlineDate)}
-                </span>
-                <div className={cn("mt-1.5 h-2 w-2 rounded-full shrink-0", getDotColor(item.deadlineDate))} />
-                <span className="text-sm text-foreground">{item.name}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        <Button variant="link" className="text-accent text-sm p-0 mt-3 h-auto" onClick={() => navigate("/deadlines")}>
-          View calendar →
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-/* ── AI Activity Feed ── */
-function AIActivityFeed() {
-  const { data: aiOutputs, refetch } = useQuery({
-    queryKey: ["ai-activity-feed"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("ai_outputs")
-        .select("id, prediction, severity, confidence_score, project_id, created_at")
-        .order("created_at", { ascending: false })
-        .limit(8);
-      if (error) throw error;
-      // get project names
-      const ids = [...new Set((data || []).map((d) => d.project_id).filter(Boolean))];
-      let projectMap = new Map<string, string>();
-      if (ids.length > 0) {
-        const { data: ps } = await supabase.from("projects").select("id, name").in("id", ids);
-        projectMap = new Map((ps || []).map((p) => [p.id, p.name]));
-      }
-      return (data || []).map((d) => ({ ...d, projectName: projectMap.get(d.project_id!) || "Unknown" }));
-    },
-  });
-
-  // Auto-refresh every 60s
-  useEffect(() => {
-    const interval = setInterval(() => refetch(), 60000);
-    return () => clearInterval(interval);
-  }, [refetch]);
-
-  const severityDot: Record<string, string> = {
-    critical: "bg-destructive",
-    major: "bg-warning",
-    minor: "bg-status-minor",
-    admin: "bg-status-admin",
-  };
-
-  return (
-    <Card className="shadow-subtle">
-      <div className="px-5 py-4 border-b flex items-center gap-2">
-        <Zap className="h-4 w-4 text-fpp-gold" />
-        <span className="text-[15px] font-semibold text-foreground">AI Activity</span>
-      </div>
-      <CardContent className="p-5">
-        {!aiOutputs || aiOutputs.length === 0 ? (
-          <p className="text-xs text-muted-foreground text-center py-4">No AI activity yet</p>
-        ) : (
-          <div className="space-y-3">
-            {aiOutputs.map((item) => (
-              <div key={item.id} className="flex items-start gap-2">
-                <div className={cn("mt-1.5 h-2 w-2 rounded-full shrink-0", severityDot[item.severity || ""] || "bg-muted-foreground")} />
-                <div className="flex-1">
-                  <p className="text-xs text-foreground/80">
-                    {item.prediction || "AI check"} • <span className="text-muted-foreground">{item.projectName}</span>
-                  </p>
-                  <p className="text-2xs text-muted-foreground mt-0.5">
-                    {formatDistanceToNow(new Date(item.created_at!), { addSuffix: true })}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-/* ── Revenue KPI Card (currency) ── */
-function RevenuKpi({
-  icon: Icon, iconColor, label, value, subRow, delay = 0,
-}: {
-  icon: React.ElementType; iconColor: string; label: string; value: number; subRow?: React.ReactNode; delay?: number;
-}) {
-  const displayed = useCountUp(value, 800, delay);
-  return (
-    <Card className="shadow-subtle">
-      <CardContent className="p-6 relative">
-        <Icon className="absolute top-5 right-5 h-6 w-6" style={{ color: iconColor }} />
-        <p className="text-4xl font-bold tracking-tight text-foreground">
-          ${displayed.toLocaleString()}
-        </p>
-        <p className="text-sm font-medium text-muted-foreground uppercase tracking-widest mt-1">{label}</p>
-        {subRow && <p className="text-xs font-mono text-muted-foreground/80 mt-2">{subRow}</p>}
-      </CardContent>
-    </Card>
-  );
-}
-
-/* ── Accounts Receivable Widget ── */
-function AccountsReceivableWidget({ navigate }: { navigate: (p: string) => void }) {
-  const { data: invoices } = useInvoices();
-  const unpaid = useMemo(() =>
-    (invoices || [])
-      .filter((i) => ["sent", "partial", "overdue"].includes(i.status))
-      .sort((a, b) => (Number(b.total) - Number(b.amount_paid)) - (Number(a.total) - Number(a.amount_paid)))
-      .slice(0, 5),
-    [invoices]
-  );
-
-  return (
-    <Card className="shadow-subtle">
-      <div className="px-5 py-4 border-b flex items-center gap-2">
-        <DollarSign className="h-4 w-4 text-fpp-gold" />
-        <span className="text-[15px] font-semibold text-foreground">Accounts Receivable</span>
-      </div>
-      <CardContent className="p-5">
-        {unpaid.length === 0 ? (
-          <p className="text-xs text-muted-foreground text-center py-4">No outstanding invoices</p>
-        ) : (
-          <div className="space-y-3">
-            {unpaid.map((inv) => {
-              const balance = Number(inv.total) - Number(inv.amount_paid);
-              const isOverdue = inv.due_at && new Date(inv.due_at) < new Date();
-              return (
-                <div
-                  key={inv.id}
-                  className="flex items-center justify-between cursor-pointer hover:bg-muted/30 -mx-2 px-2 py-1.5 rounded transition-colors"
-                  onClick={() => navigate(`/projects/${inv.project_id}`)}
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium truncate">{inv.project?.name || inv.invoice_number}</p>
-                    <p className="text-2xs text-muted-foreground">
-                      {inv.invoice_number}
-                      {inv.due_at && <> · Due {format(new Date(inv.due_at), "MMM d")}</>}
-                    </p>
-                  </div>
-                  <span className={cn("text-sm font-semibold tabular-nums ml-3", isOverdue ? "text-destructive" : "text-foreground")}>
-                    ${balance.toLocaleString()}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        <Button variant="link" className="text-accent text-sm p-0 mt-3 h-auto" onClick={() => navigate("/invoices")}>
-          View all invoices →
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-/* ── Main Dashboard ── */
+/**
+ * Focused plan-review dashboard.
+ *
+ * Replaces the multi-section dashboard (deadlines, AR, AI feed, KPIs) with
+ * a single "what should I touch next" board. Statutory clocks, fees, and
+ * invoices still live on the project detail and (when extras are enabled)
+ * their dedicated pages — they don't need a permanent home on the home
+ * screen for a reviewer running the plan-review pipeline.
+ *
+ * Sections:
+ *   1. Active Reviews — every project currently in the pipeline, with the
+ *      live stage from review_pipeline_status.
+ *   2. Needs My Review — count of findings flagged requires_human_review
+ *      across the firm, deep-link into the relevant review.
+ */
 export default function Dashboard() {
-  const { user } = useAuth();
   const navigate = useNavigate();
+  const { firmId } = useFirmId();
   const { data: projects, isLoading: projectsLoading } = useProjects();
-  const { data: flagCounts } = useReviewFlagCounts();
-  const { data: inspections } = useInspections();
-  const { data: revenueStats } = useRevenueStats();
+  const { data: pipelines } = useAllActivePipelines();
 
-  // Fetch latest plan_review id per project for direct linking
+  // Map project_id → latest plan_review_id so the dashboard rows can deep-link
+  // straight into the review surface (skipping the project detail page).
   const { data: latestReviews } = useQuery({
-    queryKey: ["latest-plan-reviews"],
+    queryKey: ["latest-plan-reviews", firmId],
+    enabled: !!firmId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("plan_reviews")
@@ -362,167 +48,249 @@ export default function Dashboard() {
         .order("round", { ascending: false });
       if (error) throw error;
       const map: Record<string, string> = {};
-      for (const r of data || []) {
+      for (const r of data ?? []) {
         if (!map[r.project_id]) map[r.project_id] = r.id;
       }
       return map;
     },
   });
 
-  // KPI calculations
-  const activeStatuses = ["intake", "plan_review", "comments_sent", "resubmitted"];
-  const activeReviews = useMemo(() => (projects || []).filter((p) => activeStatuses.includes(p.status)), [projects]);
-  const awaitingResub = useMemo(() => (projects || []).filter((p) => p.status === "comments_sent").length, [projects]);
-  const overdueCount = useMemo(() => {
-    const now = new Date();
-    return (projects || []).filter((p) => p.deadline_at && new Date(p.deadline_at) < now && activeStatuses.includes(p.status)).length;
-  }, [projects]);
-
-  // Approvals this week
-  const { data: approvalsData } = useQuery({
-    queryKey: ["approvals-this-week"],
+  // Findings flagged for human review across all open reviews. Cheap count
+  // query — one bar in the header, expand to the deficiencies page on click.
+  const { data: needsReviewCount } = useQuery({
+    queryKey: ["needs-human-review-count", firmId],
+    enabled: !!firmId,
     queryFn: async () => {
-      const now = new Date();
-      const startOfWeek = new Date(now);
-      startOfWeek.setDate(now.getDate() - now.getDay());
-      startOfWeek.setHours(0, 0, 0, 0);
-      const lastWeekStart = new Date(startOfWeek);
-      lastWeekStart.setDate(lastWeekStart.getDate() - 7);
-
-      const [thisWeek, lastWeek] = await Promise.all([
-        supabase.from("projects").select("id").eq("status", "approved").gte("updated_at", startOfWeek.toISOString()),
-        supabase.from("projects").select("id").eq("status", "approved").gte("updated_at", lastWeekStart.toISOString()).lt("updated_at", startOfWeek.toISOString()),
-      ]);
-      return { thisWeek: thisWeek.data?.length || 0, lastWeek: lastWeek.data?.length || 0 };
+      const { count, error } = await supabase
+        .from("deficiencies_v2")
+        .select("id", { count: "exact", head: true })
+        .eq("requires_human_review", true)
+        .eq("status", "open");
+      if (error) throw error;
+      return count ?? 0;
     },
   });
 
-  // Pending inspections
-  const pendingInspections = useMemo(() =>
-    (inspections || []).filter((i) => i.result === "pending" && i.scheduled_at),
-    [inspections]
-  );
-  const nextInspection = pendingInspections[0];
-
-  const openFlags = (flagCounts?.total ?? 0) - (flagCounts?.resolved ?? 0);
-
-  const now = new Date();
-  const hour = now.getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-  const displayName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "there";
-  const approvalDiff = (approvalsData?.thisWeek ?? 0) - (approvalsData?.lastWeek ?? 0);
+  // Active reviews = projects in any in-pipeline status, joined to their
+  // current pipeline stage when one exists.
+  const activeRows = useMemo(() => {
+    const activeStatuses = new Set([
+      "intake",
+      "plan_review",
+      "comments_sent",
+      "resubmitted",
+    ]);
+    const pipelineByReviewId = new Map(
+      (pipelines ?? []).map((p) => [p.planReviewId, p]),
+    );
+    return (projects ?? [])
+      .filter((p) => activeStatuses.has(p.status))
+      .map((p) => {
+        const reviewId = latestReviews?.[p.id];
+        const pipeline = reviewId ? pipelineByReviewId.get(reviewId) : null;
+        return {
+          project: p,
+          reviewId,
+          pipeline,
+          daysActive: getDaysElapsed(p.notice_filed_at || p.created_at),
+        };
+      })
+      .sort((a, b) => {
+        // Active pipelines first, then stuck, then by recency.
+        const aActive = a.pipeline?.hasActive ? 1 : 0;
+        const bActive = b.pipeline?.hasActive ? 1 : 0;
+        if (aActive !== bActive) return bActive - aActive;
+        const aStuck = a.pipeline?.isStuck ? 1 : 0;
+        const bStuck = b.pipeline?.isStuck ? 1 : 0;
+        if (aStuck !== bStuck) return bStuck - aStuck;
+        return b.daysActive - a.daysActive;
+      });
+  }, [projects, pipelines, latestReviews]);
 
   return (
-    <div className="p-4 sm:p-8 md:p-10 max-w-7xl mx-auto">
+    <div className="p-6 md:p-10 max-w-5xl mx-auto space-y-8">
       <PageHeader
-        title={`${greeting}, ${displayName}.`}
-        subtitle={format(now, "EEEE, MMMM d, yyyy")}
+        title="Plan Review"
+        actions={
+          <Button onClick={() => navigate("/review")} size="sm">
+            <Plus className="h-4 w-4 mr-1.5" />
+            New Review
+          </Button>
+        }
       />
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-        <DashKpi
-          icon={FileText}
-          iconColor="#0E7C7B"
-          label="active reviews"
-          value={activeReviews.length}
-          delay={0}
-          subRow={<>{awaitingResub} awaiting resubmittal • {overdueCount} overdue</>}
-        />
-        <DashKpi
-          icon={CheckCircle}
-          iconColor="#2E7D52"
-          label="approved this week"
-          value={approvalsData?.thisWeek ?? 0}
-          delay={100}
-          subRow={
-            approvalDiff !== 0 ? (
-              <span className={approvalDiff > 0 ? "text-success" : "text-destructive"}>
-                {approvalDiff > 0 ? "↑" : "↓"} {Math.abs(approvalDiff)} vs last week
+      {/* Needs my review banner */}
+      {(needsReviewCount ?? 0) > 0 && (
+        <button
+          onClick={() => navigate("/review")}
+          className="w-full text-left flex items-center gap-3 px-4 py-3 rounded-md border border-warning/30 bg-warning/5 hover:bg-warning/10 transition-colors"
+        >
+          <AlertTriangle className="h-4 w-4 text-warning shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground">
+              {needsReviewCount} finding{needsReviewCount === 1 ? "" : "s"} flagged
+              for human review
+            </p>
+            <p className="text-xs text-muted-foreground">
+              The AI couldn't verify these on its own — review before sending the
+              comment letter.
+            </p>
+          </div>
+          <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+        </button>
+      )}
+
+      {/* Active reviews list */}
+      <section className="space-y-3">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            Active Reviews
+            {!projectsLoading && (
+              <span className="ml-2 text-xs font-normal text-muted-foreground/70">
+                ({activeRows.length})
               </span>
-            ) : <>same as last week</>
-          }
-        />
-        <DashKpi
-          icon={ClipboardCheck}
-          iconColor="#C8972A"
-          label="inspections scheduled"
-          value={pendingInspections.length}
-          delay={200}
-          subRow={
-            nextInspection ? (
-              <>Next: {format(new Date(nextInspection.scheduled_at!), "MMM d")}</>
-            ) : undefined
-          }
-        />
-        <DashKpi
-          icon={AlertTriangle}
-          iconColor="#D63230"
-          label="open flags across reviews"
-          value={openFlags}
-          delay={300}
-          subRow={
-            <>{flagCounts?.critical ?? 0} critical • {flagCounts?.major ?? 0} major • {flagCounts?.minor ?? 0} minor</>
-          }
-        />
-      </div>
-
-      {/* Revenue KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-8">
-        <RevenuKpi
-          icon={TrendingUp}
-          iconColor="#2E7D52"
-          label="Revenue MTD"
-          value={revenueStats?.revenueMTD ?? 0}
-          delay={0}
-        />
-        <RevenuKpi
-          icon={DollarSign}
-          iconColor="#C8972A"
-          label="Outstanding"
-          value={revenueStats?.outstanding ?? 0}
-          delay={100}
-        />
-        <RevenuKpi
-          icon={Clock}
-          iconColor="#D63230"
-          label="Overdue"
-          value={revenueStats?.overdue ?? 0}
-          delay={200}
-          subRow={revenueStats?.overdueCount ? <>{revenueStats.overdueCount} invoice{revenueStats.overdueCount !== 1 ? "s" : ""}</> : undefined}
-        />
-      </div>
-
-      {/* Quick Actions */}
-      <div className="mb-8 flex flex-wrap items-center gap-3">
-        <Button onClick={() => navigate("/projects?action=new")} className="bg-primary text-primary-foreground hover:bg-primary/90">
-          <Plus className="h-4 w-4 mr-2" /> New Intake
-        </Button>
-      </div>
-
-      {/* Main 2-column layout */}
-      <div className="grid gap-6 lg:grid-cols-[65%_1fr]">
-        {/* Left: Active Reviews Queue */}
-        <div>
-          <h2 className="text-xl font-semibold text-foreground mb-4">Active Reviews</h2>
-          {projectsLoading ? (
-            <Card className="shadow-subtle">
-              <div className="p-4 space-y-2">
-                {Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} cols={6} />)}
-              </div>
-            </Card>
-          ) : (
-            <ActiveReviewsQueue projects={projects || []} navigate={navigate} latestReviews={latestReviews} />
-          )}
+            )}
+          </h2>
+          <Button
+            variant="link"
+            size="sm"
+            className="text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => navigate("/projects")}
+          >
+            View all projects →
+          </Button>
         </div>
 
-        {/* Right: Deadlines + AI Activity */}
-        <div className="space-y-6">
-          <DeadlinesPanel projects={projects || []} navigate={navigate} />
-          <AccountsReceivableWidget navigate={navigate} />
-          <AIActivityFeed />
-        </div>
-      </div>
+        {projectsLoading ? (
+          <div className="space-y-2">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="h-20 rounded-md bg-muted/30 animate-pulse"
+              />
+            ))}
+          </div>
+        ) : activeRows.length === 0 ? (
+          <EmptyState
+            icon={Clipboard}
+            title="No active reviews"
+            description="Upload a plan set to begin your first AI-assisted review."
+            actionLabel="Start New Review"
+            onAction={() => navigate("/review")}
+          />
+        ) : (
+          <Card className="shadow-subtle overflow-hidden divide-y">
+            {activeRows.map(({ project, reviewId, pipeline, daysActive }) => (
+              <ActiveReviewRow
+                key={project.id}
+                name={project.name}
+                address={project.address}
+                jurisdiction={project.jurisdiction || project.county || ""}
+                daysActive={daysActive}
+                stage={pipeline?.current?.stage ?? null}
+                stageStatus={pipeline?.current?.status ?? null}
+                isStuck={pipeline?.isStuck ?? false}
+                hasActive={pipeline?.hasActive ?? false}
+                stageStartedAt={pipeline?.current?.started_at ?? null}
+                onClick={() =>
+                  navigate(reviewId ? `/plan-review/${reviewId}` : `/review/${project.id}`)
+                }
+              />
+            ))}
+          </Card>
+        )}
+      </section>
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ActiveReviewRowProps {
+  name: string;
+  address: string | null;
+  jurisdiction: string;
+  daysActive: number;
+  stage: string | null;
+  stageStatus: string | null;
+  isStuck: boolean;
+  hasActive: boolean;
+  stageStartedAt: string | null;
+  onClick: () => void;
+}
+
+function ActiveReviewRow({
+  name,
+  address,
+  jurisdiction,
+  daysActive,
+  stage,
+  stageStatus,
+  isStuck,
+  hasActive,
+  stageStartedAt,
+  onClick,
+}: ActiveReviewRowProps) {
+  // Status pill — order: stuck > running > pending > idle.
+  const statusPill = (() => {
+    if (isStuck) {
+      return (
+        <Badge variant="outline" className="border-warning/40 text-warning">
+          Stuck · {stage ? shortStageLabel(stage) : "pipeline"}
+        </Badge>
+      );
+    }
+    if (hasActive && stageStatus === "running") {
+      return (
+        <Badge className="bg-primary/15 text-primary border-primary/30 hover:bg-primary/15">
+          <Activity className="h-3 w-3 mr-1 animate-pulse" />
+          {stage ? shortStageLabel(stage) : "running"}
+        </Badge>
+      );
+    }
+    if (stage === "complete" || stageStatus === "complete") {
+      return (
+        <Badge variant="outline" className="border-primary/30 text-primary">
+          Ready for letter
+        </Badge>
+      );
+    }
+    return (
+      <Badge variant="outline" className="text-muted-foreground">
+        {stage ? shortStageLabel(stage) : "open"}
+      </Badge>
+    );
+  })();
+
+  return (
+    <button
+      onClick={onClick}
+      className="w-full text-left px-4 py-3.5 hover:bg-muted/30 transition-colors flex items-center gap-4"
+    >
+      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-sm truncate">{name}</p>
+        <p className="text-xs text-muted-foreground truncate">
+          {[jurisdiction, address].filter(Boolean).join(" · ") || "—"}
+        </p>
+      </div>
+      <div className="flex items-center gap-3 shrink-0">
+        <span
+          className={cn(
+            "text-xs tabular-nums font-mono",
+            daysActive > 14 ? "text-warning" : "text-muted-foreground",
+          )}
+        >
+          {daysActive}d
+        </span>
+        {statusPill}
+        {stageStartedAt && hasActive && (
+          <span className="text-[10px] text-muted-foreground/70 hidden md:inline tabular-nums">
+            {formatDistanceToNow(new Date(stageStartedAt), { addSuffix: true })}
+          </span>
+        )}
+        <Eye className="h-3.5 w-3.5 text-muted-foreground/60" />
+      </div>
+    </button>
   );
 }
