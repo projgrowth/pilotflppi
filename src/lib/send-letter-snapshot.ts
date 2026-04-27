@@ -73,15 +73,26 @@ export async function sendCommentLetter(
     })),
   };
 
-  const insertRow = {
+  type SnapshotInsert = {
+    plan_review_id: string;
+    round: number;
+    sent_by: string;
+    recipient: string;
+    letter_html: string;
+    findings_json: unknown;
+    firm_info_json: unknown;
+    readiness_snapshot: unknown;
+    override_reasons: string | null;
+  };
+  const insertRow: SnapshotInsert = {
     plan_review_id: args.planReviewId,
     round: args.round,
     sent_by: userId,
     recipient: args.recipient ?? "",
     letter_html: args.letterHtml,
-    findings_json: frozenFindings as unknown as Record<string, unknown>[],
-    firm_info_json: (args.firmInfo ?? {}) as Record<string, unknown>,
-    readiness_snapshot: readinessSnapshot as unknown as Record<string, unknown>,
+    findings_json: frozenFindings,
+    firm_info_json: args.firmInfo ?? {},
+    readiness_snapshot: readinessSnapshot,
     override_reasons: args.overrideReason ?? null,
   };
   const { data: snap, error: snapErr } = await supabase
