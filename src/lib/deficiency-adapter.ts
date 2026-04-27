@@ -39,6 +39,11 @@ export interface DeficiencyV2Lite {
   verification_status: string;
   status: string;
   model_version: string | null;
+  /** Signed URL of the cited sheet image, attached by the ground_citations stage. */
+  evidence_crop_url?: string | null;
+  /** `{ page_index, sheet_ref, signed_until, source, pinned? }` — the resolved
+   *  page index here is more authoritative than the sheet_map fallback. */
+  evidence_crop_meta?: Record<string, unknown> | null;
 }
 
 /** One row of the snapshot at `plan_reviews.checklist_state.last_sheet_map`. */
