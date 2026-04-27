@@ -449,10 +449,13 @@ async function readSignedManifest(
   }>;
   if (ready.length === 0) return null;
 
-  // Reuse cached signed URLs that still have ≥10 minutes of life so 5 stages
-  // on a 78-page review aren't 5 × 78 fresh signed-URL calls.
-  const SIGN_TTL_SECONDS = 6 * 60 * 60; // 6h
-  const REUSE_MIN_REMAINING_MS = 10 * 60 * 1000; // 10 min
+  // Reuse cached signed URLs that still have ≥1h of life. Bumped from 6h to
+  // 7 days so evidence crops embedded in exported comment letters survive
+  // long enough for the building official to open the email/PDF the next
+  // day without 401s. Re-signing happens lazily via the resign-page-asset
+  // edge function when the cache approaches expiry.
+  const SIGN_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+  const REUSE_MIN_REMAINING_MS = 60 * 60 * 1000; // 1 hour
   const nowMs = Date.now();
   const out: Array<{ file_path: string; signed_url: string }> = [];
   const refreshed: Array<{ id?: never; storage_path: string; signed_url: string; expires_at: string }> = [];
@@ -3655,6 +3658,7 @@ async function stageGroundCitations(
     hallucinated: counts.hallucinated,
     crops_attached: cropResult.attached,
     crops_skipped: cropResult.skipped,
+    crops_unresolved_sheets: cropResult.unresolved_sheets,
   };
 }
 
@@ -3668,25 +3672,26 @@ async function stageGroundCitations(
 async function attachEvidenceCrops(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
-): Promise<{ attached: number; skipped: number }> {
-  // Pull current findings (only those without a crop already, to keep this
-  // idempotent across reruns).
+): Promise<{ attached: number; skipped: number; unresolved_sheets: number }> {
+  // Pull current findings (re-attach is idempotent because we only refresh
+  // when the existing meta lacks page_index or the URL has expired).
   const { data: rows, error } = await admin
     .from("deficiencies_v2")
-    .select("id, sheet_refs, evidence_crop_url")
+    .select("id, sheet_refs, evidence_crop_url, evidence_crop_meta")
     .eq("plan_review_id", planReviewId)
     .neq("status", "resolved")
     .neq("status", "waived");
   if (error) {
     console.error("[evidence_crops] read failed", error);
-    return { attached: 0, skipped: 0 };
+    return { attached: 0, skipped: 0, unresolved_sheets: 0 };
   }
   const findings = (rows ?? []) as Array<{
     id: string;
     sheet_refs: string[] | null;
     evidence_crop_url: string | null;
+    evidence_crop_meta: Record<string, unknown> | null;
   }>;
-  if (findings.length === 0) return { attached: 0, skipped: 0 };
+  if (findings.length === 0) return { attached: 0, skipped: 0, unresolved_sheets: 0 };
 
   // Read the persisted sheet map so we know which page_index each sheet_ref
   // lives on. This was snapshotted by stageSheetMap.
@@ -3697,51 +3702,120 @@ async function attachEvidenceCrops(
     .maybeSingle();
   if (prErr || !prRow) {
     console.error("[evidence_crops] plan_review read failed", prErr);
-    return { attached: 0, skipped: findings.length };
+    return { attached: 0, skipped: findings.length, unresolved_sheets: 0 };
   }
   const checklist = (prRow.checklist_state ?? {}) as Record<string, unknown>;
   const rawMap = Array.isArray(checklist.last_sheet_map)
     ? (checklist.last_sheet_map as Array<{ sheet_ref?: string; page_index?: number }>)
     : [];
+
+  // Build BOTH a strict and a fuzzy lookup so "A101", "A-101", "A-0101", and
+  // "A.101" all resolve to the same page. This is the single biggest cause
+  // of "no evidence" — AI emits "A101", title block says "A-101".
   const sheetToPage = new Map<string, number>();
+  const fuzzyToPage = new Map<string, number>();
+  const fuzzy = (s: string) =>
+    s.toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^([A-Z]+)0+(\d)/, "$1$2");
   for (const m of rawMap) {
     if (typeof m.sheet_ref === "string" && typeof m.page_index === "number") {
       sheetToPage.set(m.sheet_ref.toUpperCase().trim(), m.page_index);
+      fuzzyToPage.set(fuzzy(m.sheet_ref), m.page_index);
     }
   }
   if (sheetToPage.size === 0) {
-    return { attached: 0, skipped: findings.length };
+    return { attached: 0, skipped: findings.length, unresolved_sheets: findings.length };
   }
+
+  const resolveSheet = (raw: string | null | undefined): { sheet: string; page: number } | null => {
+    if (!raw) return null;
+    const upper = raw.toUpperCase().trim();
+    const exact = sheetToPage.get(upper);
+    if (exact != null) return { sheet: upper, page: exact };
+    const fuzzed = fuzzyToPage.get(fuzzy(upper));
+    if (fuzzed != null) return { sheet: upper, page: fuzzed };
+    return null;
+  };
 
   // Sign every page once (signedSheetUrls caches), then index by page_index.
   const signed = await signedSheetUrls(admin, planReviewId);
-  // signedSheetUrls returns rows in page_index order, so position == index.
   const pageUrlByIndex = new Map<number, string>();
   signed.forEach((s, i) => pageUrlByIndex.set(i, s.signed_url));
 
+  // Also pull cached_until per page so we can stamp expiry into the meta and
+  // let the client know when to call resign-page-asset.
+  const { data: assetRows } = await admin
+    .from("plan_review_page_assets")
+    .select("page_index, cached_until")
+    .eq("plan_review_id", planReviewId)
+    .eq("status", "ready");
+  const expiryByIndex = new Map<number, string>();
+  for (const a of (assetRows ?? []) as Array<{ page_index: number; cached_until: string | null }>) {
+    if (a.cached_until) expiryByIndex.set(a.page_index, a.cached_until);
+  }
+
   let attached = 0;
   let skipped = 0;
+  let unresolved = 0;
   for (const f of findings) {
-    if (f.evidence_crop_url) {
+    const meta = (f.evidence_crop_meta ?? {}) as Record<string, unknown>;
+    const hasPageIndex = typeof meta.page_index === "number";
+    const isPinned = meta.pinned === true;
+
+    // Don't overwrite human-pinned crops — those are the reviewer's verified
+    // selection. Only auto-fill when nothing exists OR when the auto crop is
+    // missing the page_index resolver hint.
+    if (isPinned) {
       skipped++;
       continue;
     }
-    const firstSheet = (f.sheet_refs ?? [])
-      .map((s) => s?.toUpperCase().trim())
-      .find((s) => s && sheetToPage.has(s));
-    if (!firstSheet) {
+    if (f.evidence_crop_url && hasPageIndex) {
       skipped++;
       continue;
     }
-    const pageIndex = sheetToPage.get(firstSheet)!;
-    const url = pageUrlByIndex.get(pageIndex);
+
+    const refs = f.sheet_refs ?? [];
+    let resolved: { sheet: string; page: number } | null = null;
+    for (const r of refs) {
+      resolved = resolveSheet(r);
+      if (resolved) break;
+    }
+    if (!resolved) {
+      unresolved++;
+      // Stamp meta so the client can render an honest "Sheet not located"
+      // chip instead of pretending we have evidence.
+      const { error: updErr } = await admin
+        .from("deficiencies_v2")
+        .update({
+          evidence_crop_meta: {
+            ...meta,
+            unresolved_sheet: true,
+            attempted_refs: refs,
+            attempted_at: new Date().toISOString(),
+          },
+        })
+        .eq("id", f.id);
+      if (updErr) console.error("[evidence_crops] unresolved meta update", f.id, updErr);
+      continue;
+    }
+    const url = pageUrlByIndex.get(resolved.page);
     if (!url) {
       skipped++;
       continue;
     }
     const { error: updErr } = await admin
       .from("deficiencies_v2")
-      .update({ evidence_crop_url: url })
+      .update({
+        evidence_crop_url: url,
+        evidence_crop_meta: {
+          ...meta,
+          sheet_ref: resolved.sheet,
+          page_index: resolved.page,
+          signed_until: expiryByIndex.get(resolved.page) ?? null,
+          source: "auto",
+          unresolved_sheet: false,
+          attached_at: new Date().toISOString(),
+        },
+      })
       .eq("id", f.id);
     if (updErr) {
       console.error("[evidence_crops] update failed", f.id, updErr);
@@ -3750,7 +3824,7 @@ async function attachEvidenceCrops(
       attached++;
     }
   }
-  return { attached, skipped };
+  return { attached, skipped, unresolved_sheets: unresolved };
 }
 
 // ---------- main handler ----------
