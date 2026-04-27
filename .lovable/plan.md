@@ -1,122 +1,77 @@
-# Codebase Audit & Cleanup Plan
+# Audit: "Prepare pages — pages haven't been prepared" in the wizard
 
-Goal: shrink surface area, eliminate dead code, and split a few mega-files so future edits are safer and faster. The codebase is in good shape overall (no `console.log` spam, only 1 `as any`, only 1 `TODO`), so this is targeted cleanup rather than a rewrite.
+## What's happening on the failing review
 
----
+Review `b443092b…f3bc8daff90b` (SUNCOAST PORSCHE, 78-page Arch set):
 
-## A. Dead code to delete (truly orphaned, zero imports)
+- `plan_review_files`: 1 PDF registered ✓
+- `plan_review_page_assets`: **0 rows** ✗
+- `pipeline_error_log`: 1 × `needs_browser_rasterization` from `prepare_pages` (retried 3×, then dead)
+- Wizard UI shows "Finishing on server 0 / 78" — but the server-side rasterizer was deliberately removed (see `stages/prepare-pages.ts` — verify-only, throws `NEEDS_BROWSER_RASTERIZATION` whenever the manifest is empty)
 
-These files are not referenced anywhere in `src/` or routes:
+So the pipeline is working as designed. The bug is upstream: **the wizard's background rasterizer produced 0 page assets, then started the pipeline anyway, then told the user to "Retry" — but the Retry button only re-invokes the pipeline (which will keep failing forever because no browser is going to re-rasterize)**.
 
-| File | Notes |
-|---|---|
-| `src/components/ScanTimeline.tsx` | Old timeline visualization — replaced by `PipelineProgressStepper` |
-| `src/components/plan-review/RoundDiffPanel.tsx` | Round-diff UI not wired into ReviewDashboard |
-| `src/components/shared/SkeletonRow.tsx` | Replaced by shadcn `<Skeleton>` |
-| `src/hooks/plan-review/useReviewActions.ts` | Logic was inlined into `useReviewDashboard` |
-| `src/hooks/useCountUp.ts` | Animated counter hook, never used |
-| `src/hooks/useUserRole.ts` | Role check happens server-side via RLS now |
+## Three real defects
 
-Estimated removal: ~6 files, ~600 lines.
+### 1. Wizard duplicates `uploadPlanReviewFiles` instead of using it
+`src/components/NewPlanReviewWizard.tsx` (handleLaunch, lines 392–517) hand-rolls the upload + rasterize + pipeline-start sequence. Meanwhile `src/lib/plan-review-upload.ts` already does this correctly with the **MIN_RASTERIZE_RATIO = 0.8 guard** — i.e. it refuses to start the pipeline when fewer than 80% of pages were prepared and returns `partialRasterize: true` so the UI can surface a recovery CTA.
 
-## B. Orphaned components to wire up (just built, never mounted)
+The wizard's hand-rolled version has none of that:
+- No success-ratio check — fires `invokePipeline` even when 0/78 pages rasterized
+- No `expected_pages` stamp on `ai_run_progress` (only `total_pages`), so `reprepareInBrowser`'s gap-repair planner can't reconcile anything
+- Silently swallows rasterization errors with `console.warn` — the user never learns *why* 0/78 happened
+- No retry of failed page batches
 
-These were created last loop for Track 3 but never imported. Decision needed:
+### 2. The "Retry analysis" button is the wrong action
+When `prepare_pages` fails with `needs_browser_rasterization`, re-invoking the pipeline does nothing useful — the manifest is still empty, so `prepare_pages` will throw the same error on the next attempt. The user needs to **re-run rasterization in this browser tab**, which is exactly what `reprepareInBrowser()` does (already wired into `ReviewDashboard` and `PlanReviewDetail` via `ReviewHealthStrip`).
 
-| File | Action |
-|---|---|
-| `src/components/plan-review/LetterReadinessGate.tsx` | **Wire into** `CommentLetterExport.tsx` above the export button |
-| `src/components/plan-review/LetterSnapshotViewer.tsx` | **Wire into** `ReviewDashboard.tsx` as a "History" tab |
-| `src/lib/send-letter-snapshot.ts` | **Call from** the "Mark Sent" handler in `ReviewDashboard` |
-
-Without wiring, Track 3 delivers zero user value.
-
-## C. Unused shadcn UI primitives (each used in only 1 file = self)
-
-`accordion`, `command`, `form`, `resizable`, `scroll-area`, `table` — all show 1 hit (the file itself). Safe to delete:
-
-- `src/components/ui/accordion.tsx`
-- `src/components/ui/command.tsx`
-- `src/components/ui/form.tsx`
-- `src/components/ui/resizable.tsx`
-- `src/components/ui/scroll-area.tsx`
-- `src/components/ui/table.tsx`
-
-(Keep `sonner` — it's mounted in `App.tsx` via the Toaster.)
-
-Removes ~6 files and lets us prune deps: `@radix-ui/react-accordion`, `@radix-ui/react-scroll-area`, `cmdk`, `react-resizable-panels`, `react-hook-form` (verify no other consumers first).
-
-## D. Mega-file splits (high-impact)
-
-### 1. `supabase/functions/run-review-pipeline/index.ts` — **4,206 lines**
-Already has clean `// ----- section -----` markers. Split into siblings imported by `index.ts`:
-
-```text
-run-review-pipeline/
-  index.ts                  (handler + scheduleNextStage, ~400 lines)
-  _shared/cost.ts           (withCostCtx, recordCostMetric, callAI)
-  _shared/manifest.ts       (readSignedManifest, signedSheetUrls)
-  stages/upload.ts          (stageUpload, stagePreparePages, stageSheetMap)
-  stages/submittal.ts       (stageSubmittalCheck)
-  stages/dna.ts             (stageDnaExtract, evaluateDnaHealth, stageDnaReevaluate)
-  stages/discipline.ts      (stageDisciplineReview, runDisciplineChecks)
-  stages/cross-check.ts     (runCrossSheetConsistency, stageCrossCheck)
-  stages/dedupe.ts          (jaccard, stageDedupe)
-  stages/citations.ts       (stageGroundCitations)
-  stages/evidence.ts        (attachEvidenceCrops)
-  stages/verify.ts          (stageVerify)
-  stages/finalize.ts        (stageDeferredScope, stagePrioritize, stageComplete)
-```
-Pure refactor — no logic changes, no behavior change. Deno bundles siblings fine.
-
-### 2. `src/pages/PlanReviewDetail.tsx` — **1,009 lines**
-Extract sub-components into `src/components/plan-review-detail/`:
-- `UploadSection.tsx`
-- `ProcessingSection.tsx`
-- `ResultsSection.tsx`
-- `useReviewPolling.ts` (hook)
-
-Target: page file under 300 lines.
-
-### 3. `src/components/NewPlanReviewWizard.tsx` — **1,007 lines**
-Each step into its own file:
-- `wizard/StepProjectInfo.tsx`
-- `wizard/StepUpload.tsx`
-- `wizard/StepReview.tsx`
-- `wizard/wizard-constants.ts` (counties, trades, services arrays)
-- `wizard/useWizardState.ts`
-
-### 4. `src/lib/county-report.ts` (521) and `src/lib/county-requirements/data.ts` (480)
-Move large static county arrays into JSON under `src/data/counties/` and import — keeps diffable code small and lets Vite tree-shake.
-
-## E. Quick wins
-
-- Remove the 2 stray `console.log`s in `PlanReviewDetail.tsx` and `NewPlanReviewWizard.tsx`.
-- Resolve the lone `TODO` in `src/lib/letter-linter.ts`.
-- Replace the 1 `as any` (per project memory: strict TS, no `as any`).
+### 3. The wizard's progress strip lies
+`PagePrepProgress` reads `total_pages` and `pre_rasterized_pages`. The wizard writes those, but `uploadPlanReviewFiles` writes `expected_pages` instead. So whichever entry point you use, the other one's UI is wrong. Pick one schema and stick with it.
 
 ---
 
-## Execution order (proposed)
+# Plan — three changes, ~120 lines net
 
-1. **Delete dead code (A + C)** — instant win, lowest risk.
-2. **Wire Track 3 components (B)** — unblocks shipped work.
-3. **Split `run-review-pipeline` (D1)** — biggest maintainability win, isolated to one edge function.
-4. **Split wizard + detail page (D2 + D3)** — improves preview hot-reload time.
-5. **Externalize county data (D4)** — last, smallest payoff.
-6. **Quick wins (E)** — bundle into the same PR as #1.
+### A. Replace the wizard's hand-rolled upload with `uploadPlanReviewFiles`
+`NewPlanReviewWizard.tsx > handleLaunch`:
+- After creating the `projects` and `plan_reviews` rows, call `uploadPlanReviewFiles({ reviewId, round: 1, existingFileUrls: [], existingPageCount: null, files: uploadedFiles.map(u => u.file), userId, onProgress })`.
+- Drive `PagePrepProgress` from the `onProgress` callback (set local state `{ prepared, expected, phase }`) instead of the DB poll, so the progress strip reflects what's actually happening in *this* tab.
+- Read `result.partialRasterize` and `result.pipelineStarted` to decide what to render in Step 3.
 
-## Expected impact
+Delete the inline upload / rasterize / `invokePipeline` block (lines ~392–517) — it's all in `uploadPlanReviewFiles` now.
 
-- ~12 files deleted, ~5 deps removable
-- Largest source file drops from 4,206 → ~600 lines
-- 3 orphaned Track 3 features become live
-- Bundle size: minor (most dead code already tree-shaken), but DX and review speed improve materially
+### B. Replace "Retry analysis" with a context-aware recovery CTA
+Step 3 panel logic:
 
-## What this plan does NOT do
+| State | CTA |
+|---|---|
+| `result.partialRasterize === true` OR pipeline error contains `needs_browser_rasterization` | **"Re-prepare in this browser"** → calls `reprepareInBrowser(createdReviewId)` |
+| Other pipeline-start error | Keep **"Retry analysis"** → calls `invokePipeline` |
+| Pipeline running normally | No CTA, just the stepper |
 
-- No behavior changes, no schema changes, no new features
-- No tests added (none exist today; would be a separate proposal)
-- No edge function logic rewrites — splits are mechanical moves only
+Show a clear inline explanation when partial: *"Your browser only prepared X of Y pages. Click below to finish — keep this tab open."*
 
-**Approve and I'll execute steps 1–2 first (lowest risk, highest signal), then check in before tackling the pipeline split.**
+### C. Unify the progress schema
+In `uploadPlanReviewFiles` (and `reprepareInBrowser`), also write `total_pages` alongside `expected_pages` and `pre_rasterized_pages`. One-line change in two places. Existing `PagePrepProgress` keeps working everywhere with no UI churn.
+
+### D. Self-heal the existing stuck review (one-shot)
+For SUNCOAST PORSCHE specifically (`b443092b…`): once Change A is shipped, the user can click the new **Re-prepare in this browser** CTA from the dashboard's `ReviewHealthStrip` (already wired) and the 78 pages will render locally, then the pipeline restarts automatically. No migration needed.
+
+---
+
+# Files touched
+
+- `src/components/NewPlanReviewWizard.tsx` — replace `handleLaunch` upload block; replace Retry CTA with recovery branch; pass `onProgress` to local `PagePrepProgress` state.
+- `src/lib/plan-review-upload.ts` — also write `total_pages` to `ai_run_progress` so the wizard's polling progress bar matches.
+- `src/lib/reprepare-in-browser.ts` — same one-line addition for consistency.
+- `src/components/plan-review/PagePrepProgress.tsx` — accept optional `localProgress` prop so the wizard can drive it directly (avoids a 1.2s polling delay during step 3).
+
+# Out of scope (intentional)
+
+- No edge-function changes — `stages/prepare-pages.ts` is correctly a verify-only gate; bringing back server-side MuPDF rasterization is what we just spent rounds 1–6 removing.
+- No DB schema changes.
+- No UI redesign of the wizard or recovery banner — copy/CTA only.
+
+# Risk
+
+Low. `uploadPlanReviewFiles` is the same code path used by the dashboard's "+ Add files" flow today, so this is consolidating two divergent implementations onto the well-tested one. The user-visible behavior change is: when rasterization is incomplete, they see "Re-prepare in this browser" instead of a Retry button that can't actually fix anything.
