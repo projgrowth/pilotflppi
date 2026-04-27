@@ -1,85 +1,99 @@
-# Plan review: scope confirmation + UX cleanup
+## What's actually broken (evidence from your current Suncoast Porsche review)
 
-## Will the recent changes apply to all plan reviews?
+I pulled the live data for the review you're looking at right now (`aa5638ef…`). Here's what 40 findings look like in production:
 
-Yes. Everything we just shipped is global:
+| Metric | Suncoast Porsche | What it should be |
+|---|---|---|
+| Total findings | 40 | ✓ |
+| Citations grounded | **0** | 35+ |
+| Citations marked "mismatch" | 7 | 0–2 |
+| Findings flagged "needs human review" | **38 of 40** | <10 |
+| Findings with an evidence crop image | **0** | 30+ |
+| First 12 findings, root cause | All variants of "code summary / construction type missing on cover sheet" | Should be 1 finding |
 
-- **Pipeline orchestrator** (`run-review-pipeline` edge function) — every new run uses the new `CORE_STAGES` order including `submittal_check` and `ground_citations`.
-- **Health metrics** (`useReviewHealth`) — reads live from `deficiencies_v2` per review, so any review (old or new) gets the grounded / low-confidence / needs-review numbers on next page load.
-- **Export safety gate** (`CommentLetterExport`) — fires for any letter export where unverified citations exist.
-- **DNA schema fix** — unblocks `dna_extract` for every run.
-
-Nothing is keyed to a project ID. Older reviews benefit from the UI-side fixes immediately; the pipeline-side fixes apply to the next time a review runs (re-run, resubmittal, or new upload).
-
-The one thing that is **not** yet visible to users: the new `submittal_check` stage runs but its label and the resulting `submittal_incomplete` flag are not surfaced anywhere in the UI. That is the top item below.
+Three real bugs are causing this. None are cosmetic.
 
 ---
 
-## What we'll fix in this loop
+### Bug 1 · The citation grounder is matching the wrong field format
 
-### 1. Make the new gates visible
+The AI emits `code_reference.section = "FBC-B 508"`. The `fbc_code_sections` library stores the same section as `"508"`. The grounder does a literal compare, so **every citation comes back `not_found`** and we mark them unverified. The seed library has 151 valid sections — none of them carry the `FBC-B ` prefix.
 
-a. **Stepper labels** — add `submittal_check` to `FRIENDLY_LABELS` and `FRIENDLY_HINTS` in `PipelineProgressStepper.tsx` so it renders as "Submittal check / Verifying required trades are present" instead of a blank pill.
+**Fix:** normalize both sides in `groundCitations` — strip leading `FBC-B `, `FBC-` and trim — before comparing. While we're there, also fall back to a "starts-with" match on the section prefix (`508.4` should match a stored `508`) and store the matched canonical section back on the row so the UI can show the verified citation, not the AI's guess.
 
-b. **Submittal-incomplete banner** on `PlanReviewDetail` — when `ai_run_progress.submittal_incomplete === true`, show a yellow strip above the findings panel:
+This single fix should flip ~80% of the "not_found" citations to "verified" with no other changes.
 
-```text
-Submittal incomplete — missing: Structural, MEP, Fire Protection
-This review will continue, but a permit-blocker DEF-SUB001 has been opened.
-[View finding]  [Mark as deferred submittal]
-```
+### Bug 2 · Dedupe is letter-matching findings, not concept-matching
 
-c. **Provenance strip** at the top of the findings panel (one line, always visible):
+The first 12 architectural findings on this review are all variants of "construction type / code summary / FBC edition missing from cover sheet G001." Each one cites a different sub-section, so the current dedupe (which keys on `discipline + sheet + def_number`) keeps them as 12 separate findings. A reviewer reading the letter sees 12 redundant comments.
 
-```text
-74 findings · 71 grounded · 3 need review · DNA 12/14 fields · Submittal: incomplete
-```
+**Fix:** add a second dedupe pass keyed on `(discipline, sheet, normalized_finding_topic)` where `normalized_finding_topic` is the AI-extracted topic. Cheapest implementation: in the `dedupe` stage, when two findings on the same sheet share the same first 6 normalized words of the finding text **or** their cited section's parent (e.g. both 508.x), collapse them into one with the worst-case priority and a merged `code_reference[]` array.
 
-Pulls from the existing `useReviewHealth` hook + `project_dna.missing_fields` + `ai_run_progress.submittal_incomplete`. No new queries needed.
+We already have a `dedupe` stage in the pipeline — this is just tightening its similarity rule, not adding a new stage.
 
-### 2. Smoother upload → review hand-off
+### Bug 3 · Evidence crops never get generated
 
-Today the user drops a file and stares at a stepper. Three small fixes:
+`evidence_crop_url` is null on every finding. The schema is built for it (`evidence_crop_url`, `evidence_crop_meta`), the pin-placement logic depends on it, but nothing in the pipeline actually writes one. Reviewers have to mentally jump from "DEF-A012, sheet A-201" to the PDF and search.
 
-a. **Upload zone copy** — replace "Drop plan documents here" with a 2-line hint:
-   - "Drop the full plan set (PDF). Include cover, code summary, and all discipline sheets."
-   - Sub-line: "We'll auto-detect Architectural, Structural, MEP, Civil, and Fire Protection."
+**Fix:** add a lightweight `crop_evidence` step at the tail of `discipline_review` (or piggyback on `ground_citations`): for each finding with `sheet_refs[0]`, fetch the corresponding `plan_review_page_assets.vision_storage_path`, crop a 1024×768 region centered on the AI-returned bbox (or full sheet if no bbox), upload to the `documents` bucket as `crops/{review_id}/{finding_id}.png`, and store the path. The `FindingCard` already has a slot to render it.
 
-b. **Auto-jump to findings when ready** — when `ai_check_status` flips to `complete` and the right panel is on `letter` or empty, switch it to `findings` and toast "Review complete — N findings".
+If a tight bbox isn't returned, fall back to the full sheet thumbnail — that's still infinitely better than a text reference.
 
-c. **Single status header** — the page currently has the stepper, the `StuckRecoveryBanner`, the `UploadProgressBar`, and the top bar all stacked. Group them into one collapsing "Pipeline status" card that auto-collapses to a one-line summary once the run is complete, so reviewers reading the letter aren't looking at a giant in-progress UI.
+---
 
-### 3. Findings panel: easier to triage
+## What we'll ship (one loop, in order)
 
-a. **Default sort = confidence ascending, then severity** so reviewers see the AI's least-confident calls first (the ones that actually need eyes) instead of scrolling.
+### 1. Citation grounder normalization (highest leverage — fixes 80% of "needs review")
 
-b. **"Needs human review" pill** at the top of the filter row — one click filters to `requires_human_review = true`. Currently buried in the filter dropdown.
+Edit `groundCitations` stage in `supabase/functions/run-review-pipeline/index.ts`:
 
-c. **Citation status icon on every card** — small inline glyph: green check (grounded), grey dash (unverified), red triangle (mismatch). Pulls from `citation_status` / `citation_match_score` already on the row.
+- Add `normalizeSection(s)` helper: strip `FBC-B `, `FBC-`, `FBC `, lowercase, trim.
+- Compare normalized AI section ↔ normalized stored section.
+- If exact match fails, try parent-section match (`508.4.1` → `508.4` → `508`).
+- On match: set `citation_status='verified'`, `citation_canonical_text` = stored requirement, `citation_match_score=1.0`, `citation_grounded_at=now()`.
+- On no match anywhere: keep `not_found` but **don't** set `requires_human_review=true` solely for that reason. Reviewer-needed should be reserved for low-confidence findings, not unverifiable citations.
 
-### 4. Letter export: clearer pre-flight
+### 2. Concept-level dedupe
 
-The export gate dialog currently says "unverified citations exist — confirm". Add a count and a "Jump to findings" button so the reviewer can fix them in one click instead of guessing which findings are flagged.
+Edit the `dedupe` stage:
+- Group findings by `(discipline, primary_sheet)`.
+- Within a group, run a cheap similarity check on the first sentence of `finding`: shingled token overlap > 0.6 → merge.
+- Also merge any two findings whose `code_reference.section` shares the same parent (e.g. `508.4` and `508.4.1`).
+- Merged finding keeps the worst-case `priority`, union of `code_reference[]`, union of `evidence[]`, and a counter `merged_from: 4` so the UI can show "merged from 4 similar findings."
+
+### 3. Evidence crops
+
+Add a `crop_evidence` sub-step inside `discipline_review` (cheaper) or as a tail step in `ground_citations`:
+- For each finding with `sheet_refs.length > 0`:
+  - Resolve the page asset via `plan_review_page_assets`.
+  - If the AI returned an `evidence_crop_meta.bbox`, crop to it + 10% padding.
+  - Otherwise upload the full page as the crop (acceptable fallback).
+  - Write to `documents/crops/{plan_review_id}/{finding_id}.png`, signed URL into `evidence_crop_url`.
+- No new table, no schema migration.
+
+### 4. UI polish (small, but visible)
+
+- **`FindingCard`**: distinguish `not_found` (grey "code lookup unavailable") from `mismatch` (red "citation conflict") — they currently both look like errors. Show `merged_from` badge when present.
+- **`ReviewProvenanceStrip`**: change "verified" copy to use new grounding numbers; surface "X findings merged in dedupe" so reviewers trust the lower count.
+- **`FindingsListPanel`**: keep the existing default sort, but add a permanent "Top 5 root causes" collapsible at the top of the list — groups merged findings by topic so reviewers see "Cover sheet code summary (8 instances)" before scrolling.
 
 ---
 
 ## Files to change
 
-- `src/components/plan-review/PipelineProgressStepper.tsx` — add `submittal_check` labels.
-- `src/pages/PlanReviewDetail.tsx` — submittal banner, provenance strip, auto-switch to findings on complete, collapse status into one card.
-- `src/components/plan-review/PlanViewerPanel.tsx` — upload zone copy.
-- `src/components/plan-review/FindingsListPanel.tsx` — default sort, "needs review" quick filter, citation icon on cards.
-- `src/components/FindingCard.tsx` — citation status icon.
-- `src/components/CommentLetterExport.tsx` — show count + jump-to-findings in the gate dialog.
+- `supabase/functions/run-review-pipeline/index.ts` — `groundCitations`, `dedupe`, new `cropEvidence` helper.
+- `src/components/FindingCard.tsx` — citation status copy, `merged_from` badge, evidence crop image rendering.
+- `src/components/plan-review/ReviewProvenanceStrip.tsx` — updated grounding/dedupe copy.
+- `src/components/plan-review/FindingsListPanel.tsx` — top-of-list "root causes" collapsible.
 
-No DB migrations. No edge function changes. All data already exists on the rows we're reading.
+No DB migrations. No new tables. No new secrets.
 
 ---
 
-## What we're explicitly **not** doing in this loop
+## What we're explicitly **not** doing
 
-- Re-running historical reviews to backfill the new `submittal_check` finding. (Reviewers can re-run individual projects from the existing "Run AI check" button if they want it.)
-- Touching the deep-pipeline stages (`verify`, `cross_check`, `deferred_scope`, `prioritize`).
-- Sidebar / dashboard changes — those were already trimmed in the previous loop.
+- Re-running the 40-finding review automatically. After this ships, you can hit "Run AI check" on Suncoast Porsche and the same 40-finding output should collapse to ~12–15 grounded, mostly-non-flagged findings.
+- Backfilling evidence crops on old reviews. New runs only.
+- Touching the `verify` / `cross_check` deep stages — those work, they're just optional.
 
 Approve and I'll ship it.

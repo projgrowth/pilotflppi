@@ -19,8 +19,16 @@ import { useFirmId } from "@/hooks/useFirmId";
 export interface ReviewHealth {
   total: number;
   grounded: number;
+  /** Found a real FBC parent section but text overlap was weak — keep visible
+   *  but distinguish from "not in our library at all" so the UI doesn't
+   *  scream "WRONG" at the reviewer. */
+  citationsLibraryGap: number;
+  citationsMismatch: number;
   lowConfidence: number;
   needsEyes: number;
+  /** Findings auto-merged by dedupe. Surfaced so reviewers trust the
+   *  shorter visible list ("8 duplicates merged into 1"). */
+  mergedDuplicates: number;
 }
 
 export interface ReviewHealthMap {
@@ -52,19 +60,35 @@ export function useReviewHealth(planReviewIds: string[]): ReviewHealthMap {
 
       const out: ReviewHealthMap = {};
       for (const id of sortedIds) {
-        out[id] = { total: 0, grounded: 0, lowConfidence: 0, needsEyes: 0 };
+        out[id] = {
+          total: 0,
+          grounded: 0,
+          citationsLibraryGap: 0,
+          citationsMismatch: 0,
+          lowConfidence: 0,
+          needsEyes: 0,
+          mergedDuplicates: 0,
+        };
       }
       for (const r of rows ?? []) {
+        const bucket = out[r.plan_review_id];
+        if (!bucket) continue;
+
+        // Count merged-out duplicates separately so we can surface the
+        // dedupe gain without inflating the visible total.
+        if (r.verification_status === "superseded") {
+          bucket.mergedDuplicates++;
+          continue;
+        }
         // Skip findings that won't appear in the letter — they don't reflect
         // on the run's quality the reviewer actually has to ship.
-        if (r.verification_status === "superseded") continue;
         if (r.verification_status === "overturned") continue;
         if (r.status === "resolved" || r.status === "waived") continue;
 
-        const bucket = out[r.plan_review_id];
-        if (!bucket) continue;
         bucket.total++;
         if (r.citation_status === "verified") bucket.grounded++;
+        if (r.citation_status === "not_found") bucket.citationsLibraryGap++;
+        if (r.citation_status === "mismatch") bucket.citationsMismatch++;
         if (
           typeof r.confidence_score === "number" &&
           r.confidence_score < LOW_CONFIDENCE_THRESHOLD

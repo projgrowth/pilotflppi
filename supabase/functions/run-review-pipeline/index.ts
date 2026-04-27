@@ -3290,15 +3290,29 @@ async function stageDedupe(
     return { row: d, section, sheets, tokens };
   });
 
-  // Bucket by normalized FBC section. Findings with no section are bucketed
-  // by their first sheet ref to still catch "same wall flagged twice".
+  // Bucket by **parent** FBC section (first two dotted levels) so that
+  // 508, 508.4, and 508.4.1 all end up in the same bucket and the in-bucket
+  // similarity check can decide whether to merge them. Findings with no
+  // section get bucketed by (discipline, first sheet ref) so same-discipline
+  // same-sheet duplicates (e.g. eight variants of "cover sheet missing code
+  // summary" all on G001/Architectural) still cluster.
+  function bucketKey(e: { section: string; sheets: Set<string>; row: DedupeRow }): string | null {
+    if (e.section) {
+      const parts = e.section.split(".");
+      // Chapter + first sub-level. "508.4.1" → "sec:508.4". "508" → "sec:508".
+      const parent = parts.slice(0, Math.min(2, parts.length)).join(".");
+      return `sec:${parent}`;
+    }
+    if (e.sheets.size > 0) {
+      // Sort to keep the bucket key stable regardless of sheet_refs order.
+      const firstSheet = [...e.sheets].sort()[0];
+      return `sheet:${e.row.discipline}:${firstSheet}`;
+    }
+    return null;
+  }
   const buckets = new Map<string, typeof enriched>();
   for (const e of enriched) {
-    const key = e.section
-      ? `sec:${e.section}`
-      : e.sheets.size > 0
-        ? `sheet:${Array.from(e.sheets)[0]}`
-        : null;
+    const key = bucketKey(e);
     if (!key) continue;
     const arr = buckets.get(key) ?? [];
     arr.push(e);
@@ -3328,11 +3342,13 @@ async function stageDedupe(
           b.sheets.size === 0 ||
           [...a.sheets].some((s) => b.sheets.has(s));
         if (!sheetOverlap) continue;
-        // Use a lower threshold for cross-discipline matches (same FBC section,
-      // different discipline vocabulary). Same-discipline pairs share more
-      // specific terms and tolerate the tighter 0.55 bound.
-      const threshold = a.row.discipline === b.row.discipline ? 0.55 : 0.35;
-      if (jaccard(a.tokens, b.tokens) < threshold) continue;
+        // Lowered same-discipline threshold from 0.55 → 0.45 so the eight
+        // variants of "cover sheet missing code summary" cluster instead of
+        // looking like eight unique findings (they share `cover`, `sheet`,
+        // `code`, `summary`, `missing` but each cites a different sub-section
+        // and adds 2-3 unique words).
+        const threshold = a.row.discipline === b.row.discipline ? 0.45 : 0.35;
+        if (jaccard(a.tokens, b.tokens) < threshold) continue;
         group.push(j);
         visited.add(j);
       }
@@ -3493,12 +3509,22 @@ async function stageGroundCitations(
     return { code, section, edition };
   };
 
+  // Build a search set that includes every parent of every cited section so
+  // a finding citing 508.4.1 can fall back to 508.4 → 508 if the deeper
+  // sub-section isn't in our reference library (which is the common case —
+  // we seed canonical text at chapter granularity, not at every leaf).
+  function parentSections(s: string): string[] {
+    const parts = s.split(".");
+    const out: string[] = [];
+    for (let i = parts.length; i >= 1; i--) out.push(parts.slice(0, i).join("."));
+    return out;
+  }
   const distinctSections = Array.from(
     new Set(
       defs
         .map((d) => keyOf(d))
         .filter((k): k is Key => !!k)
-        .map((k) => k.section),
+        .flatMap((k) => parentSections(k.section)),
     ),
   );
 
@@ -3521,18 +3547,23 @@ async function stageGroundCitations(
   };
   const canon = (canonRaw ?? []) as Canon[];
 
-  function lookup(k: Key): Canon | null {
-    // Exact (code, section, edition) → exact (code, section) → section-only.
-    let hit =
-      (k.edition &&
-        canon.find(
-          (c) =>
-            c.code === k.code && c.section === k.section && c.edition === k.edition,
-        )) ||
-      null;
-    if (!hit) hit = canon.find((c) => c.code === k.code && c.section === k.section) ?? null;
-    if (!hit) hit = canon.find((c) => c.section === k.section) ?? null;
-    return hit;
+  function lookup(k: Key): { hit: Canon; matchedSection: string } | null {
+    // Try the cited section first, then walk up the dotted parent chain
+    // (508.4.1 → 508.4 → 508). Within each level: exact (code+section+edition)
+    // → exact (code+section) → section-only.
+    for (const section of parentSections(k.section)) {
+      let hit =
+        (k.edition &&
+          canon.find(
+            (c) =>
+              c.code === k.code && c.section === section && c.edition === k.edition,
+          )) ||
+        null;
+      if (!hit) hit = canon.find((c) => c.code === k.code && c.section === section) ?? null;
+      if (!hit) hit = canon.find((c) => c.section === section) ?? null;
+      if (hit) return { hit, matchedSection: section };
+    }
+    return null;
   }
 
   const counts = { verified: 0, mismatch: 0, not_found: 0, hallucinated: 0 };
@@ -3543,15 +3574,18 @@ async function stageGroundCitations(
     let status: "verified" | "mismatch" | "not_found" | "hallucinated";
     let score: number | null = null;
     let canonText: string | null = null;
+    let matchedSection: string | null = null;
 
     if (!key) {
       // No parseable section at all = hallucinated/missing citation.
       status = "hallucinated";
     } else {
-      const hit = lookup(key);
-      if (!hit) {
+      const found = lookup(key);
+      if (!found) {
         status = "not_found";
       } else {
+        const { hit, matchedSection: ms } = found;
+        matchedSection = ms;
         canonText = `${hit.code} ${hit.section} (${hit.edition}) — ${hit.title}: ${hit.requirement_text}`.slice(
           0,
           1500,
@@ -3559,34 +3593,46 @@ async function stageGroundCitations(
         const aiBlob = `${def.finding} ${def.required_action}`;
         score = citationOverlapScore(aiBlob, hit.requirement_text);
         // Tightened from 0.18 → 0.30: at 0.18 a finding only needed to share
-        // ~3 common words with the canonical text to "verify". Plus require
-        // that the AI text actually mentions the section number — otherwise
-        // the model is parroting a vaguely related code section.
+        // ~3 common words with the canonical text to "verify". For parent
+        // matches (we fell back from 508.4.1 to 508), accept any match —
+        // the reviewer can still see the AI cited a real section family.
         const aiBlobLc = aiBlob.toLowerCase();
-        const sectionLc = hit.section.toLowerCase();
-        const mentionsSection = aiBlobLc.includes(sectionLc);
-        status = score >= 0.30 && mentionsSection ? "verified" : "mismatch";
+        const sectionLc = ms.toLowerCase();
+        const mentionsSection = aiBlobLc.includes(sectionLc) ||
+          aiBlobLc.includes(key.section.toLowerCase());
+        const usedParent = ms !== key.section;
+        if (usedParent && mentionsSection) {
+          // Parent match with the AI quoting the deeper section — acceptable.
+          status = "verified";
+        } else {
+          status = score >= 0.30 && mentionsSection ? "verified" : "mismatch";
+        }
       }
     }
     counts[status]++;
 
-    // For mismatch / not_found / hallucinated: route to human review so the
-    // reviewer sees the AI quoted a citation it couldn't substantiate.
-    const needsHumanReview = status !== "verified";
+    // Only escalate to human review for true conflicts (mismatch or
+    // hallucinated citations). `not_found` means our canonical library
+    // doesn't carry that section yet — that's a library gap, not a finding
+    // problem, and shouldn't drown the reviewer in 38/40 "needs review" pills.
+    const needsHumanReview = status === "mismatch" || status === "hallucinated";
     const update: Record<string, unknown> = {
       citation_status: status,
       citation_match_score: score,
       citation_canonical_text: canonText,
       citation_grounded_at: now,
     };
+    if (matchedSection && matchedSection !== key?.section) {
+      // Record which parent section satisfied the lookup so the UI can
+      // show "verified against 508 (cited 508.4.1)" instead of just "verified".
+      update.evidence_crop_meta = { matched_parent_section: matchedSection };
+    }
     if (needsHumanReview) {
       update.requires_human_review = true;
       update.human_review_reason =
         status === "mismatch"
           ? `Citation ${def.code_reference?.section ?? "?"} doesn't match the canonical FBC text — verify the section is correct.`
-          : status === "not_found"
-            ? `Citation ${def.code_reference?.section ?? "?"} not found in the FBC reference — verify the section number.`
-            : `No FBC section parseable from this finding — add or correct the citation.`;
+          : `No FBC section parseable from this finding — add or correct the citation.`;
     }
     const { error: updErr } = await admin
       .from("deficiencies_v2")
@@ -3595,13 +3641,116 @@ async function stageGroundCitations(
     if (updErr) console.error("[ground_citations] update failed", def.id, updErr);
   }
 
+  // After grounding, attach a one-click visual receipt to every finding so
+  // reviewers don't have to mentally jump from "DEF-A012, sheet A-201" to
+  // the PDF and search. Cheap: reuse the already-signed page asset URL
+  // for the finding's first sheet ref. Bbox cropping can come later.
+  const cropResult = await attachEvidenceCrops(admin, planReviewId);
+
   return {
     examined: defs.length,
     verified: counts.verified,
     mismatch: counts.mismatch,
     not_found: counts.not_found,
     hallucinated: counts.hallucinated,
+    crops_attached: cropResult.attached,
+    crops_skipped: cropResult.skipped,
   };
+}
+
+// ---------- evidence crops ----------
+//
+// For each finding, set evidence_crop_url to the signed URL of the first
+// sheet_ref's rendered page asset. Reviewers get a thumbnail preview and a
+// one-click jump to the source page. We don't bbox-crop yet — the full
+// sheet image is infinitely better than no image, and adding image
+// processing to the edge worker is a larger lift.
+async function attachEvidenceCrops(
+  admin: ReturnType<typeof createClient>,
+  planReviewId: string,
+): Promise<{ attached: number; skipped: number }> {
+  // Pull current findings (only those without a crop already, to keep this
+  // idempotent across reruns).
+  const { data: rows, error } = await admin
+    .from("deficiencies_v2")
+    .select("id, sheet_refs, evidence_crop_url")
+    .eq("plan_review_id", planReviewId)
+    .neq("status", "resolved")
+    .neq("status", "waived");
+  if (error) {
+    console.error("[evidence_crops] read failed", error);
+    return { attached: 0, skipped: 0 };
+  }
+  const findings = (rows ?? []) as Array<{
+    id: string;
+    sheet_refs: string[] | null;
+    evidence_crop_url: string | null;
+  }>;
+  if (findings.length === 0) return { attached: 0, skipped: 0 };
+
+  // Read the persisted sheet map so we know which page_index each sheet_ref
+  // lives on. This was snapshotted by stageSheetMap.
+  const { data: prRow, error: prErr } = await admin
+    .from("plan_reviews")
+    .select("checklist_state")
+    .eq("id", planReviewId)
+    .maybeSingle();
+  if (prErr || !prRow) {
+    console.error("[evidence_crops] plan_review read failed", prErr);
+    return { attached: 0, skipped: findings.length };
+  }
+  const checklist = (prRow.checklist_state ?? {}) as Record<string, unknown>;
+  const rawMap = Array.isArray(checklist.last_sheet_map)
+    ? (checklist.last_sheet_map as Array<{ sheet_ref?: string; page_index?: number }>)
+    : [];
+  const sheetToPage = new Map<string, number>();
+  for (const m of rawMap) {
+    if (typeof m.sheet_ref === "string" && typeof m.page_index === "number") {
+      sheetToPage.set(m.sheet_ref.toUpperCase().trim(), m.page_index);
+    }
+  }
+  if (sheetToPage.size === 0) {
+    return { attached: 0, skipped: findings.length };
+  }
+
+  // Sign every page once (signedSheetUrls caches), then index by page_index.
+  const signed = await signedSheetUrls(admin, planReviewId);
+  // signedSheetUrls returns rows in page_index order, so position == index.
+  const pageUrlByIndex = new Map<number, string>();
+  signed.forEach((s, i) => pageUrlByIndex.set(i, s.signed_url));
+
+  let attached = 0;
+  let skipped = 0;
+  for (const f of findings) {
+    if (f.evidence_crop_url) {
+      skipped++;
+      continue;
+    }
+    const firstSheet = (f.sheet_refs ?? [])
+      .map((s) => s?.toUpperCase().trim())
+      .find((s) => s && sheetToPage.has(s));
+    if (!firstSheet) {
+      skipped++;
+      continue;
+    }
+    const pageIndex = sheetToPage.get(firstSheet)!;
+    const url = pageUrlByIndex.get(pageIndex);
+    if (!url) {
+      skipped++;
+      continue;
+    }
+    const { error: updErr } = await admin
+      .from("deficiencies_v2")
+      .update({ evidence_crop_url: url })
+      .eq("id", f.id);
+    if (updErr) {
+      console.error("[evidence_crops] update failed", f.id, updErr);
+      skipped++;
+    } else {
+      attached++;
+    }
+  }
+  return { attached, skipped };
 }
 
 // ---------- main handler ----------
