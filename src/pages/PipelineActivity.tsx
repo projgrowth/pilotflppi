@@ -469,6 +469,7 @@ export default function PipelineActivity() {
                 <ActivityRow
                   key={a.planReviewId}
                   activity={a}
+                  health={healthMap[a.planReviewId]}
                   onCancel={handleCancel}
                   onResume={handleResume}
                   cancelling={cancellingId === a.planReviewId}
@@ -487,6 +488,7 @@ export default function PipelineActivity() {
                 <ActivityRow
                   key={a.planReviewId}
                   activity={a}
+                  health={healthMap[a.planReviewId]}
                   onCancel={handleCancel}
                   onResume={handleResume}
                   cancelling={cancellingId === a.planReviewId}
