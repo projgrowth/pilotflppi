@@ -3342,11 +3342,13 @@ async function stageDedupe(
           b.sheets.size === 0 ||
           [...a.sheets].some((s) => b.sheets.has(s));
         if (!sheetOverlap) continue;
-        // Use a lower threshold for cross-discipline matches (same FBC section,
-      // different discipline vocabulary). Same-discipline pairs share more
-      // specific terms and tolerate the tighter 0.55 bound.
-      const threshold = a.row.discipline === b.row.discipline ? 0.55 : 0.35;
-      if (jaccard(a.tokens, b.tokens) < threshold) continue;
+        // Lowered same-discipline threshold from 0.55 → 0.45 so the eight
+        // variants of "cover sheet missing code summary" cluster instead of
+        // looking like eight unique findings (they share `cover`, `sheet`,
+        // `code`, `summary`, `missing` but each cites a different sub-section
+        // and adds 2-3 unique words).
+        const threshold = a.row.discipline === b.row.discipline ? 0.45 : 0.35;
+        if (jaccard(a.tokens, b.tokens) < threshold) continue;
         group.push(j);
         visited.add(j);
       }
