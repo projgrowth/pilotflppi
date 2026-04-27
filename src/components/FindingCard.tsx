@@ -629,14 +629,15 @@ export const FindingCard = forwardRef<HTMLDivElement, FindingCardProps>(
                   <Eye className="h-3 w-3" /> AI Observation
                 </div>
                 <p className="text-xs text-foreground/85 leading-relaxed">{finding.reasoning}</p>
-                {finding.crop_url && (
+                {(finding.crop_url || finding.evidence_crop_url) && (
                   <div className="space-y-1 pt-1 border-t border-accent/15">
                     <div className="flex items-center gap-1 text-2xs font-semibold text-muted-foreground uppercase tracking-wide">
-                      <ImageIcon className="h-3 w-3" /> Image evidence
+                      <ImageIcon className="h-3 w-3" />
+                      {finding.crop_url ? "Image evidence" : "Cited sheet"}
                     </div>
                     <img
-                      src={finding.crop_url}
-                      alt={`AI-analyzed region for finding ${finding.code_ref}`}
+                      src={finding.crop_url || finding.evidence_crop_url || ""}
+                      alt={`Evidence for finding ${finding.code_ref}`}
                       className="w-full max-h-64 object-contain rounded border border-border/40 bg-card"
                       loading="lazy"
                     />
