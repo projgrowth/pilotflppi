@@ -13,7 +13,7 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { subscribeShared } from "@/hooks/useReviewDashboard";
-import { adaptV2ToFindings, type DeficiencyV2Lite } from "@/lib/deficiency-adapter";
+import { adaptV2ToFindings, type DeficiencyV2Lite, type SheetMapEntry } from "@/lib/deficiency-adapter";
 import type { PlanReviewRow } from "@/types";
 import type { Finding } from "@/components/FindingCard";
 
