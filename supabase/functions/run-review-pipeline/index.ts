@@ -22,7 +22,6 @@ import { createClient } from "./_shared/supabase.ts";
 import {
   type Stage,
   type PipelineMode,
-  type ChatMessage,
   STAGES,
   stagesForMode,
   DISCIPLINES,
@@ -35,10 +34,7 @@ import { setStage, recordPipelineError } from "./_shared/pipeline-status.ts";
 import { withRetry } from "./_shared/retry.ts";
 import { setCostCtx, withCostCtx } from "./_shared/cost.ts";
 import { callAI } from "./_shared/ai.ts";
-import {
-  signedSheetUrls,
-  invalidatePageManifestCache,
-} from "./_shared/storage.ts";
+import { signedSheetUrls } from "./_shared/storage.ts";
 
 // Re-export `LOVABLE_API_KEY` reference is no longer needed locally — `callAI`
 // owns the gateway call. Keep this comment so the next refactor doesn't add
