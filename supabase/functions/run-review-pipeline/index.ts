@@ -1085,7 +1085,7 @@ async function stageSubmittalCheck(
   };
 }
 
-const DNA_TOOL = {
+const DNA_SCHEMA = {
   type: "function",
   name: "submit_project_dna",
   description:
