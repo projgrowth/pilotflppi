@@ -92,6 +92,60 @@ export function ReviewProvenanceStrip({ planReviewId, progress }: Props) {
 
   return (
     <div className="rounded-md border border-border/60 bg-muted/30 px-2.5 py-1.5 flex items-center gap-3 text-2xs flex-wrap">
+      {qualityScore !== null && (
+        <TooltipProvider delayDuration={150}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className={cn(
+                  "flex items-center gap-1 font-mono cursor-help border-r border-border/60 pr-3",
+                  qualityTone,
+                )}
+              >
+                <Gauge className="h-3 w-3" />
+                AI quality <strong>{qualityScore}</strong>
+                <span className="opacity-60">/100</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-xs text-xs">
+              <p className="font-semibold mb-1">AI run confidence</p>
+              {qualityBreakdown ? (
+                <ul className="space-y-0.5">
+                  <li>
+                    Verified citations:{" "}
+                    <strong>{qualityBreakdown.verified_citations_pct ?? 0}%</strong>
+                  </li>
+                  <li>
+                    Verified findings:{" "}
+                    <strong>{qualityBreakdown.verified_findings_pct ?? 0}%</strong>
+                  </li>
+                  <li>
+                    With evidence crop:{" "}
+                    <strong>{qualityBreakdown.with_evidence_crop_pct ?? 0}%</strong>
+                  </li>
+                  <li
+                    className={
+                      qualityBreakdown.has_hallucinated_citations
+                        ? "text-destructive"
+                        : "text-success"
+                    }
+                  >
+                    Hallucinated citations:{" "}
+                    <strong>
+                      {qualityBreakdown.has_hallucinated_citations ? "yes" : "none"}
+                    </strong>
+                  </li>
+                </ul>
+              ) : (
+                <p>Score not yet computed for this run.</p>
+              )}
+              <p className="mt-2 opacity-70">
+                ≥80 trustworthy · 60–79 spot-check · &lt;60 needs heavy review
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
       {hasHealth && (
         <>
           <span className="font-mono text-foreground/80">
