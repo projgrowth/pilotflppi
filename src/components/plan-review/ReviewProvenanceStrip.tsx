@@ -13,7 +13,7 @@
 import { useReviewHealth, pct } from "@/hooks/useReviewHealth";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { CheckCircle2, AlertCircle, Eye, FileSearch, BookOpen, Layers, Gauge } from "lucide-react";
+import { CheckCircle2, AlertCircle, Eye, FileSearch, BookOpen, Layers, Gauge, RefreshCw, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Tooltip,
@@ -21,6 +21,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import { useIsAdmin } from "@/hooks/useIsAdmin";
+import { useState } from "react";
+import { toast } from "sonner";
 
 interface QualityBreakdown {
   verified_citations_pct?: number;
