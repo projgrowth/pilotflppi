@@ -8,6 +8,7 @@ import {
   Leaf,
   Accessibility,
   MapPin,
+  Info,
   type LucideIcon,
 } from "lucide-react";
 
