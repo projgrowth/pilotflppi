@@ -254,7 +254,7 @@ async function persistConsistencyMismatches(
     plan_review_id: planReviewId,
     firm_id: firmId,
     def_number: `DEF-XS${String(baseIdx + i).padStart(3, "0")}`,
-    discipline: "Cross-Sheet",
+    discipline: "cross_sheet",
     sheet_refs: [m.sheet_a, m.sheet_b],
     code_reference: {},
     finding: `Cross-sheet mismatch: ${m.description} (${m.sheet_a}: "${m.value_a}" vs ${m.sheet_b}: "${m.value_b}")`,
