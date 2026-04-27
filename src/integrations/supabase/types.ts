@@ -143,6 +143,65 @@ export type Database = {
           },
         ]
       }
+      comment_letter_snapshots: {
+        Row: {
+          created_at: string
+          findings_json: Json
+          firm_id: string | null
+          firm_info_json: Json
+          id: string
+          letter_html: string
+          override_reasons: string | null
+          pdf_storage_path: string | null
+          plan_review_id: string
+          readiness_snapshot: Json
+          recipient: string
+          round: number
+          sent_at: string
+          sent_by: string
+        }
+        Insert: {
+          created_at?: string
+          findings_json?: Json
+          firm_id?: string | null
+          firm_info_json?: Json
+          id?: string
+          letter_html?: string
+          override_reasons?: string | null
+          pdf_storage_path?: string | null
+          plan_review_id: string
+          readiness_snapshot?: Json
+          recipient?: string
+          round?: number
+          sent_at?: string
+          sent_by: string
+        }
+        Update: {
+          created_at?: string
+          findings_json?: Json
+          firm_id?: string | null
+          firm_info_json?: Json
+          id?: string
+          letter_html?: string
+          override_reasons?: string | null
+          pdf_storage_path?: string | null
+          plan_review_id?: string
+          readiness_snapshot?: Json
+          recipient?: string
+          round?: number
+          sent_at?: string
+          sent_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "comment_letter_snapshots_plan_review_id_fkey"
+            columns: ["plan_review_id"]
+            isOneToOne: false
+            referencedRelation: "plan_reviews"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contractors: {
         Row: {
           created_at: string
