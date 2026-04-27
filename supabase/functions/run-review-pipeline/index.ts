@@ -3641,13 +3641,116 @@ async function stageGroundCitations(
     if (updErr) console.error("[ground_citations] update failed", def.id, updErr);
   }
 
+  // After grounding, attach a one-click visual receipt to every finding so
+  // reviewers don't have to mentally jump from "DEF-A012, sheet A-201" to
+  // the PDF and search. Cheap: reuse the already-signed page asset URL
+  // for the finding's first sheet ref. Bbox cropping can come later.
+  const cropResult = await attachEvidenceCrops(admin, planReviewId);
+
   return {
     examined: defs.length,
     verified: counts.verified,
     mismatch: counts.mismatch,
     not_found: counts.not_found,
     hallucinated: counts.hallucinated,
+    crops_attached: cropResult.attached,
+    crops_skipped: cropResult.skipped,
   };
+}
+
+// ---------- evidence crops ----------
+//
+// For each finding, set evidence_crop_url to the signed URL of the first
+// sheet_ref's rendered page asset. Reviewers get a thumbnail preview and a
+// one-click jump to the source page. We don't bbox-crop yet — the full
+// sheet image is infinitely better than no image, and adding image
+// processing to the edge worker is a larger lift.
+async function attachEvidenceCrops(
+  admin: ReturnType<typeof createClient>,
+  planReviewId: string,
+): Promise<{ attached: number; skipped: number }> {
+  // Pull current findings (only those without a crop already, to keep this
+  // idempotent across reruns).
+  const { data: rows, error } = await admin
+    .from("deficiencies_v2")
+    .select("id, sheet_refs, evidence_crop_url")
+    .eq("plan_review_id", planReviewId)
+    .neq("status", "resolved")
+    .neq("status", "waived");
+  if (error) {
+    console.error("[evidence_crops] read failed", error);
+    return { attached: 0, skipped: 0 };
+  }
+  const findings = (rows ?? []) as Array<{
+    id: string;
+    sheet_refs: string[] | null;
+    evidence_crop_url: string | null;
+  }>;
+  if (findings.length === 0) return { attached: 0, skipped: 0 };
+
+  // Read the persisted sheet map so we know which page_index each sheet_ref
+  // lives on. This was snapshotted by stageSheetMap.
+  const { data: prRow, error: prErr } = await admin
+    .from("plan_reviews")
+    .select("checklist_state")
+    .eq("id", planReviewId)
+    .maybeSingle();
+  if (prErr || !prRow) {
+    console.error("[evidence_crops] plan_review read failed", prErr);
+    return { attached: 0, skipped: findings.length };
+  }
+  const checklist = (prRow.checklist_state ?? {}) as Record<string, unknown>;
+  const rawMap = Array.isArray(checklist.last_sheet_map)
+    ? (checklist.last_sheet_map as Array<{ sheet_ref?: string; page_index?: number }>)
+    : [];
+  const sheetToPage = new Map<string, number>();
+  for (const m of rawMap) {
+    if (typeof m.sheet_ref === "string" && typeof m.page_index === "number") {
+      sheetToPage.set(m.sheet_ref.toUpperCase().trim(), m.page_index);
+    }
+  }
+  if (sheetToPage.size === 0) {
+    return { attached: 0, skipped: findings.length };
+  }
+
+  // Sign every page once (signedSheetUrls caches), then index by page_index.
+  const signed = await signedSheetUrls(admin, planReviewId);
+  // signedSheetUrls returns rows in page_index order, so position == index.
+  const pageUrlByIndex = new Map<number, string>();
+  signed.forEach((s, i) => pageUrlByIndex.set(i, s.signed_url));
+
+  let attached = 0;
+  let skipped = 0;
+  for (const f of findings) {
+    if (f.evidence_crop_url) {
+      skipped++;
+      continue;
+    }
+    const firstSheet = (f.sheet_refs ?? [])
+      .map((s) => s?.toUpperCase().trim())
+      .find((s) => s && sheetToPage.has(s));
+    if (!firstSheet) {
+      skipped++;
+      continue;
+    }
+    const pageIndex = sheetToPage.get(firstSheet)!;
+    const url = pageUrlByIndex.get(pageIndex);
+    if (!url) {
+      skipped++;
+      continue;
+    }
+    const { error: updErr } = await admin
+      .from("deficiencies_v2")
+      .update({ evidence_crop_url: url })
+      .eq("id", f.id);
+    if (updErr) {
+      console.error("[evidence_crops] update failed", f.id, updErr);
+      skipped++;
+    } else {
+      attached++;
+    }
+  }
+  return { attached, skipped };
 }
 
 // ---------- main handler ----------
