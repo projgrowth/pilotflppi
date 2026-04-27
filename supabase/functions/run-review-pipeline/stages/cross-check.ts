@@ -222,7 +222,8 @@ async function runCrossSheetConsistency(
       m.sheet_b &&
       m.sheet_a.trim().toUpperCase() !== m.sheet_b.trim().toUpperCase() &&
       (m.value_a ?? "").trim() &&
-      (m.value_b ?? "").trim(),
+      (m.value_b ?? "").trim() &&
+      (m.confidence_score ?? 0) >= 0.7,
   );
 
   return raw.map((m) => ({
