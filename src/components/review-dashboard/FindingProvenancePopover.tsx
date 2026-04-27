@@ -71,13 +71,15 @@ export default function FindingProvenancePopover({ def }: Props) {
           <Row label="Citation">
             <span
               className={
-                def.citation_status === "verified"
+                def.citation_status === "verified" || def.citation_status === "verified_stub"
                   ? "text-emerald-600 dark:text-emerald-400"
-                  : def.citation_status === "mismatch"
-                    ? "text-amber-600 dark:text-amber-400"
-                    : def.citation_status === "hallucinated"
-                      ? "text-destructive"
-                      : "text-muted-foreground"
+                  : def.citation_status === "no_citation_required"
+                    ? "text-blue-600 dark:text-blue-400"
+                    : def.citation_status === "mismatch"
+                      ? "text-amber-600 dark:text-amber-400"
+                      : def.citation_status === "hallucinated"
+                        ? "text-destructive"
+                        : "text-muted-foreground"
               }
             >
               {def.citation_status ?? "unverified"}
