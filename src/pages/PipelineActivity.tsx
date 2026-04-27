@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import FppEmptyState from "@/components/shared/FppEmptyState";
 import { useAllActivePipelines, type ReviewActivity } from "@/hooks/useAllActivePipelines";
+import { useReviewHealth, pct, type ReviewHealth } from "@/hooks/useReviewHealth";
 import { cancelPipelineForReview, clearOrphanedPipelineRows, resumePipelineForReview } from "@/lib/pipeline-cancel";
 import { useFirmId } from "@/hooks/useFirmId";
 import { CORE_STAGES, DEEP_STAGES, shortStageLabel } from "@/lib/pipeline-stages";
