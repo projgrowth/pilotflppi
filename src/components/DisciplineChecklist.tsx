@@ -14,7 +14,7 @@ interface ChecklistItem {
   required: boolean;
 }
 
-const CHECKLIST_TEMPLATES: Record<string, Record<Discipline, ChecklistItem[]>> = {
+const CHECKLIST_TEMPLATES: Record<string, Partial<Record<Discipline, ChecklistItem[]>>> = {
   building: {
     structural: [
       { id: "s1", label: "Verify design loads per ASCE 7-22 (wind, seismic, live, dead)", codeRef: "FBC 1603", required: true },
