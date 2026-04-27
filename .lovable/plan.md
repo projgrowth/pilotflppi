@@ -1,77 +1,85 @@
+# Plan review: scope confirmation + UX cleanup
 
-## What's actually wrong with Suncoast Porsche (and why)
+## Will the recent changes apply to all plan reviews?
 
-I queried the latest run (`aa5638ef…`, 78 pages, 26 findings, status `complete`) and traced it through `pipeline_error_log`, `review_pipeline_status`, `sheet_coverage`, `project_dna`, and `deficiencies_v2`. Three independent failures stacked:
+Yes. Everything we just shipped is global:
 
-### 1. Submittal is incomplete and nothing flagged it
-Sheet map is correct: every page is `A-`, `AD-`, or `G-` prefixed. There is **no Structural, MEP, Plumbing, Electrical, or Fire Protection** in the upload — for a 51,086 sf, 2-story, mixed A-3/S-2 auto dealership. The pipeline doesn't notice. It runs `discipline_review` on Architectural only, then ships 26 findings, most of which are unanswerable (e.g. "construction type missing from cover sheet" — true, but Structural/MEP wouldn't be in the set anyway). The reviewer can't tell from the dashboard that this is a partial submittal vs. a complete one with bad arch.
+- **Pipeline orchestrator** (`run-review-pipeline` edge function) — every new run uses the new `CORE_STAGES` order including `submittal_check` and `ground_citations`.
+- **Health metrics** (`useReviewHealth`) — reads live from `deficiencies_v2` per review, so any review (old or new) gets the grounded / low-confidence / needs-review numbers on next page load.
+- **Export safety gate** (`CommentLetterExport`) — fires for any letter export where unverified citations exist.
+- **DNA schema fix** — unblocks `dna_extract` for every run.
 
-### 2. `ground_citations` silently skipped
-`review_pipeline_status` for this run lists 7 stages: `upload, prepare_pages, sheet_map, dna_extract, discipline_review, dedupe, complete`. **No `ground_citations` row exists.** Across the last 7 days, 11 of 16 reviews never created a `ground_citations` row. All 26 findings on Suncoast still have `citation_status='unverified'` and `citation_grounded_at IS NULL`. Cause: the orchestrator advances `activeChain[idx+1]` after dedupe, but `scheduleNextStage` for `ground_citations` is being lost (likely a worker crash with no `pipeline_error_log` entry, or the entry-point used a stale `activeChain` from before `ground_citations` was promoted to CORE). Either way, **the Plan B "core stage" promotion isn't actually executing.**
+Nothing is keyed to a project ID. Older reviews benefit from the UI-side fixes immediately; the pipeline-side fixes apply to the next time a review runs (re-run, resubmittal, or new upload).
 
-### 3. Findings duplicate the DNA gap instead of being suppressed by it
-DNA extracted `construction_type=NULL`, `wind_speed_vult=NULL`, `flood_zone=NULL`, etc. (10 missing fields). Architectural expert then wrote **6 separate findings** (DEF-A001…A008) all saying variants of "construction type / FBC edition / code summary missing from cover sheet." The DNA stage already knows this; the discipline experts shouldn't be re-flagging the same gap 6 times.
-
-### 4. DNA didn't read sheets G003/G004 (which are literally "Code Information")
-Sheets `G003 — Code Information - Occupancy` and `G004 — Code Information - Energy` exist in the set. DNA extracted `occupancy_classification = "A-3; S-2"` (good) but missed everything else. So either the DNA stage didn't include G003/G004 in its vision payload, or it did but parsed only occupancy. This is the upstream cause of #3.
+The one thing that is **not** yet visible to users: the new `submittal_check` stage runs but its label and the resulting `submittal_incomplete` flag are not surfaced anywhere in the UI. That is the top item below.
 
 ---
 
-## Plan: fix these four things in one pass
+## What we'll fix in this loop
 
-### A. Add a Submittal Completeness Gate (new pipeline stage, runs after `sheet_map`)
-- New stage `submittal_check` inserted into `CORE_STAGES` between `sheet_map` and `dna_extract`.
-- Logic: given the DNA's `occupancy_classification`, `total_sq_ft`, `stories`, decide which trade disciplines are reasonably required for permit. For commercial > 5,000 sf: require S, M, P, E. For ≥2 stories or A/B/F/M occupancy: require FP. If a required discipline has **zero sheets** in `sheet_coverage`, write **one** `requires_human_review=true` finding to `deficiencies_v2` titled "Submittal incomplete — [Trade] drawings not provided" and set `plan_reviews.ai_run_progress.submittal_incomplete = true`.
-- New top-of-page banner on `PlanReviewDetail` shown when `submittal_incomplete=true`: "Architectural-only submittal — 5 trades not provided. Confirm whether resubmittal is required before issuing comments."
-- The discipline_review stage for the present trades still runs — but every finding from those reviews is annotated `submittal_context: "architectural_only"` so the letter export adds a preamble: "These comments cover the architectural set only. Structural, MEP, Plumbing, Electrical, and Fire Protection drawings must be submitted under separate cover."
+### 1. Make the new gates visible
 
-### B. Fix `ground_citations` actually executing
-- Root cause hypothesis: when the chain advances from `dedupe`, `setStage(...,{status:'pending'})` for `ground_citations` is happening but the `scheduleNextStage` self-invoke is being dropped. Two reinforcing fixes:
-  1. **Watchdog sweep at the start of every `complete` stage**: before marking complete, call `runPendingTailStages()` which scans `review_pipeline_status` for any stage in `activeChain` that is not in (`complete`,`error`) and runs them inline before completing. Belt-and-suspenders.
-  2. **Make `ground_citations` idempotent + invokable on already-complete reviews**: add a "Re-ground citations" button on `PlanReviewDetail` (admin only) that POSTs `start_from=ground_citations` to the edge function. Cost: one DB query per finding, no AI.
-- One-time backfill: for every existing review with `citation_grounded_at IS NULL`, run `stageGroundCitations`. Use a small Node script via the edge function, not a migration.
+a. **Stepper labels** — add `submittal_check` to `FRIENDLY_LABELS` and `FRIENDLY_HINTS` in `PipelineProgressStepper.tsx` so it renders as "Submittal check / Verifying required trades are present" instead of a blank pill.
 
-### C. DNA-Aware Discipline Review
-- Pass DNA's `missing_fields` array into every discipline expert's system prompt as: *"The cover-sheet code summary is already known to be missing the following items: [list]. **Do not** re-raise findings about these specific gaps — they're tracked separately. Focus on technical compliance issues you can identify from the drawings themselves."*
-- Add a post-discipline filter: any finding whose normalized text matches a DNA-gap pattern (`/cover sheet.*missing/i`, `/construction type.*not specified/i`, `/code summary.*required/i`) is auto-merged into a single "DNA gap" finding instead of being kept separately. Reuses the existing dedupe bucketing.
+b. **Submittal-incomplete banner** on `PlanReviewDetail` — when `ai_run_progress.submittal_incomplete === true`, show a yellow strip above the findings panel:
 
-### D. Force DNA to actually read code-summary sheets
-- `stageDnaExtract` currently picks "cover/code-summary pages from sheet_coverage; fall back to first 3 pages." Looking at the code (line 1006-1009), the matcher is loose. Change it to **always include any sheet whose title contains "code", "occupancy", "summary", "data" (case-insensitive)** plus the first 2 sheets, and pass them all in one Gemini Pro call (not Flash). Cost is small (≤5 pages); accuracy gain is huge.
-- Add a logged metric `dna_pages_read` so we can audit which sheets DNA actually saw.
+```text
+Submittal incomplete — missing: Structural, MEP, Fire Protection
+This review will continue, but a permit-blocker DEF-SUB001 has been opened.
+[View finding]  [Mark as deferred submittal]
+```
+
+c. **Provenance strip** at the top of the findings panel (one line, always visible):
+
+```text
+74 findings · 71 grounded · 3 need review · DNA 12/14 fields · Submittal: incomplete
+```
+
+Pulls from the existing `useReviewHealth` hook + `project_dna.missing_fields` + `ai_run_progress.submittal_incomplete`. No new queries needed.
+
+### 2. Smoother upload → review hand-off
+
+Today the user drops a file and stares at a stepper. Three small fixes:
+
+a. **Upload zone copy** — replace "Drop plan documents here" with a 2-line hint:
+   - "Drop the full plan set (PDF). Include cover, code summary, and all discipline sheets."
+   - Sub-line: "We'll auto-detect Architectural, Structural, MEP, Civil, and Fire Protection."
+
+b. **Auto-jump to findings when ready** — when `ai_check_status` flips to `complete` and the right panel is on `letter` or empty, switch it to `findings` and toast "Review complete — N findings".
+
+c. **Single status header** — the page currently has the stepper, the `StuckRecoveryBanner`, the `UploadProgressBar`, and the top bar all stacked. Group them into one collapsing "Pipeline status" card that auto-collapses to a one-line summary once the run is complete, so reviewers reading the letter aren't looking at a giant in-progress UI.
+
+### 3. Findings panel: easier to triage
+
+a. **Default sort = confidence ascending, then severity** so reviewers see the AI's least-confident calls first (the ones that actually need eyes) instead of scrolling.
+
+b. **"Needs human review" pill** at the top of the filter row — one click filters to `requires_human_review = true`. Currently buried in the filter dropdown.
+
+c. **Citation status icon on every card** — small inline glyph: green check (grounded), grey dash (unverified), red triangle (mismatch). Pulls from `citation_status` / `citation_match_score` already on the row.
+
+### 4. Letter export: clearer pre-flight
+
+The export gate dialog currently says "unverified citations exist — confirm". Add a count and a "Jump to findings" button so the reviewer can fix them in one click instead of guessing which findings are flagged.
 
 ---
 
-## Diagnostics added to the dashboard (free, no schema change)
+## Files to change
 
-- **Per-review provenance row** at top of `PlanReviewDetail`:
-  `Sheet map: 78 (A:74, G:4, S:0, M:0, P:0, E:0, FP:0)` · `DNA: 6/16 fields` · `Citations: 0/26 grounded` · `Disciplines run: 1/9`. Color-coded green/amber/red. Anyone looking at the page sees the gaps in 1 second.
-- **Pipeline tail check** on the existing `useReviewHealth` hook: surface `ground_citations_skipped: true` when the stage row is missing or `citation_grounded_at IS NULL` for any finding. Show as red badge in the dashboard "Active reviews" list.
+- `src/components/plan-review/PipelineProgressStepper.tsx` — add `submittal_check` labels.
+- `src/pages/PlanReviewDetail.tsx` — submittal banner, provenance strip, auto-switch to findings on complete, collapse status into one card.
+- `src/components/plan-review/PlanViewerPanel.tsx` — upload zone copy.
+- `src/components/plan-review/FindingsListPanel.tsx` — default sort, "needs review" quick filter, citation icon on cards.
+- `src/components/FindingCard.tsx` — citation status icon.
+- `src/components/CommentLetterExport.tsx` — show count + jump-to-findings in the gate dialog.
+
+No DB migrations. No edge function changes. All data already exists on the rows we're reading.
 
 ---
 
-## Out of scope for this pass (parking lot)
+## What we're explicitly **not** doing in this loop
 
-- Switching sheet_map to a single-call Pro vision pass instead of 4-image Flash batches (would help differently-shaped projects but Suncoast wasn't a sheet_map failure).
-- Per-county "required disciplines" override matrix.
-- Auto-rejecting incomplete submittals at upload time (we should warn, not block — sometimes private-provider clients want partial review for early feedback).
+- Re-running historical reviews to backfill the new `submittal_check` finding. (Reviewers can re-run individual projects from the existing "Run AI check" button if they want it.)
+- Touching the deep-pipeline stages (`verify`, `cross_check`, `deferred_scope`, `prioritize`).
+- Sidebar / dashboard changes — those were already trimmed in the previous loop.
 
-## Technical details
-
-**Files to change**
-
-- `supabase/functions/run-review-pipeline/index.ts`
-  - Insert `submittal_check` stage (`Stage` union, `STAGES`, `CORE_STAGES`, `stageImpls`).
-  - Add `stageSubmittalCheck()` (~80 lines).
-  - In `stageComplete()`, prepend `runPendingTailStages()` watchdog (~40 lines).
-  - In `stageDnaExtract()`, broaden cover/code-summary sheet selection (~15 line diff).
-  - In each discipline expert prompt builder, append DNA gap notice (~5 lines × 9 disciplines).
-  - In `stageDedupe()`, add DNA-gap auto-merge bucket (~25 lines).
-- `src/pages/PlanReviewDetail.tsx` — completeness banner + provenance strip (~60 lines added).
-- `src/hooks/useReviewHealth.ts` — `ground_citations_skipped` derivation (~10 lines).
-- `src/components/plan-review/StuckRecoveryBanner.tsx` — add "Re-ground citations" admin action (~20 lines).
-- One-shot backfill: invoke `start_from=ground_citations` for the 11 stuck reviews after deploy.
-
-**No DB schema changes required.** Existing columns (`citation_status`, `requires_human_review`, `ai_run_progress` JSONB) cover everything.
-
-**Estimated cost per run after changes**: +1 DB roundtrip for completeness check, +0 AI calls (the gap check is purely structural). DNA accuracy improves at the cost of ~1 extra page in the existing DNA call. Net pipeline cost: roughly flat.
-
+Approve and I'll ship it.
