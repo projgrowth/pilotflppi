@@ -158,13 +158,27 @@ export async function stageDedupe(
         if (visited.has(j)) continue;
         const a = bucket[i];
         const b = bucket[j];
+        // Require an actual shared sheet — empty-sheet wildcard match used
+        // to silently merge two distinct findings on different sheets.
         const sheetOverlap =
-          a.sheets.size === 0 ||
-          b.sheets.size === 0 ||
+          a.sheets.size > 0 &&
+          b.sheets.size > 0 &&
           [...a.sheets].some((s) => b.sheets.has(s));
         if (!sheetOverlap) continue;
-        const threshold = a.row.discipline === b.row.discipline ? 0.45 : 0.35;
+        // Tighter token-set Jaccard. 0.55/0.45 was over-merging legitimate
+        // distinct findings on the same code section / sheet (e.g. two
+        // separate handrails both citing 1014.8).
+        const threshold = a.row.discipline === b.row.discipline ? 0.7 : 0.55;
         if (jaccard(a.tokens, b.tokens) < threshold) continue;
+        // Belt-and-suspenders: also require either a token-overlap on the
+        // evidence quotes OR an even higher finding-text similarity.
+        const aEv = (a.row.evidence ?? []).join(" ");
+        const bEv = (b.row.evidence ?? []).join(" ");
+        const evidenceJaccard = aEv && bEv
+          ? jaccard(tokenSet(aEv), tokenSet(bEv))
+          : 0;
+        const findingJaccard = jaccard(a.tokens, b.tokens);
+        if (evidenceJaccard < 0.4 && findingJaccard < 0.85) continue;
         group.push(j);
         visited.add(j);
       }
@@ -203,12 +217,22 @@ export async function stageDedupe(
     return { examined: rows.length, groups_merged: 0, findings_superseded: 0 };
   }
 
+  // Look up project_id + firm_id once for the audit-log writes below.
+  const { data: prRow } = await admin
+    .from("plan_reviews")
+    .select("project_id, firm_id")
+    .eq("id", planReviewId)
+    .maybeSingle();
+  const auditMeta = (prRow ?? {}) as { project_id?: string; firm_id?: string | null };
+
   let supersededCount = 0;
   for (const m of merges) {
     const winnerRow = rows.find((r) => r.id === m.winner);
     const winnerLabel = winnerRow ? `${winnerRow.def_number} (${winnerRow.discipline})` : m.winner;
+    const loserDefs: string[] = [];
     for (const loserId of m.losers) {
       const loser = rows.find((r) => r.id === loserId);
+      if (loser?.def_number) loserDefs.push(loser.def_number);
       const priorNote = loser?.verification_status && loser.verification_status !== "unverified"
         ? ` Prior verification: ${loser.verification_status}.`
         : "";
@@ -224,6 +248,25 @@ export async function stageDedupe(
         })
         .eq("id", loserId);
       if (!updErr) supersededCount++;
+    }
+    // Auditable trail: every merge gets one activity_log row so reviewers
+    // can see what dedupe collapsed and undo it if it was wrong.
+    if (auditMeta.project_id) {
+      await admin.from("activity_log").insert({
+        event_type: "dedupe_merge",
+        description: `Merged ${loserDefs.join(", ") || "finding(s)"} into ${winnerLabel}`,
+        project_id: auditMeta.project_id,
+        firm_id: auditMeta.firm_id ?? null,
+        actor_type: "system",
+        metadata: {
+          plan_review_id: planReviewId,
+          winner_id: m.winner,
+          winner_def_number: winnerRow?.def_number ?? null,
+          loser_ids: m.losers,
+          loser_def_numbers: loserDefs,
+          reason: m.reason,
+        },
+      });
     }
   }
 

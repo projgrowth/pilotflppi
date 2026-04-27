@@ -19,12 +19,39 @@ export async function stageComplete(
     discipline: string | null;
   }>;
 
+  // Compute a 0–100 quality score so reviewers can see at a glance
+  // whether this AI run is trustworthy or needs heavy spot-checking.
+  const { data: defs } = await admin
+    .from("deficiencies_v2")
+    .select("citation_status, verification_status, evidence_crop_url")
+    .eq("plan_review_id", planReviewId)
+    .neq("status", "waived")
+    .neq("status", "resolved");
+  const live = (defs ?? []) as Array<{
+    citation_status: string | null;
+    verification_status: string | null;
+    evidence_crop_url: string | null;
+  }>;
+  const total = live.length || 1;
+  const verifiedCit = live.filter((d) => d.citation_status === "verified").length / total;
+  const verifiedVer = live.filter((d) =>
+    d.verification_status === "verified" || d.verification_status === "modified"
+  ).length / total;
+  const withCrop = live.filter((d) => !!d.evidence_crop_url).length / total;
+  const hasHallucinated = live.some((d) => d.citation_status === "hallucinated");
+  let qualityScore = 0;
+  if (verifiedCit >= 0.8) qualityScore += 30;
+  if (verifiedVer >= 0.8) qualityScore += 30;
+  if (withCrop >= 0.8) qualityScore += 20;
+  if (!hasHallucinated) qualityScore += 20;
+
   const { data: existing } = await admin
     .from("plan_reviews")
-    .select("checklist_state")
+    .select("ai_run_progress, checklist_state")
     .eq("id", planReviewId)
     .maybeSingle();
   const prevState = ((existing?.checklist_state ?? {}) as Record<string, unknown>) ?? {};
+  const prevProgress = ((existing?.ai_run_progress ?? {}) as Record<string, unknown>) ?? {};
 
   await admin
     .from("plan_reviews")
@@ -36,8 +63,19 @@ export async function stageComplete(
         last_sheet_map: snapshot,
         last_sheet_map_at: new Date().toISOString(),
       },
+      ai_run_progress: {
+        ...prevProgress,
+        quality_score: qualityScore,
+        quality_breakdown: {
+          verified_citations_pct: Math.round(verifiedCit * 100),
+          verified_findings_pct: Math.round(verifiedVer * 100),
+          with_evidence_crop_pct: Math.round(withCrop * 100),
+          has_hallucinated_citations: hasHallucinated,
+          total_live_findings: live.length,
+        },
+      },
       updated_at: new Date().toISOString(),
     })
     .eq("id", planReviewId);
-  return { ok: true, snapshot_size: snapshot.length };
+  return { ok: true, snapshot_size: snapshot.length, quality_score: qualityScore };
 }

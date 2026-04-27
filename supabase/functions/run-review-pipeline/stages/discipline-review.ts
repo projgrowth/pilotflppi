@@ -17,6 +17,7 @@ import {
   normalizeAIDiscipline,
   disciplineForSheetFallback,
   mapSeverityToPriority,
+  canonicalDiscipline,
 } from "../_shared/types.ts";
 
 const FINDINGS_SCHEMA = {
@@ -261,7 +262,9 @@ ${sheetIndex || "(none)"}
     `## Mandatory ${ctx.discipline} checklist
 ${checklistText}` +
     memoryBlock +
-    `\n\nAnalyze the attached pages (general-notes pages first, then ${ctx.discipline} sheets). ` +
+    `\n\n## Citation discipline (HARD RULE)
+Every finding MUST cite an FBC section you are confident exists in the Florida Building Code (e.g. "1010.1.1", "Table 1004.5"). If you are not sure the section exists or applies, do NOT guess — instead set requires_human_review=true with human_review_reason="Citation needs human verification". Hallucinated citations get auto-suppressed downstream and waste reviewer time.\n\n` +
+    `Analyze the attached pages (general-notes pages first, then ${ctx.discipline} sheets). ` +
     `Return findings via submit_discipline_findings.`;
 
   void fbcEdition;
@@ -314,12 +317,13 @@ ${checklistText}` +
   // Compute next def_number using MAX of existing rows for this
   // (plan_review, discipline) pair. Combined with the unique index on
   // (plan_review_id, def_number) and the upsert below, retries are idempotent.
-  const prefix = `DEF-${ctx.discipline.slice(0, 1).toUpperCase()}`;
+  const canonicalSlug = canonicalDiscipline(ctx.discipline);
+  const prefix = `DEF-${canonicalSlug.slice(0, 1).toUpperCase()}`;
   const { data: existingRows } = await admin
     .from("deficiencies_v2")
     .select("def_number")
     .eq("plan_review_id", planReviewId)
-    .eq("discipline", ctx.discipline)
+    .eq("discipline", canonicalSlug)
     .like("def_number", `${prefix}%`);
   let maxIdx = 0;
   for (const r of (existingRows ?? []) as Array<{ def_number: string }>) {
@@ -335,7 +339,7 @@ ${checklistText}` +
     plan_review_id: planReviewId,
     firm_id: firmId,
     def_number: `${prefix}${String(baseIdx + i).padStart(3, "0")}`,
-    discipline: ctx.discipline,
+    discipline: canonicalSlug,
     sheet_refs: f.sheet_refs ?? [],
     code_reference: f.code_section
       ? { code: "FBC", section: f.code_section, edition: ctx.dna?.fbc_edition ?? "8th" }

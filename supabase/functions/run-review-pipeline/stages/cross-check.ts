@@ -73,6 +73,8 @@ const CROSS_SHEET_SCHEMA = {
                 "room_finish_vs_schedule",
                 "fixture_count_vs_plumbing",
                 "egress_width_vs_capacity",
+                "accessibility_clearance_vs_plan",
+                "roof_uplift_vs_truss_layout",
                 "other",
               ],
             },
@@ -118,12 +120,13 @@ Hunt for these patterns:
 - Sheet index lists sheets that are not in the submittal (or vice versa)
 
 Hard rules:
-1. Quote BOTH disagreeing values verbatim. If you cannot quote both sides from the supplied sheets, do not raise it.
+1. Quote BOTH disagreeing values from the supplied sheets. If you cannot quote at least one side verbatim and describe the other concretely, do not raise it.
 2. Use the EXACT sheet identifier as printed in the title block (e.g. "A-101", not "Architectural floor plan").
 3. Numeric mismatches must be real disagreements, not rounding (3'-0" vs 36" is the same).
 4. Skip anything already obvious from a single sheet — the discipline reviewers handle those.
-5. Prefer high-impact disagreements: life-safety, egress, structural, panel sizing.
-6. Return an empty array if you find nothing concrete. Do not invent.`;
+5. Prefer high-impact disagreements: life-safety, egress, structural, panel sizing, ADA clearance, roof uplift.
+6. Set confidence_score honestly: 0.9+ only when you can quote both sides verbatim; 0.7–0.85 when one side is verbatim and the other inferred from drawings; below 0.7, do not return the mismatch.
+7. Return an empty array if you find nothing concrete. Do not invent.`;
 
 async function runCrossSheetConsistency(
   admin: ReturnType<typeof createClient>,
@@ -219,7 +222,8 @@ async function runCrossSheetConsistency(
       m.sheet_b &&
       m.sheet_a.trim().toUpperCase() !== m.sheet_b.trim().toUpperCase() &&
       (m.value_a ?? "").trim() &&
-      (m.value_b ?? "").trim(),
+      (m.value_b ?? "").trim() &&
+      (m.confidence_score ?? 0) >= 0.7,
   );
 
   return raw.map((m) => ({
@@ -254,7 +258,7 @@ async function persistConsistencyMismatches(
     plan_review_id: planReviewId,
     firm_id: firmId,
     def_number: `DEF-XS${String(baseIdx + i).padStart(3, "0")}`,
-    discipline: "Cross-Sheet",
+    discipline: "cross_sheet",
     sheet_refs: [m.sheet_a, m.sheet_b],
     code_reference: {},
     finding: `Cross-sheet mismatch: ${m.description} (${m.sheet_a}: "${m.value_a}" vs ${m.sheet_b}: "${m.value_b}")`,

@@ -95,10 +95,13 @@ export async function stageVerify(
     life_safety_flag: boolean;
     permit_blocker: boolean;
   }>).filter((d) => {
-    const lowConf = (d.confidence_score ?? 1) < 0.85;
-    const highPri =
-      d.priority === "high" || d.life_safety_flag || d.permit_blocker;
-    return lowConf || highPri;
+    // Verify everything EXCEPT high-confidence low-priority chatter.
+    // Older logic only ran on `lowConf || highPri`, which left ~75% of
+    // findings sitting in `verification_status='unverified'` forever.
+    const conf = d.confidence_score ?? 0.5;
+    const isSafeToSkip = conf >= 0.9 && d.priority === "low" &&
+      !d.life_safety_flag && !d.permit_blocker;
+    return !isSafeToSkip;
   });
 
   if (candidates.length === 0) {
@@ -155,7 +158,7 @@ export async function stageVerify(
     "- 'cannot_locate' — you cannot verify either way from the supplied images. Will be routed to human review.\n" +
     "Be strict: 'overturned' requires positive evidence the finding is wrong, not absence of evidence.";
 
-  const BATCH = 3;
+  const BATCH = 6;
   let upheld = 0;
   let overturned = 0;
   let modified = 0;
