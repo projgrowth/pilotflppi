@@ -397,9 +397,57 @@ export async function stageDisciplineReview(
       .maybeSingle(),
   ]);
 
-  // Stage start timestamp for the soft 120s mid-stage timeout safety net.
+  // Stage start timestamp for the soft mid-stage timeout safety net.
+  // Tightened from 120s → 90s now that chunks run in parallel batches of 3 —
+  // a full discipline rarely needs more than ~45s, so 90s leaves headroom
+  // without lingering in the dead zone before the dispatcher takes over.
   const stageStartedAt = Date.now();
-  const STAGE_SOFT_TIMEOUT_MS = 120_000;
+  const STAGE_SOFT_TIMEOUT_MS = 90_000;
+
+  // How many chunks per discipline run concurrently. 3 is the sweet spot:
+  // - high enough to crush a 10-chunk Architectural set in ~3 vision rounds
+  //   (~30-45s vs ~100-150s sequentially)
+  // - low enough to stay under the Lovable AI Gateway burst tier and keep
+  //   the edge function comfortably below its 150s budget.
+  const CHUNK_CONCURRENCY = 3;
+
+  // Helper: write a live "we're on chunk N of M" beacon to ai_run_progress
+  // so the UI can render sub-stage progress and the watchdog can tell the
+  // worker apart from a true hang. Best-effort — never throws.
+  const writeChunkProgress = async (args: {
+    discipline: string;
+    chunk: number;
+    total: number;
+    findingsSoFar: number;
+  }) => {
+    try {
+      const { data: cur } = await admin
+        .from("plan_reviews")
+        .select("ai_run_progress")
+        .eq("id", planReviewId)
+        .maybeSingle();
+      const prev =
+        ((cur as { ai_run_progress?: Record<string, unknown> | null } | null)
+          ?.ai_run_progress ?? {}) as Record<string, unknown>;
+      await admin
+        .from("plan_reviews")
+        .update({
+          ai_run_progress: {
+            ...prev,
+            discipline_review_progress: {
+              discipline: args.discipline,
+              chunk: args.chunk,
+              total: args.total,
+              findings_so_far: args.findingsSoFar,
+              last_chunk_at: new Date().toISOString(),
+            },
+          },
+        })
+        .eq("id", planReviewId);
+    } catch (err) {
+      console.error("[discipline_review] progress write failed:", err);
+    }
+  };
 
   // Resumable chunk checkpoints. `stage_checkpoints.discipline_review` is a
   // map of `{ [discipline]: lastChunkCompleted }`. On retry we skip every
