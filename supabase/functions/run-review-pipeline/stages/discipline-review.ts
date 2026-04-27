@@ -335,31 +335,58 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
   }
   const baseIdx = maxIdx + 1;
 
-  const rows = findings.map((f, i) => ({
-    plan_review_id: planReviewId,
-    firm_id: firmId,
-    def_number: `${prefix}${String(baseIdx + i).padStart(3, "0")}`,
-    discipline: canonicalSlug,
-    sheet_refs: f.sheet_refs ?? [],
-    code_reference: f.code_section
-      ? { code: "FBC", section: f.code_section, edition: ctx.dna?.fbc_edition ?? "8th" }
-      : {},
-    finding: f.finding,
-    required_action: f.required_action,
-    evidence: (f.evidence ?? []).slice(0, 3).map((s) => s.slice(0, 200)),
-    priority: f.priority ?? "medium",
-    life_safety_flag: !!f.life_safety_flag,
-    permit_blocker: !!f.permit_blocker,
-    liability_flag: !!f.liability_flag,
-    requires_human_review: !!f.requires_human_review,
-    human_review_reason: f.human_review_reason ?? null,
-    human_review_verify: f.human_review_verify ?? null,
-    confidence_score: Math.max(0, Math.min(1, f.confidence_score ?? 0.5)),
-    confidence_basis: f.confidence_basis ?? "Vision-extracted",
-    model_version: "google/gemini-2.5-flash",
-    prompt_version_id: promptVersionId,
-    status: "open",
-  }));
+  // Server-side citation validator. The AI occasionally writes section
+  // numbers in fake formats ("FBC 9999.99", "Chapter 6", random prose). Any
+  // section that can't be normalized to a real-looking FBC code reference has
+  // its code_reference blanked here so the grounder doesn't have to guess.
+  // The shape we accept: optional letter prefix, 1–4 digits, up to four
+  // dotted sub-parts, optional trailing letter. e.g. 1006.2.1, 508.4, R301.1
+  const VALID_SECTION_RE = /^[A-Z]?\d{1,4}(\.\d{1,4}){0,4}[A-Za-z]?$/;
+  const cleanSection = (raw: string | null | undefined): string | null => {
+    if (!raw) return null;
+    const stripped = raw
+      .replace(/sec(?:tion)?\.?/i, "")
+      .replace(/[§¶]/g, "")
+      .replace(/^FBC[-\s]?[A-Z]?\s*/i, "")
+      .trim()
+      .split(/[,;]/)[0]
+      .trim();
+    if (!VALID_SECTION_RE.test(stripped)) return null;
+    // Reject obviously fake numbers (FBC chapters max around 35 in any book).
+    const major = parseInt(stripped.replace(/[^0-9]/g, "").slice(0, 4), 10);
+    if (Number.isNaN(major) || major > 9000) return null;
+    return stripped;
+  };
+
+  const rows = findings.map((f, i) => {
+    const validSection = cleanSection(f.code_section);
+    return {
+      plan_review_id: planReviewId,
+      firm_id: firmId,
+      def_number: `${prefix}${String(baseIdx + i).padStart(3, "0")}`,
+      discipline: canonicalSlug,
+      sheet_refs: f.sheet_refs ?? [],
+      code_reference: validSection
+        ? { code: "FBC", section: validSection, edition: ctx.dna?.fbc_edition ?? "8th" }
+        : {},
+      finding: f.finding,
+      required_action: f.required_action,
+      evidence: (f.evidence ?? []).slice(0, 3).map((s) => s.slice(0, 200)),
+      priority: f.priority ?? "medium",
+      life_safety_flag: !!f.life_safety_flag,
+      permit_blocker: !!f.permit_blocker,
+      liability_flag: !!f.liability_flag,
+      requires_human_review: !!f.requires_human_review,
+      human_review_reason: f.human_review_reason ?? null,
+      human_review_verify: f.human_review_verify ?? null,
+      confidence_score: Math.max(0, Math.min(1, f.confidence_score ?? 0.5)),
+      confidence_basis: f.confidence_basis ?? "Vision-extracted",
+      model_version: "google/gemini-2.5-flash",
+      prompt_version_id: promptVersionId,
+      status: "open",
+    };
+  });
+
 
   const { error } = await admin
     .from("deficiencies_v2")
