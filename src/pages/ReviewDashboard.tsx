@@ -490,6 +490,7 @@ export default function ReviewDashboard() {
           </TabsTrigger>
           <TabsTrigger value="findings">All findings</TabsTrigger>
           <TabsTrigger value="audit">Audit & Coverage</TabsTrigger>
+          <TabsTrigger value="history">Sent letters</TabsTrigger>
         </TabsList>
 
         <TabsContent value="triage" className="mt-4">
@@ -512,6 +513,10 @@ export default function ReviewDashboard() {
             onJumpToFindings={() => setActiveTab("findings")}
             onAfterDnaRerun={() => setActiveTab("triage")}
           />
+        </TabsContent>
+
+        <TabsContent value="history" className="mt-4">
+          {id && <LetterSnapshotViewer planReviewId={id} />}
         </TabsContent>
       </Tabs>
     </div>
