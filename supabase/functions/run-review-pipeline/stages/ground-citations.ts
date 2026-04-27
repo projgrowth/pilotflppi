@@ -161,7 +161,8 @@ export async function stageGroundCitations(
     }
     counts[status]++;
 
-    const needsHumanReview = status === "mismatch" || status === "hallucinated";
+    const needsHumanReview =
+      status === "mismatch" || status === "hallucinated" || status === "not_found";
     const update: Record<string, unknown> = {
       citation_status: status,
       citation_match_score: score,
@@ -176,7 +177,9 @@ export async function stageGroundCitations(
       update.human_review_reason =
         status === "mismatch"
           ? `Citation ${def.code_reference?.section ?? "?"} doesn't match the canonical FBC text — verify the section is correct.`
-          : `No FBC section parseable from this finding — add or correct the citation.`;
+          : status === "not_found"
+            ? `Cited FBC section ${def.code_reference?.section ?? "?"} was not found in the code library — verify or correct.`
+            : `No FBC section parseable from this finding — add or correct the citation.`;
     }
     const { error: updErr } = await admin
       .from("deficiencies_v2")
