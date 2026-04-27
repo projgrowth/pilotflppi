@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Info, ChevronDown } from "lucide-react";
+import { Info, ChevronDown, ImageOff, ExternalLink } from "lucide-react";
 import {
   Collapsible,
   CollapsibleContent,
@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { type DeficiencyV2Row } from "@/hooks/useReviewDashboard";
+import { useEvidencePageThumb } from "@/hooks/useEvidencePageThumb";
 import EvidenceSnippet from "./EvidenceSnippet";
 
 interface Props {
