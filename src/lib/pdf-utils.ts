@@ -266,13 +266,30 @@ export async function rasterizeAndUploadPagesResilient(
     quality?: number;
     startGlobalIndex?: number;
     batchSize?: number;
+    /** Per-chunk render timeout in ms. A stuck PDF.js worker won't freeze the wizard. */
+    chunkTimeoutMs?: number;
+    /** Total wall-clock cap; once exceeded, remaining pages are abandoned and left to the server-side rasterizer. */
+    totalTimeoutMs?: number;
+    /** If failure ratio exceeds this (0-1), abort and let server fallback handle the rest. */
+    abortFailureRatio?: number;
+    /** Called after each page completes (success or failure). */
+    onProgress?: (done: number, total: number) => void;
+    /** Called after each successfully uploaded page so callers can persist incrementally. */
+    onPageReady?: (asset: PreparedPageAsset) => void | Promise<void>;
   } = {},
-): Promise<RasterizeResult> {
+): Promise<RasterizeResult & { aborted?: boolean }> {
   const dpi = opts.dpi ?? 96;
   const quality = opts.quality ?? 0.72;
   const batchSize = Math.max(1, opts.batchSize ?? 4);
+  const chunkTimeoutMs = opts.chunkTimeoutMs ?? 30_000;
+  const totalTimeoutMs = opts.totalTimeoutMs ?? 5 * 60_000;
+  const abortFailureRatio = opts.abortFailureRatio ?? 0.4;
+  const startedAt = Date.now();
   let nextGlobalPageIndex = opts.startGlobalIndex ?? 0;
   const succeeded: PreparedPageAsset[] = [];
+  const totalPages = files.reduce((sum, f) => sum + (f.pageCount || 0), 0);
+  let processed = 0;
+  let aborted = false;
   const failures: Array<{ fileName: string; pageIndex: number; reason: string }> = [];
 
   for (const uf of files) {
