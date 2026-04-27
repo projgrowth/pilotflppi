@@ -23,6 +23,7 @@ type Stage =
   | "upload"
   | "prepare_pages"
   | "sheet_map"
+  | "submittal_check"
   | "dna_extract"
   | "discipline_review"
   | "verify"
@@ -40,6 +41,7 @@ const STAGES: Stage[] = [
   "upload",
   "prepare_pages",
   "sheet_map",
+  "submittal_check",
   "dna_extract",
   "discipline_review",
   "verify",
@@ -56,6 +58,11 @@ const STAGES: Stage[] = [
 // pre-rasterizes in the browser); it does NOT loop through MuPDF chunks
 // in the default path.
 //
+// `submittal_check` runs right after sheet_map and before any AI review work:
+// if a 5,000+ sf commercial set is missing entire trades (no S/M/P/E/FP), we
+// raise ONE permit-blocker finding so reviewers don't waste cycles auditing
+// architectural-only against a code that demands the full submittal.
+//
 // `ground_citations` lives in CORE (not DEEP) so every shipped run validates
 // every finding's FBC citation against `fbc_code_sections`. The cost is one
 // cheap deterministic comparison per finding (no AI call) — worth it because
@@ -65,6 +72,7 @@ const CORE_STAGES: Stage[] = [
   "upload",
   "prepare_pages",
   "sheet_map",
+  "submittal_check",
   "dna_extract",
   "discipline_review",
   "dedupe",
