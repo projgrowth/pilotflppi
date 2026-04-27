@@ -3290,15 +3290,29 @@ async function stageDedupe(
     return { row: d, section, sheets, tokens };
   });
 
-  // Bucket by normalized FBC section. Findings with no section are bucketed
-  // by their first sheet ref to still catch "same wall flagged twice".
+  // Bucket by **parent** FBC section (first two dotted levels) so that
+  // 508, 508.4, and 508.4.1 all end up in the same bucket and the in-bucket
+  // similarity check can decide whether to merge them. Findings with no
+  // section get bucketed by (discipline, first sheet ref) so same-discipline
+  // same-sheet duplicates (e.g. eight variants of "cover sheet missing code
+  // summary" all on G001/Architectural) still cluster.
+  function bucketKey(e: { section: string; sheets: Set<string>; row: DedupeRow }): string | null {
+    if (e.section) {
+      const parts = e.section.split(".");
+      // Chapter + first sub-level. "508.4.1" → "sec:508.4". "508" → "sec:508".
+      const parent = parts.slice(0, Math.min(2, parts.length)).join(".");
+      return `sec:${parent}`;
+    }
+    if (e.sheets.size > 0) {
+      // Sort to keep the bucket key stable regardless of sheet_refs order.
+      const firstSheet = [...e.sheets].sort()[0];
+      return `sheet:${e.row.discipline}:${firstSheet}`;
+    }
+    return null;
+  }
   const buckets = new Map<string, typeof enriched>();
   for (const e of enriched) {
-    const key = e.section
-      ? `sec:${e.section}`
-      : e.sheets.size > 0
-        ? `sheet:${Array.from(e.sheets)[0]}`
-        : null;
+    const key = bucketKey(e);
     if (!key) continue;
     const arr = buckets.get(key) ?? [];
     arr.push(e);
