@@ -8,6 +8,7 @@ import {
   Leaf,
   Accessibility,
   MapPin,
+  Info,
   type LucideIcon,
 } from "lucide-react";
 
@@ -25,33 +26,83 @@ export function getCountyLabel(county: string): string {
 }
 
 export type Discipline =
+  | "general"
+  | "architectural"
   | "structural"
   | "life_safety"
   | "fire"
   | "mechanical"
   | "electrical"
   | "plumbing"
+  | "mep"
   | "energy"
   | "ada"
-  | "site";
+  | "site"
+  | "civil";
 
 const disciplineConfig: Record<
   Discipline,
   { icon: LucideIcon; color: string; label: string }
 > = {
+  general: { icon: Info, color: "text-muted-foreground", label: "General" },
+  architectural: { icon: Building2, color: "text-indigo-600", label: "Architectural" },
   structural: { icon: Building2, color: "text-blue-600", label: "Structural" },
   life_safety: { icon: Shield, color: "text-red-600", label: "Life Safety / Egress" },
   fire: { icon: Flame, color: "text-orange-600", label: "Fire Protection" },
   mechanical: { icon: Wrench, color: "text-slate-600", label: "Mechanical" },
   electrical: { icon: Zap, color: "text-yellow-600", label: "Electrical" },
   plumbing: { icon: Droplets, color: "text-cyan-600", label: "Plumbing" },
+  mep: { icon: Wrench, color: "text-slate-500", label: "MEP" },
   energy: { icon: Leaf, color: "text-green-600", label: "Energy Conservation" },
   ada: { icon: Accessibility, color: "text-purple-600", label: "ADA / Accessibility" },
   site: { icon: MapPin, color: "text-emerald-600", label: "Site / Civil" },
+  civil: { icon: MapPin, color: "text-teal-600", label: "Civil" },
 };
 
+/**
+ * Normalize an arbitrary discipline string from the AI pipeline into one of
+ * our canonical keys. Handles whitespace, casing, and common synonyms so a
+ * model emitting "Architectural", "ARCH", "arch", "site/civil", etc. all
+ * land on a known group rather than getting filtered out of the list.
+ */
+export function normalizeDiscipline(raw: string | null | undefined): string {
+  if (!raw) return "general";
+  const k = raw.toLowerCase().trim().replace(/[\s/-]+/g, "_");
+  const aliases: Record<string, Discipline> = {
+    arch: "architectural",
+    architecture: "architectural",
+    architectural: "architectural",
+    struct: "structural",
+    structural: "structural",
+    life_safety: "life_safety",
+    egress: "life_safety",
+    safety: "life_safety",
+    fire: "fire",
+    fire_protection: "fire",
+    fp: "fire",
+    mech: "mechanical",
+    mechanical: "mechanical",
+    hvac: "mechanical",
+    elec: "electrical",
+    electrical: "electrical",
+    plumb: "plumbing",
+    plumbing: "plumbing",
+    mep: "mep",
+    energy: "energy",
+    energy_conservation: "energy",
+    ada: "ada",
+    accessibility: "ada",
+    site: "site",
+    site_civil: "site",
+    civil: "civil",
+    general: "general",
+    other: "general",
+  };
+  return aliases[k] ?? k;
+}
+
 export function getDisciplineIcon(discipline: string): LucideIcon {
-  return disciplineConfig[discipline as Discipline]?.icon ?? Building2;
+  return disciplineConfig[discipline as Discipline]?.icon ?? Info;
 }
 
 export function getDisciplineColor(discipline: string): string {
@@ -59,19 +110,31 @@ export function getDisciplineColor(discipline: string): string {
 }
 
 export function getDisciplineLabel(discipline: string): string {
-  return disciplineConfig[discipline as Discipline]?.label ?? discipline;
+  return (
+    disciplineConfig[discipline as Discipline]?.label ??
+    // Fallback: prettify unknown slugs ("foo_bar" → "Foo Bar")
+    discipline
+      .split(/[_\s-]+/)
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(" ")
+  );
 }
 
 export const DISCIPLINE_ORDER: Discipline[] = [
+  "general",
+  "architectural",
   "structural",
   "life_safety",
   "fire",
   "mechanical",
   "electrical",
   "plumbing",
+  "mep",
   "energy",
   "ada",
   "site",
+  "civil",
 ];
 
 export const SCANNING_STEPS = [

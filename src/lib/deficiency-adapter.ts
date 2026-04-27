@@ -2,20 +2,21 @@
  * Adapter: convert `deficiencies_v2` rows into the legacy `Finding[]` shape
  * the PlanReviewDetail viewer + CommentLetterExport expect.
  *
- * Why this exists
- * ---------------
- * The v2 pipeline (`run-review-pipeline`) writes structured findings to
- * `deficiencies_v2`. The existing PDF viewer / comment-letter / lint /
- * SitePlanChecklist still consume the `Finding` interface, so this adapter
- * shapes v2 rows down into that interface without rewriting those screens.
+ * Two responsibilities:
+ *   1. Reshape v2 columns → legacy Finding fields (severity, resolved, …).
+ *   2. Compute a deterministic `markup` (page_index + pin x/y/w/h) by joining
+ *      the row's first sheet_ref against the sheet_map snapshot stored at
+ *      `plan_reviews.checklist_state.last_sheet_map`. Pin coordinates follow
+ *      the rule in mem://logic/pin-placement: hash(finding.id + sheet_ref)
+ *      → stable position so the same finding always lands in the same spot
+ *      across renders without us storing per-flag coords in the DB.
  *
- * Source-of-truth rule: the v2 row's verification_status / requires_human_review
- * / status drives what the viewer shows. We map them down into the legacy
- * `severity` + `resolved` fields plus surface the v2 fields verbatim under
- * their original names so downstream filters can opt in.
+ * Without (2) the PlanMarkupViewer's `if (!finding.markup) return null;`
+ * guard suppresses every pin and the viewer looks broken.
  */
 
-import type { Finding } from "@/types";
+import { normalizeDiscipline } from "@/lib/county-utils";
+import type { Finding, MarkupData } from "@/types";
 
 /** Subset of `deficiencies_v2` columns the adapter needs. */
 export interface DeficiencyV2Lite {
@@ -40,7 +41,12 @@ export interface DeficiencyV2Lite {
   model_version: string | null;
 }
 
-/** Map v2 priority + life-safety flag → legacy severity. */
+/** One row of the snapshot at `plan_reviews.checklist_state.last_sheet_map`. */
+export interface SheetMapEntry {
+  sheet_ref?: string;
+  page_index?: number;
+}
+
 function severityFromV2(d: DeficiencyV2Lite): "critical" | "major" | "minor" {
   if (d.life_safety_flag || d.permit_blocker) return "critical";
   if (d.priority === "high") return "critical";
@@ -48,7 +54,6 @@ function severityFromV2(d: DeficiencyV2Lite): "critical" | "major" | "minor" {
   return "minor";
 }
 
-/** Build a human-friendly code_ref string from the structured code_reference. */
 function codeRefFromV2(d: DeficiencyV2Lite): string {
   const cr = d.code_reference;
   if (!cr) return "";
@@ -58,25 +63,62 @@ function codeRefFromV2(d: DeficiencyV2Lite): string {
     .trim();
 }
 
-/** Map v2 lifecycle status → legacy `resolved` boolean. */
 function resolvedFromV2(d: DeficiencyV2Lite): boolean {
   return d.status === "resolved" || d.status === "waived";
+}
+
+/** Cheap, stable 32-bit hash → keeps the same pin across renders/sessions. */
+function hash32(s: string): number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/**
+ * Deterministic pin placement on a page (normalized 0–1 coords).
+ * Keeps pins inside a 0.10–0.90 inset so they never hug the trim edge.
+ */
+function deterministicPin(seed: string): Pick<MarkupData, "x" | "y" | "width" | "height"> {
+  const h = hash32(seed);
+  const x = 0.1 + ((h % 800) / 1000); // 0.10–0.90
+  const y = 0.1 + (((h >>> 10) % 800) / 1000);
+  return { x, y, width: 0.06, height: 0.04 };
+}
+
+/**
+ * Build a sheet_ref → page_index map from the snapshot.
+ * Tolerates uppercase/lowercase variation ("A101" vs "a101").
+ */
+function indexSheetMap(sheetMap: SheetMapEntry[] | null | undefined): Map<string, number> {
+  const m = new Map<string, number>();
+  if (!sheetMap) return m;
+  for (const row of sheetMap) {
+    if (!row?.sheet_ref || typeof row.page_index !== "number") continue;
+    m.set(row.sheet_ref.toUpperCase().trim(), row.page_index);
+  }
+  return m;
 }
 
 /**
  * Convert a list of v2 deficiencies into the legacy Finding[] shape.
  *
- * - `finding_id` = the v2 row UUID, so per-finding state (status changes,
- *   pin overrides, similar-correction lookups) keys cleanly off the v2 row.
- * - Sheet ref is the FIRST sheet_ref so the viewer's single-page anchor still
- *   works; downstream code that needs the full list can read `sheet_refs` off
- *   the raw row.
- * - `reasoning` carries the v2 `confidence_basis` so the existing "Why?"
- *   disclosure on FindingCard surfaces the senior-pass justification.
+ * @param rows     deficiencies_v2 rows for this plan review
+ * @param sheetMap optional sheet snapshot from
+ *                 `plan_reviews.checklist_state.last_sheet_map`. Pass it so
+ *                 each finding gets a deterministic pin on the right page.
  */
-export function adaptV2ToFindings(rows: DeficiencyV2Lite[]): Finding[] {
+export function adaptV2ToFindings(
+  rows: DeficiencyV2Lite[],
+  sheetMap?: SheetMapEntry[] | null,
+): Finding[] {
+  const sheetIndex = indexSheetMap(sheetMap);
+
   return rows.map((d) => {
     const sheets = d.sheet_refs ?? [];
+    const firstSheet = sheets[0] ?? "";
     const reasoning = [
       d.confidence_basis ?? "",
       d.requires_human_review && d.human_review_reason
@@ -85,12 +127,30 @@ export function adaptV2ToFindings(rows: DeficiencyV2Lite[]): Finding[] {
     ]
       .join("")
       .trim();
+
+    // Compute deterministic pin if we can resolve the sheet to a page.
+    let markup: MarkupData | undefined;
+    if (firstSheet) {
+      const pageIndex = sheetIndex.get(firstSheet.toUpperCase().trim());
+      if (typeof pageIndex === "number") {
+        const { x, y, width, height } = deterministicPin(`${d.id}|${firstSheet}`);
+        markup = {
+          page_index: pageIndex,
+          x,
+          y,
+          width,
+          height,
+          pin_confidence: "low",
+        };
+      }
+    }
+
     return {
       finding_id: d.id,
       severity: severityFromV2(d),
-      discipline: d.discipline.toLowerCase().replace(/\s+/g, "-"),
+      discipline: normalizeDiscipline(d.discipline),
       code_ref: codeRefFromV2(d),
-      page: sheets[0] ?? "",
+      page: firstSheet,
       description: d.finding,
       recommendation: d.required_action,
       confidence:
@@ -104,6 +164,7 @@ export function adaptV2ToFindings(rows: DeficiencyV2Lite[]): Finding[] {
       reasoning: reasoning || undefined,
       resolved: resolvedFromV2(d),
       model_version: d.model_version ?? undefined,
+      markup,
     };
   });
 }
