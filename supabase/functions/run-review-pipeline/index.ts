@@ -3493,12 +3493,22 @@ async function stageGroundCitations(
     return { code, section, edition };
   };
 
+  // Build a search set that includes every parent of every cited section so
+  // a finding citing 508.4.1 can fall back to 508.4 → 508 if the deeper
+  // sub-section isn't in our reference library (which is the common case —
+  // we seed canonical text at chapter granularity, not at every leaf).
+  function parentSections(s: string): string[] {
+    const parts = s.split(".");
+    const out: string[] = [];
+    for (let i = parts.length; i >= 1; i--) out.push(parts.slice(0, i).join("."));
+    return out;
+  }
   const distinctSections = Array.from(
     new Set(
       defs
         .map((d) => keyOf(d))
         .filter((k): k is Key => !!k)
-        .map((k) => k.section),
+        .flatMap((k) => parentSections(k.section)),
     ),
   );
 
