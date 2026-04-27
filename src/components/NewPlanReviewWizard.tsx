@@ -345,145 +345,180 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
    if (error) throw error;
  };
 
- const handleLaunch = async () => {
- setSaving(true);
- setPipelineError(null);
- try {
- let projectId: string;
+  const handleLaunch = async () => {
+    setSaving(true);
+    setPipelineError(null);
+    try {
+      let projectId: string;
 
- if (useExisting && matchedProject) {
- projectId = matchedProject.id;
- // Update use_type on the existing project so the pipeline can read it.
- await supabase
-   .from("projects")
-   .update({ use_type: useType || null })
-   .eq("id", projectId);
- } else {
- const serviceArray = services === "both" ? ["plan_review", "inspections"] : [services];
- const { data: proj, error: projErr } = await supabase
- .from("projects")
- .insert({
- name: projectName,
- address,
- county,
- jurisdiction,
- trade_type: tradeType,
- services: serviceArray,
- use_type: useType || null,
- status: "plan_review" as const,
- })
- .select("id")
- .single();
- if (projErr) throw projErr;
- projectId = proj.id;
- }
+      if (useExisting && matchedProject) {
+        projectId = matchedProject.id;
+        await supabase
+          .from("projects")
+          .update({ use_type: useType || null })
+          .eq("id", projectId);
+      } else {
+        const serviceArray = services === "both" ? ["plan_review", "inspections"] : [services];
+        const { data: proj, error: projErr } = await supabase
+          .from("projects")
+          .insert({
+            name: projectName,
+            address,
+            county,
+            jurisdiction,
+            trade_type: tradeType,
+            services: serviceArray,
+            use_type: useType || null,
+            status: "plan_review" as const,
+          })
+          .select("id")
+          .single();
+        if (projErr) throw projErr;
+        projectId = proj.id;
+      }
 
- // Create plan_review record
- const { data: review, error: revErr } = await supabase
- .from("plan_reviews")
- .insert({ project_id: projectId })
- .select("id")
- .single();
- if (revErr) throw revErr;
+      // Create plan_review record
+      const { data: review, error: revErr } = await supabase
+        .from("plan_reviews")
+        .insert({ project_id: projectId })
+        .select("id")
+        .single();
+      if (revErr) throw revErr;
 
- setCreatedReviewId(review.id);
- setCreatedProjectId(projectId);
+      setCreatedReviewId(review.id);
+      setCreatedProjectId(projectId);
 
-  // Upload files to storage
- const fileUrls: string[] = [];
-  const uploadedForRaster: Array<{ name: string; file: File; storagePath: string; pageCount: number }> = [];
- for (const uf of uploadedFiles) {
- const path = `plan-reviews/${review.id}/${uf.name}`;
- const { error: uploadError } = await supabase.storage
- .from("documents")
- .upload(path, uf.file, { upsert: true });
- if (uploadError) {
- toast.error(`Failed to upload ${uf.name}: ${uploadError.message}`);
- continue;
- }
- // Store the path, not a public URL — bucket is private
- fileUrls.push(path);
+      // Upload original PDFs to storage (fast — just one upload per file).
+      const fileUrls: string[] = [];
+      const uploadedForRaster: Array<{ name: string; file: File; storagePath: string; pageCount: number }> = [];
+      for (const uf of uploadedFiles) {
+        const path = `plan-reviews/${review.id}/${uf.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from("documents")
+          .upload(path, uf.file, { upsert: true });
+        if (uploadError) {
+          toast.error(`Failed to upload ${uf.name}: ${uploadError.message}`);
+          continue;
+        }
+        fileUrls.push(path);
+        if (uf.file.type === "application/pdf" || uf.name.toLowerCase().endsWith(".pdf")) {
+          uploadedForRaster.push({ name: uf.name, file: uf.file, storagePath: path, pageCount: uf.pageCount });
+        }
+      }
 
-  if (uf.file.type === "application/pdf" || uf.name.toLowerCase().endsWith(".pdf")) {
-    uploadedForRaster.push({ name: uf.name, file: uf.file, storagePath: path, pageCount: uf.pageCount });
-  }
- }
+      const totalPagesToPrepare = uploadedForRaster.reduce((s, f) => s + (f.pageCount || 0), 0);
 
-  // Browser-side pre-rasterization (shared with PlanReviewDetail's inline drop).
-  const { rasterizeAndUploadPages } = await import("@/lib/pdf-utils");
-  const pageAssetRows = await rasterizeAndUploadPages(
-    review.id,
-    uploadedForRaster,
-    async (path, blob) => {
-      const res = await supabase.storage
-        .from("documents")
-        .upload(path, blob, { upsert: true, contentType: "image/jpeg" });
-      return { error: res.error ? { message: res.error.message } : null };
-    },
-    { dpi: CLIENT_PAGE_RASTER_DPI, quality: CLIENT_PAGE_RASTER_QUALITY },
-  );
+      // Update plan_review with file URLs + initial progress so Step 3 has data
+      // to render the "Preparing pages 0/N" strip immediately.
+      if (fileUrls.length > 0) {
+        await supabase
+          .from("plan_reviews")
+          .update({
+            file_urls: fileUrls,
+            ai_run_progress: { pre_rasterized_pages: 0, total_pages: totalPagesToPrepare },
+          })
+          .eq("id", review.id);
 
-  // Update plan_review with file URLs
- if (fileUrls.length > 0) {
- await supabase
- .from("plan_reviews")
-  .update({
-    file_urls: fileUrls,
-    ai_run_progress: pageAssetRows.length > 0
-      ? { pre_rasterized: true, pre_rasterized_pages: pageAssetRows.length }
-      : undefined,
-  })
- .eq("id", review.id);
+        // Register files for the pipeline.
+        const { data: { user } } = await supabase.auth.getUser();
+        const { error: prfErr } = await supabase.from("plan_review_files").insert(
+          fileUrls.map((fp) => ({
+            plan_review_id: review.id,
+            file_path: fp,
+            round: 1,
+            uploaded_by: user?.id ?? null,
+          })),
+        );
+        if (prfErr) {
+          toast.error(`Failed to register files for pipeline: ${prfErr.message}`);
+        }
+      }
 
- // Also insert into plan_review_files so the pipeline can find them
- const { data: { user } } = await supabase.auth.getUser();
- const { error: prfErr } = await supabase.from("plan_review_files").insert(
- fileUrls.map((fp) => ({
- plan_review_id: review.id,
- file_path: fp,
- round: 1,
- uploaded_by: user?.id ?? null,
- })),
- );
- if (prfErr) {
- toast.error(`Failed to register files for pipeline: ${prfErr.message}`);
- }
+      queryClient.invalidateQueries({ queryKey: ["plan-reviews"] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
 
-  if (pageAssetRows.length > 0) {
-    const { error: assetErr } = await supabase
-      .from("plan_review_page_assets")
-      .upsert(pageAssetRows, { onConflict: "plan_review_id,page_index" });
-    if (assetErr) {
-      throw new Error(`Failed to register prepared pages: ${assetErr.message}`);
+      // ---- HAND OFF TO STEP 3 IMMEDIATELY ----
+      // Everything below runs in the background. The user is now watching the
+      // live "Analyzing" panel with the pipeline stepper + page-prep progress.
+      setStep(3);
+      setSaving(false);
+
+      // Background: rasterize pages with incremental persistence + progress.
+      void (async () => {
+        try {
+          let preparedCount = 0;
+          let lastProgressUpdate = 0;
+          const flushProgress = async (force = false) => {
+            const now = Date.now();
+            if (!force && now - lastProgressUpdate < 1500) return;
+            lastProgressUpdate = now;
+            await supabase
+              .from("plan_reviews")
+              .update({ ai_run_progress: { pre_rasterized_pages: preparedCount, total_pages: totalPagesToPrepare } })
+              .eq("id", review.id);
+          };
+
+          const { rasterizeAndUploadPagesResilient } = await import("@/lib/pdf-utils");
+          const result = await rasterizeAndUploadPagesResilient(
+            review.id,
+            uploadedForRaster,
+            async (path, blob) => {
+              const res = await supabase.storage
+                .from("documents")
+                .upload(path, blob, { upsert: true, contentType: "image/jpeg" });
+              return { error: res.error ? { message: res.error.message } : null };
+            },
+            {
+              dpi: CLIENT_PAGE_RASTER_DPI,
+              quality: CLIENT_PAGE_RASTER_QUALITY,
+              chunkTimeoutMs: 30_000,
+              totalTimeoutMs: 4 * 60_000,
+              abortFailureRatio: 0.4,
+              onPageReady: async (asset) => {
+                // Persist immediately so the pipeline / UI can see ready pages.
+                await supabase
+                  .from("plan_review_page_assets")
+                  .upsert([asset], { onConflict: "plan_review_id,page_index" });
+                preparedCount += 1;
+                await flushProgress();
+              },
+            },
+          );
+
+          await flushProgress(true);
+
+          if (result.aborted) {
+            await supabase
+              .from("plan_reviews")
+              .update({
+                ai_run_progress: {
+                  pre_rasterized_pages: preparedCount,
+                  total_pages: totalPagesToPrepare,
+                  client_raster_aborted: true,
+                },
+              })
+              .eq("id", review.id);
+          }
+        } catch (err) {
+          console.warn("Background rasterization failed:", err);
+        }
+
+        // Kick off the pipeline whether rasterization fully completed or not —
+        // the server-side rasterizer fills in any missing pages.
+        try {
+          await invokePipeline(review.id);
+          toast.success("Analysis started");
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Pipeline failed to start";
+          setPipelineError(msg);
+          toast.error(`Analysis failed to start: ${msg}`);
+        }
+      })();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create review");
+      setSaving(false);
     }
-  }
- }
-
- queryClient.invalidateQueries({ queryKey: ["plan-reviews"] });
- queryClient.invalidateQueries({ queryKey: ["projects"] });
-
- // Move to step 3 BEFORE invoking — the realtime stepper subscribes immediately.
- setStep(3);
-
- // Await the trigger so we can surface 401/500 startup failures (auth, missing
- // service role, CORS preflight rejection) immediately as `pipelineError`
- // instead of leaving the user staring at a "Pending" stepper forever.
- // The function returns 202 quickly after kicking off background work, so
- // awaiting here does not block the UI for the full pipeline duration.
- try {
-   await invokePipeline(review.id);
-   toast.success("Review created — analysis started");
- } catch (err) {
-   const msg = err instanceof Error ? err.message : "Pipeline failed to start";
-   setPipelineError(msg);
-   toast.error(`Analysis failed to start: ${msg}`);
- }
- } catch (err) {
- toast.error(err instanceof Error ? err.message : "Failed to create review");
- } finally {
- setSaving(false);
- }
- };
+  };
 
  // --- Pipeline complete handler (auto-route to workspace) ---
  const handlePipelineComplete = useCallback(() => {
