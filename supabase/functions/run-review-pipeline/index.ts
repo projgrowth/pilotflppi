@@ -44,6 +44,7 @@ import {
   PAGE_ASSET_INDEX_RE,
   readSignedManifest,
   signedSheetUrls,
+  invalidatePageManifestCache,
 } from "./_shared/storage.ts";
 
 // Re-export `LOVABLE_API_KEY` reference is no longer needed locally — `callAI`
@@ -212,7 +213,7 @@ async function stagePreparePages(
     );
   }
 
-  _pageManifestCache.delete(planReviewId);
+  invalidatePageManifestCache(planReviewId);
   return {
     prepared_pages: prepared,
     pre_rasterized: true,

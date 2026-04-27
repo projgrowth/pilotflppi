@@ -31,6 +31,15 @@ const _pageManifestCache = new Map<
 >();
 
 /**
+ * Invalidate the in-memory page manifest cache for a single review. Call after
+ * a stage materially changes the underlying `plan_review_page_assets` rows
+ * (e.g. prepare_pages just persisted a fresh browser-rendered manifest).
+ */
+export function invalidatePageManifestCache(planReviewId: string): void {
+  _pageManifestCache.delete(planReviewId);
+}
+
+/**
  * Read the persisted page manifest from public.plan_review_page_assets and
  * sign each row's storage_path. Returns null if the manifest is empty so the
  * caller can fall back to building it.
