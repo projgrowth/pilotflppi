@@ -1,5 +1,17 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { FileDown, Printer } from "lucide-react";
+import { FileDown, Printer, AlertTriangle } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { Finding } from "@/components/FindingCard";
 import { getDisciplineLabel, getCountyLabel, DISCIPLINE_ORDER } from "@/lib/county-utils";
 import { getCountyRequirements, getSupplementalSectionLabel, type CountyRequirements, type SupplementalSection } from "@/lib/county-requirements";
