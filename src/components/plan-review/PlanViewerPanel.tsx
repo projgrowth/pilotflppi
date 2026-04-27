@@ -57,9 +57,13 @@ export function PlanViewerPanel(props: Props) {
             <Upload className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
           )}
           <p className="text-sm font-medium text-foreground">
-            {props.uploading ? "Uploading..." : "Drop plan documents here"}
+            {props.uploading ? "Uploading…" : "Drop the full plan set (PDF)"}
           </p>
-          <p className="text-xs text-muted-foreground mt-1">PDF files up to 50MB</p>
+          <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+            Include the cover, code summary, and all discipline sheets.<br />
+            We auto-detect Architectural, Structural, MEP, Civil &amp; Fire Protection.
+          </p>
+          <p className="text-2xs text-muted-foreground/70 mt-2">PDF up to 50&nbsp;MB</p>
           <input
             ref={props.fileInputRef}
             type="file"

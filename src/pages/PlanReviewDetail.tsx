@@ -59,6 +59,8 @@ import { reprepareInBrowser } from "@/lib/reprepare-in-browser";
 import { StuckRecoveryBanner } from "@/components/plan-review/StuckRecoveryBanner";
 import { RoundCarryoverPanel } from "@/components/plan-review/RoundCarryoverPanel";
 import { UploadProgressBar } from "@/components/plan-review/UploadProgressBar";
+import { SubmittalIncompleteBanner } from "@/components/plan-review/SubmittalIncompleteBanner";
+import { ReviewProvenanceStrip } from "@/components/plan-review/ReviewProvenanceStrip";
 
 import { Wand2, AlertTriangle, Loader2 } from "lucide-react";
 
@@ -423,6 +425,14 @@ export default function PlanReviewDetail() {
     setAiRunning(false);
     setAiCompleteFlash(findings.length);
     setTimeout(() => setAiCompleteFlash(null), 3000);
+    // Auto-jump the right panel to findings (only if user is on a non-findings
+    // tab) and surface a one-time toast so the completion isn't easy to miss.
+    setRightPanel((prev) => (prev === "findings" ? prev : "findings"));
+    toast.success(
+      findings.length > 0
+        ? `Review complete — ${findings.length} finding${findings.length === 1 ? "" : "s"}`
+        : "Review complete — no findings",
+    );
   }, [aiRunning, queryClient, review?.id, id, findings.length]);
 
   if (isLoading) {
@@ -739,6 +749,31 @@ export default function PlanReviewDetail() {
           </div>
         );
       })()}
+
+      {/* Submittal completeness banner — surfaces the result of the new
+          `submittal_check` pipeline stage when required disciplines are
+          missing from the uploaded sheet set. */}
+      <SubmittalIncompleteBanner
+        progress={(review as unknown as { ai_run_progress?: Record<string, unknown> }).ai_run_progress ?? null}
+        onViewFinding={() => {
+          const idx = findings.findIndex((f) => f.code_ref === "DEF-SUB001" || /SUB001/.test(f.code_ref || ""));
+          if (idx >= 0) {
+            setActiveFindingIndex(idx);
+            findingRefs.current.get(idx)?.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }}
+      />
+
+      {/* Provenance / health strip — one-line trust receipt above the
+          findings list. Reads useReviewHealth + project_dna + ai_run_progress. */}
+      {findings.length > 0 && (
+        <div className="shrink-0 px-4 pt-2 empty:hidden">
+          <ReviewProvenanceStrip
+            planReviewId={review.id}
+            progress={(review as unknown as { ai_run_progress?: Record<string, unknown> }).ai_run_progress ?? null}
+          />
+        </div>
+      )}
 
       {/* Round-2+ carryover summary — only renders when there's at least one
           carryover finding from a prior round. */}

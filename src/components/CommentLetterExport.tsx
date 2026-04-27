@@ -353,7 +353,16 @@ async function persistToStorage(html: string, projectId: string | undefined, fil
   }
 }
 
-export function CommentLetterExport(props: CommentLetterExportProps & { onDocumentGenerated?: () => void }) {
+export function CommentLetterExport(
+  props: CommentLetterExportProps & {
+    onDocumentGenerated?: () => void;
+    /** Optional jump-to-findings callback. When supplied, the unverified
+     *  citation gate dialog shows a "Review unverified findings" button that
+     *  closes the dialog and invokes this with the first unverified finding's
+     *  id (so the host can scroll/highlight it). */
+    onJumpToFinding?: (findingId: string) => void;
+  },
+) {
   // Findings included in this letter that don't have a verified citation. We
   // surface a hard confirmation step so the reviewer can't accidentally ship
   // a letter that quotes FBC sections we never grounded.
@@ -384,6 +393,13 @@ export function CommentLetterExport(props: CommentLetterExportProps & { onDocume
     }
     setConfirmed(false);
     setOpen(true);
+  };
+
+  const handleJump = () => {
+    const first = unverified[0];
+    if (!first?.finding_id) return;
+    setOpen(false);
+    props.onJumpToFinding?.(first.finding_id);
   };
 
   return (
@@ -437,8 +453,13 @@ export function CommentLetterExport(props: CommentLetterExportProps & { onDocume
               {unverified.length === 1 ? "" : "s"}.
             </span>
           </label>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="gap-2 sm:gap-2">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
+            {props.onJumpToFinding && unverified[0]?.finding_id && (
+              <Button variant="outline" size="sm" onClick={handleJump}>
+                Review unverified findings
+              </Button>
+            )}
             <AlertDialogAction
               disabled={!confirmed}
               onClick={() => {
