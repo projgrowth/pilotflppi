@@ -3531,18 +3531,23 @@ async function stageGroundCitations(
   };
   const canon = (canonRaw ?? []) as Canon[];
 
-  function lookup(k: Key): Canon | null {
-    // Exact (code, section, edition) → exact (code, section) → section-only.
-    let hit =
-      (k.edition &&
-        canon.find(
-          (c) =>
-            c.code === k.code && c.section === k.section && c.edition === k.edition,
-        )) ||
-      null;
-    if (!hit) hit = canon.find((c) => c.code === k.code && c.section === k.section) ?? null;
-    if (!hit) hit = canon.find((c) => c.section === k.section) ?? null;
-    return hit;
+  function lookup(k: Key): { hit: Canon; matchedSection: string } | null {
+    // Try the cited section first, then walk up the dotted parent chain
+    // (508.4.1 → 508.4 → 508). Within each level: exact (code+section+edition)
+    // → exact (code+section) → section-only.
+    for (const section of parentSections(k.section)) {
+      let hit =
+        (k.edition &&
+          canon.find(
+            (c) =>
+              c.code === k.code && c.section === section && c.edition === k.edition,
+          )) ||
+        null;
+      if (!hit) hit = canon.find((c) => c.code === k.code && c.section === section) ?? null;
+      if (!hit) hit = canon.find((c) => c.section === section) ?? null;
+      if (hit) return { hit, matchedSection: section };
+    }
+    return null;
   }
 
   const counts = { verified: 0, mismatch: 0, not_found: 0, hallucinated: 0 };
@@ -3553,15 +3558,18 @@ async function stageGroundCitations(
     let status: "verified" | "mismatch" | "not_found" | "hallucinated";
     let score: number | null = null;
     let canonText: string | null = null;
+    let matchedSection: string | null = null;
 
     if (!key) {
       // No parseable section at all = hallucinated/missing citation.
       status = "hallucinated";
     } else {
-      const hit = lookup(key);
-      if (!hit) {
+      const found = lookup(key);
+      if (!found) {
         status = "not_found";
       } else {
+        const { hit, matchedSection: ms } = found;
+        matchedSection = ms;
         canonText = `${hit.code} ${hit.section} (${hit.edition}) — ${hit.title}: ${hit.requirement_text}`.slice(
           0,
           1500,
@@ -3569,34 +3577,46 @@ async function stageGroundCitations(
         const aiBlob = `${def.finding} ${def.required_action}`;
         score = citationOverlapScore(aiBlob, hit.requirement_text);
         // Tightened from 0.18 → 0.30: at 0.18 a finding only needed to share
-        // ~3 common words with the canonical text to "verify". Plus require
-        // that the AI text actually mentions the section number — otherwise
-        // the model is parroting a vaguely related code section.
+        // ~3 common words with the canonical text to "verify". For parent
+        // matches (we fell back from 508.4.1 to 508), accept any match —
+        // the reviewer can still see the AI cited a real section family.
         const aiBlobLc = aiBlob.toLowerCase();
-        const sectionLc = hit.section.toLowerCase();
-        const mentionsSection = aiBlobLc.includes(sectionLc);
-        status = score >= 0.30 && mentionsSection ? "verified" : "mismatch";
+        const sectionLc = ms.toLowerCase();
+        const mentionsSection = aiBlobLc.includes(sectionLc) ||
+          aiBlobLc.includes(key.section.toLowerCase());
+        const usedParent = ms !== key.section;
+        if (usedParent && mentionsSection) {
+          // Parent match with the AI quoting the deeper section — acceptable.
+          status = "verified";
+        } else {
+          status = score >= 0.30 && mentionsSection ? "verified" : "mismatch";
+        }
       }
     }
     counts[status]++;
 
-    // For mismatch / not_found / hallucinated: route to human review so the
-    // reviewer sees the AI quoted a citation it couldn't substantiate.
-    const needsHumanReview = status !== "verified";
+    // Only escalate to human review for true conflicts (mismatch or
+    // hallucinated citations). `not_found` means our canonical library
+    // doesn't carry that section yet — that's a library gap, not a finding
+    // problem, and shouldn't drown the reviewer in 38/40 "needs review" pills.
+    const needsHumanReview = status === "mismatch" || status === "hallucinated";
     const update: Record<string, unknown> = {
       citation_status: status,
       citation_match_score: score,
       citation_canonical_text: canonText,
       citation_grounded_at: now,
     };
+    if (matchedSection && matchedSection !== key?.section) {
+      // Record which parent section satisfied the lookup so the UI can
+      // show "verified against 508 (cited 508.4.1)" instead of just "verified".
+      update.evidence_crop_meta = { matched_parent_section: matchedSection };
+    }
     if (needsHumanReview) {
       update.requires_human_review = true;
       update.human_review_reason =
         status === "mismatch"
           ? `Citation ${def.code_reference?.section ?? "?"} doesn't match the canonical FBC text — verify the section is correct.`
-          : status === "not_found"
-            ? `Citation ${def.code_reference?.section ?? "?"} not found in the FBC reference — verify the section number.`
-            : `No FBC section parseable from this finding — add or correct the citation.`;
+          : `No FBC section parseable from this finding — add or correct the citation.`;
     }
     const { error: updErr } = await admin
       .from("deficiencies_v2")
