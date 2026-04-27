@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/contexts/AuthContext";
 import { useActivePipelineCount } from "@/hooks/useAllActivePipelines";
+import { EXTRAS_ENABLED } from "@/lib/feature-flags";
 import { useState, useEffect } from "react";
 
 interface NavItem {
@@ -35,13 +36,19 @@ interface NavItem {
   icon: React.ElementType;
 }
 
-// Single, flat nav. Sections felt like clutter for ~11 items.
-// Order is workflow-first (review pipeline) then library/admin.
-const mainNav: NavItem[] = [
+// Core nav — the plan-review-only workspace. Keep this list short.
+// Routes for the extras (invoices, contractors, CRM, etc.) still exist in
+// App.tsx so direct links continue to work; they're just hidden from
+// navigation until VITE_FEATURE_EXTRAS=true.
+const coreNav: NavItem[] = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
   { label: "Projects", path: "/projects", icon: FolderKanban },
   { label: "Plan Review", path: "/review", icon: Search },
   { label: "Pipeline Activity", path: "/pipelines", icon: Activity },
+  { label: "Settings", path: "/settings", icon: Settings },
+];
+
+const extrasNav: NavItem[] = [
   { label: "Inspections", path: "/inspections", icon: ClipboardCheck },
   { label: "Documents", path: "/documents", icon: FileText },
   { label: "Invoices", path: "/invoices", icon: Receipt },
@@ -49,15 +56,17 @@ const mainNav: NavItem[] = [
   { label: "Deficiencies", path: "/deficiencies", icon: Radar },
   { label: "Contractors", path: "/contractors", icon: Users },
   { label: "Analytics", path: "/analytics", icon: TrendingUp },
-  { label: "Settings", path: "/settings", icon: Settings },
 ];
 
-// Bottom tab bar items for mobile
+const mainNav: NavItem[] = EXTRAS_ENABLED
+  ? [...coreNav.slice(0, -1), ...extrasNav, coreNav[coreNav.length - 1]]
+  : coreNav;
+
+// Bottom tab bar items for mobile — focused trio.
 const bottomTabs: NavItem[] = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
   { label: "Review", path: "/review", icon: Search },
-  { label: "Inspections", path: "/inspections", icon: ClipboardCheck },
-  { label: "Documents", path: "/documents", icon: FileText },
+  { label: "Pipelines", path: "/pipelines", icon: Activity },
 ];
 
 const NavList = React.forwardRef<HTMLDivElement, { items: NavItem[]; onNavigate?: () => void; collapsed?: boolean }>(function NavList({ items, onNavigate, collapsed }, ref) {
