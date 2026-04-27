@@ -1085,7 +1085,8 @@ async function stageSubmittalCheck(
   };
 }
 
-
+const DNA_TOOL = {
+  type: "function",
   name: "submit_project_dna",
   description:
     "Extract Florida Building Code project DNA from cover/code-summary sheets. Read values verbatim. Use null when not directly readable; list those keys in missing_fields. List keys with conflicting values across sheets in ambiguous_fields.",
