@@ -111,7 +111,7 @@ export default function Dashboard() {
     <div className="p-6 md:p-10 max-w-5xl mx-auto space-y-8">
       <PageHeader
         title="Plan Review"
-        action={
+        actions={
           <Button onClick={() => navigate("/review")} size="sm">
             <Plus className="h-4 w-4 mr-1.5" />
             New Review
