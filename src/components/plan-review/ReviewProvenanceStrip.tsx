@@ -237,6 +237,23 @@ export function ReviewProvenanceStrip({ planReviewId, progress }: Props) {
           Submittal: <strong>incomplete</strong>
         </span>
       )}
+      {isAdmin && hasHealth && (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={handleRegroup}
+          disabled={regrouping}
+          className="ml-auto h-6 px-2 text-2xs gap-1"
+          title="Re-run citation grounding + verification on all open findings"
+        >
+          {regrouping ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <RefreshCw className="h-3 w-3" />
+          )}
+          {regrouping ? "Re-grounding…" : "Re-ground citations"}
+        </Button>
+      )}
     </div>
   );
 }
