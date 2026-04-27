@@ -1,45 +1,62 @@
-# Next Precision/Reliability Improvements
+# Fix: discipline_review feels stuck for 60-90s
 
-The pipeline now produces canonical disciplines, citation grounding, and a quality score — but several pieces are computed and never used, and ~76% of existing findings have unverified or broken citation states. Three concrete improvements:
+## Diagnosis
 
-## 1. Surface the AI Run Quality Score
+The stage isn't broken — the most recent run (`6b679f01...`) completed cleanly: 10 chunks across 73 architectural sheets, total ~117s. But:
 
-Right now `complete.ts` calculates a 0–100 quality score and writes it into the snapshot, but nothing in the UI ever reads it. Reviewers have no signal about how trustworthy a run is.
+1. **Chunks run sequentially** — one Gemini vision call at a time, ~5-15s each. With 10 chunks that's 60-150s of wall time.
+2. **One chunk paused ~60s** between chunks 4→5 (Gemini latency spike), tripping the 120s soft timeout and forcing a worker handoff (visible as `chunk_resume` in `pipeline_error_log`).
+3. **UI shows only the stage name.** `PipelineProgressStepper` has no idea we're "on chunk 5/10" — so a slow chunk looks like a hang.
 
-- Persist `quality_score` and its breakdown (citations / verification / evidence / hallucinations) onto `plan_reviews.ai_run_progress.quality` so it survives without a new column.
-- Add a compact "AI Confidence" badge at the top of the plan review page showing the score, color-coded (green ≥80, amber 60–79, red <60), with a tooltip listing the four sub-scores.
-- In the Findings panel header, show "X of Y citations verified" and "Z hallucinated" as small chips so the reviewer knows where to focus.
+Three fixes, ordered by impact:
 
-## 2. Real Evidence Crops + Bbox-Backed Pins
+## 1. Surface chunk-level progress in `ai_run_progress` (UI fix — biggest perceived win)
 
-`evidence_crop_url` exists on every finding but is `NULL` for all 320 rows. Pins are still placed with the deterministic hash, which means they never actually point at the deficient detail.
+**Edit `supabase/functions/run-review-pipeline/stages/discipline-review.ts`:**
+- After each chunk completes, write `discipline_review_progress: { discipline, chunk: N, total: M, findings_so_far: K }` into `plan_reviews.ai_run_progress` (already a JSON column — no migration).
+- Also write `last_chunk_at` timestamp so the UI can show "still working — last chunk 12s ago".
 
-- Add a new `evidence-crop` stage that runs after `verify`. For each finding, it asks Gemini 2.5 Pro Vision (already wired) to return a normalized bbox `{x, y, w, h, page_index}` for the cited sheet, then crops the page PNG via the existing `plan_review_page_assets` cache and uploads to the `documents` bucket.
-- Store the bbox in `evidence_crop_meta` and the cropped PNG path in `evidence_crop_url`.
-- Update `deficiency-adapter.ts` to prefer the real bbox over the deterministic hash when present, falling back to the hash only when the crop step failed.
-- Show the crop thumbnail inside each finding row in `FindingsListPanel` so the reviewer can verify without opening the PDF viewer.
+**Edit `src/components/plan-review/PipelineProgressStepper.tsx`:**
+- When current stage is `discipline_review`, read `ai_run_progress.discipline_review_progress` and render a sub-line: `"Architectural — chunk 5 of 10 (8 findings so far)"`.
+- Show a stale-watchdog hint if `Date.now() - last_chunk_at > 30s`: `"Vision model is taking longer than usual…"`.
 
-## 3. Repair Existing Findings
+**Edit `src/hooks/plan-review/usePlanReviewData.ts`:**
+- The realtime subscription on `plan_reviews` already fires on `ai_run_progress` updates, so chunk progress will stream live with no extra wiring.
 
-The historical data has 170 `unverified` citations, 47 `not_found`, and 19 `hallucinated` — these will never improve unless reprocessed.
+This alone removes the "stuck" feeling — even 90s of work feels fine when the user can see chunks ticking up.
 
-- Add an admin-only "Re-ground citations" button on the plan review page that re-runs the `ground-citations` and `verify` stages for the current review without redoing the expensive vision pass.
-- Auto-flip any finding with `citation_status` in (`hallucinated`, `not_found`) and `verification_status = 'unverified'` to `needs_human` so they stop appearing as letter-ready.
-- Backfill once now: for the 19 hallucinated findings across all firms, mark `requires_human_review = true` and `priority = 'low'` so they're hidden from default letter generation until a human signs off.
+## 2. Run chunks in parallel within a discipline (real speedup, ~3-4×)
 
-## Technical Notes
+Each chunk is an independent Gemini call. Currently a `for` loop awaits each one.
 
-- New stage file: `supabase/functions/run-review-pipeline/stages/evidence-crop.ts`. Register it in the pipeline orchestrator after `verify`.
-- Image cropping: use `Deno` `ImageMagick` WASM (already in `_shared/`) — no new deps.
-- New edge function: `regroup-citations` that accepts a `plan_review_id`, re-runs `groundCitations` + `verify` against existing `deficiencies_v2` rows.
-- UI: extend `usePlanReviewData.ts` to expose `qualityScore` and citation tallies; new component `AIQualityBadge.tsx` in the plan review header.
-- One small migration: `ALTER TABLE plan_reviews` not needed — reuse existing `ai_run_progress` jsonb and `evidence_crop_meta` jsonb.
-- Backfill for hallucinated findings runs as a one-time `UPDATE` via the insert tool, not a migration.
+**Edit `discipline-review.ts`:**
+- Replace the per-discipline sequential `for (chunk of chunks)` with `Promise.allSettled` in batches of **3 concurrent chunks**.
+- 3 is the right ceiling: high enough to crush the 10-chunk Architectural set in ~3 rounds (~30-45s instead of 100-150s), low enough to stay under the Lovable AI Gateway burst limit and not blow the 150s edge function budget.
+- Keep the existing per-chunk checkpoint write — but persist the *highest contiguous* completed chunk so resume logic stays correct after parallel completion.
+- Errors in one chunk no longer block the others; failed chunks get logged to `pipeline_error_log` with `error_class: "chunk_failed"` and the stage continues. A discipline only fails the stage if **>50%** of its chunks fail.
 
-## Out of Scope
+## 3. Tighten the soft timeout so handoffs are cheaper
 
-- Lowering verifier threshold further (already at 0.9).
-- Changing the dedupe Jaccard threshold (already 0.7).
-- Letter template changes — readiness guard already blocks hallucinated citations.
+Today the stage runs until 120s wall-clock then throws. With parallelism the worker-handoff is rarely needed, but when it is:
 
-Approve to implement all three.
+**Edit `discipline-review.ts`:**
+- Drop `STAGE_SOFT_TIMEOUT_MS` from `120_000` → `90_000`. Combined with parallel chunks this leaves ample headroom and avoids the 90-150s "almost done but rebooting" window the user just saw.
+- After the timeout throw, the dispatcher already re-invokes; checkpoint state lets it resume in ~2s.
+
+## Out of scope (intentionally)
+
+- **Switching to a faster model** — `gemini-2.5-flash` is already the right choice for vision-heavy chunked work. Pro would be slower per call.
+- **Pre-warming Gemini** — no measurable benefit; cold starts are server-side at the gateway.
+- **Reducing chunk size** — smaller chunks = more API calls = more cost & no net speedup.
+
+## Files touched
+
+- `supabase/functions/run-review-pipeline/stages/discipline-review.ts` (progress writes, parallel chunks, timeout)
+- `src/components/plan-review/PipelineProgressStepper.tsx` (sub-line + watchdog text)
+- (No DB migration — `ai_run_progress` is already a flexible JSONB column.)
+
+## Expected outcome
+
+- Architectural-heavy reviews (~70 sheets): **discipline_review drops from ~100-150s to ~30-50s.**
+- Even when Gemini has a slow chunk, the UI shows live chunk progress so it never looks frozen.
+- Worker handoffs become rare; when they happen they're transparent (resume from saved chunk).

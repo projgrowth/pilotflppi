@@ -397,9 +397,57 @@ export async function stageDisciplineReview(
       .maybeSingle(),
   ]);
 
-  // Stage start timestamp for the soft 120s mid-stage timeout safety net.
+  // Stage start timestamp for the soft mid-stage timeout safety net.
+  // Tightened from 120s → 90s now that chunks run in parallel batches of 3 —
+  // a full discipline rarely needs more than ~45s, so 90s leaves headroom
+  // without lingering in the dead zone before the dispatcher takes over.
   const stageStartedAt = Date.now();
-  const STAGE_SOFT_TIMEOUT_MS = 120_000;
+  const STAGE_SOFT_TIMEOUT_MS = 90_000;
+
+  // How many chunks per discipline run concurrently. 3 is the sweet spot:
+  // - high enough to crush a 10-chunk Architectural set in ~3 vision rounds
+  //   (~30-45s vs ~100-150s sequentially)
+  // - low enough to stay under the Lovable AI Gateway burst tier and keep
+  //   the edge function comfortably below its 150s budget.
+  const CHUNK_CONCURRENCY = 3;
+
+  // Helper: write a live "we're on chunk N of M" beacon to ai_run_progress
+  // so the UI can render sub-stage progress and the watchdog can tell the
+  // worker apart from a true hang. Best-effort — never throws.
+  const writeChunkProgress = async (args: {
+    discipline: string;
+    chunk: number;
+    total: number;
+    findingsSoFar: number;
+  }) => {
+    try {
+      const { data: cur } = await admin
+        .from("plan_reviews")
+        .select("ai_run_progress")
+        .eq("id", planReviewId)
+        .maybeSingle();
+      const prev =
+        ((cur as { ai_run_progress?: Record<string, unknown> | null } | null)
+          ?.ai_run_progress ?? {}) as Record<string, unknown>;
+      await admin
+        .from("plan_reviews")
+        .update({
+          ai_run_progress: {
+            ...prev,
+            discipline_review_progress: {
+              discipline: args.discipline,
+              chunk: args.chunk,
+              total: args.total,
+              findings_so_far: args.findingsSoFar,
+              last_chunk_at: new Date().toISOString(),
+            },
+          },
+        })
+        .eq("id", planReviewId);
+    } catch (err) {
+      console.error("[discipline_review] progress write failed:", err);
+    }
+  };
 
   // Resumable chunk checkpoints. `stage_checkpoints.discipline_review` is a
   // map of `{ [discipline]: lastChunkCompleted }`. On retry we skip every
@@ -605,6 +653,9 @@ export async function stageDisciplineReview(
           metadata: { discipline, resume_after_chunk: resumeFrom + 1, total_chunks: totalChunks },
         });
       }
+      // Build the list of chunk indexes we still need to run (skip resumed
+      // and any beyond the per-discipline ceiling).
+      const pendingChunks: number[] = [];
       for (let cs = 0; cs < cappedUrls.length; cs += DISCIPLINE_BATCH) {
         const chunkIdx = Math.floor(cs / DISCIPLINE_BATCH);
         if (chunkIdx <= resumeFrom) {
@@ -612,56 +663,107 @@ export async function stageDisciplineReview(
           lastReviewedSheets = Math.min(cs + DISCIPLINE_BATCH, cappedUrls.length);
           continue;
         }
+        if (chunkIdx >= MAX_CHUNKS_PER_DISCIPLINE) break;
+        pendingChunks.push(chunkIdx);
+      }
+
+      // Track contiguous completion so the resume checkpoint stays correct
+      // even when chunks finish out of order.
+      const completedSet = new Set<number>();
+      let highestContiguous = resumeFrom;
+      const advanceContiguous = async () => {
+        let advanced = false;
+        while (completedSet.has(highestContiguous + 1)) {
+          highestContiguous += 1;
+          advanced = true;
+        }
+        if (advanced) await persistDisciplineCheckpoint(discipline, highestContiguous);
+      };
+
+      let failedChunks = 0;
+      const totalPending = pendingChunks.length;
+
+      // Process chunks in waves of CHUNK_CONCURRENCY.
+      outer: for (let waveStart = 0; waveStart < pendingChunks.length; waveStart += CHUNK_CONCURRENCY) {
         if (await checkCancelled()) {
           cancelledMidRun = true;
-          break;
+          break outer;
         }
         if (Date.now() - stageStartedAt > STAGE_SOFT_TIMEOUT_MS) {
+          const nextChunk = pendingChunks[waveStart];
           await recordPipelineError(admin, {
             planReviewId,
             firmId,
             stage: "discipline_review",
             errorClass: "soft_timeout",
-            errorMessage: `${discipline}: paused at chunk ${chunkIdx}/${totalChunks} after ${Math.round((Date.now() - stageStartedAt) / 1000)}s — will resume on next dispatcher tick.`,
-            metadata: { discipline, paused_at_chunk: chunkIdx, total_chunks: totalChunks, elapsed_ms: Date.now() - stageStartedAt },
+            errorMessage: `${discipline}: paused at chunk ${nextChunk + 1}/${totalChunks} after ${Math.round((Date.now() - stageStartedAt) / 1000)}s — will resume on next dispatcher tick.`,
+            metadata: { discipline, paused_at_chunk: nextChunk + 1, total_chunks: totalChunks, elapsed_ms: Date.now() - stageStartedAt },
           });
-          throw new Error(`SOFT_TIMEOUT: discipline_review paused at ${discipline} chunk ${chunkIdx}/${totalChunks}`);
+          throw new Error(`SOFT_TIMEOUT: discipline_review paused at ${discipline} chunk ${nextChunk + 1}/${totalChunks}`);
         }
-        if (chunksRun >= MAX_CHUNKS_PER_DISCIPLINE) {
-          cappedAt = lastReviewedSheets;
-          await recordPipelineError(admin, {
-            planReviewId,
-            firmId,
-            stage: "discipline_review",
-            errorClass: "chunk_ceiling",
-            errorMessage: `${discipline}: stopped after ${chunksRun} chunks (~${lastReviewedSheets} sheets) to bound runtime.`,
-            metadata: { discipline, chunks_run: chunksRun, sheets_total: cappedUrls.length },
-          });
-          break;
+
+        const wave = pendingChunks.slice(waveStart, waveStart + CHUNK_CONCURRENCY);
+        const settled = await Promise.allSettled(
+          wave.map(async (chunkIdx) => {
+            const cs = chunkIdx * DISCIPLINE_BATCH;
+            const chunkUrls = cappedUrls.slice(cs, cs + DISCIPLINE_BATCH);
+            const chunkSheets = disciplineSheets.slice(cs, cs + DISCIPLINE_BATCH);
+            const inserted = await runDisciplineChecks(admin, planReviewId, firmId, {
+              discipline,
+              disciplineSheets: chunkSheets,
+              disciplineImageUrls: chunkUrls,
+              generalImageUrls,
+              dna,
+              jurisdiction,
+              useType,
+            });
+            return { chunkIdx, cs, chunkSheets, inserted };
+          }),
+        );
+
+        for (let i = 0; i < settled.length; i++) {
+          const r = settled[i];
+          const chunkIdx = wave[i];
+          if (r.status === "fulfilled") {
+            const { cs, chunkSheets, inserted } = r.value;
+            disciplineFindings += inserted;
+            chunksRun++;
+            lastReviewedSheets = Math.max(lastReviewedSheets, cs + chunkSheets.length);
+            completedSet.add(chunkIdx);
+            await recordPipelineError(admin, {
+              planReviewId,
+              firmId,
+              stage: "discipline_review",
+              errorClass: "chunk_summary",
+              errorMessage: `${discipline}: chunk ${chunkIdx + 1}/${totalChunks} → ${inserted} finding${inserted === 1 ? "" : "s"} (sheets ${cs + 1}-${cs + chunkSheets.length}).`,
+              metadata: { discipline, chunk: chunkIdx + 1, total_chunks: totalChunks, findings: inserted },
+            });
+          } else {
+            failedChunks++;
+            await recordPipelineError(admin, {
+              planReviewId,
+              firmId,
+              stage: "discipline_review",
+              errorClass: "chunk_failed",
+              errorMessage: `${discipline}: chunk ${chunkIdx + 1}/${totalChunks} failed — ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`,
+              metadata: { discipline, chunk: chunkIdx + 1, total_chunks: totalChunks },
+            });
+          }
         }
-        const chunkUrls = cappedUrls.slice(cs, cs + DISCIPLINE_BATCH);
-        const chunkSheets = disciplineSheets.slice(cs, cs + DISCIPLINE_BATCH);
-        const inserted = await runDisciplineChecks(admin, planReviewId, firmId, {
+
+        await advanceContiguous();
+        // Live UI beacon: how many chunks are done in this discipline so far.
+        await writeChunkProgress({
           discipline,
-          disciplineSheets: chunkSheets,
-          disciplineImageUrls: chunkUrls,
-          generalImageUrls,
-          dna,
-          jurisdiction,
-          useType,
+          chunk: completedSet.size + Math.max(0, resumeFrom + 1),
+          total: totalChunks,
+          findingsSoFar: disciplineFindings,
         });
-        disciplineFindings += inserted;
-        chunksRun++;
-        lastReviewedSheets = cs + chunkSheets.length;
-        await persistDisciplineCheckpoint(discipline, chunkIdx);
-        await recordPipelineError(admin, {
-          planReviewId,
-          firmId,
-          stage: "discipline_review",
-          errorClass: "chunk_summary",
-          errorMessage: `${discipline}: chunk ${chunksRun}/${totalChunks} → ${inserted} finding${inserted === 1 ? "" : "s"} (sheets ${cs + 1}-${lastReviewedSheets}).`,
-          metadata: { discipline, chunk: chunksRun, total_chunks: totalChunks, findings: inserted },
-        });
+
+        // A discipline fails the stage only if >50% of pending chunks errored.
+        if (totalPending > 0 && failedChunks > totalPending / 2) {
+          throw new Error(`${discipline}: ${failedChunks}/${totalPending} chunks failed — bailing out.`);
+        }
       }
       totalFindings += disciplineFindings;
       byDiscipline[discipline].reviewed = byDiscipline[discipline].reviewed + lastReviewedSheets;
