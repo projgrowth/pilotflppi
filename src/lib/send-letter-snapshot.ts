@@ -95,8 +95,14 @@ export async function sendCommentLetter(
     readiness_snapshot: readinessSnapshot,
     override_reasons: args.overrideReason ?? null,
   };
-  const { data: snap, error: snapErr } = await supabase
-    .from("comment_letter_snapshots")
+  const { data: snap, error: snapErr } = await (supabase
+    .from("comment_letter_snapshots") as unknown as {
+      insert: (rows: SnapshotInsert[]) => {
+        select: (cols: string) => {
+          single: () => Promise<{ data: { id: string; sent_at: string } | null; error: { message: string } | null }>;
+        };
+      };
+    })
     .insert([insertRow])
     .select("id, sent_at")
     .single();
