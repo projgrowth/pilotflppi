@@ -13,7 +13,7 @@
 import { useReviewHealth, pct } from "@/hooks/useReviewHealth";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { CheckCircle2, AlertCircle, Eye, FileSearch } from "lucide-react";
+import { CheckCircle2, AlertCircle, Eye, FileSearch, BookOpen, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Props {
