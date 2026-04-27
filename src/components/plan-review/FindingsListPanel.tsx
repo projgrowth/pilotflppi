@@ -177,10 +177,18 @@ export function FindingsListPanel(props: Props) {
       )}
       <Accordion
         type="multiple"
-        defaultValue={DISCIPLINE_ORDER.filter((d) => props.filteredGrouped[d])}
+        defaultValue={[
+          ...DISCIPLINE_ORDER.filter((d) => props.filteredGrouped[d]),
+          ...Object.keys(props.filteredGrouped).filter((d) => !DISCIPLINE_ORDER.includes(d as never)),
+        ]}
         className="space-y-1"
       >
-        {DISCIPLINE_ORDER.filter((d) => props.filteredGrouped[d]).map((discipline) => {
+        {[
+          ...DISCIPLINE_ORDER.filter((d) => props.filteredGrouped[d]),
+          // Append any disciplines the AI emitted that aren't in our canonical
+          // order so findings are NEVER silently dropped from the list.
+          ...Object.keys(props.filteredGrouped).filter((d) => !DISCIPLINE_ORDER.includes(d as never)),
+        ].map((discipline) => {
           const group = props.filteredGrouped[discipline];
           const Icon = getDisciplineIcon(discipline);
           const worst = getWorstSeverity(group);
