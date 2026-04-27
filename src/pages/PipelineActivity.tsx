@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import FppEmptyState from "@/components/shared/FppEmptyState";
 import { useAllActivePipelines, type ReviewActivity } from "@/hooks/useAllActivePipelines";
+import { useReviewHealth, pct, type ReviewHealth } from "@/hooks/useReviewHealth";
 import { cancelPipelineForReview, clearOrphanedPipelineRows, resumePipelineForReview } from "@/lib/pipeline-cancel";
 import { useFirmId } from "@/hooks/useFirmId";
 import { CORE_STAGES, DEEP_STAGES, shortStageLabel } from "@/lib/pipeline-stages";
@@ -70,14 +71,100 @@ function MiniStepper({ activity }: { activity: ReviewActivity }) {
   );
 }
 
+/**
+ * Per-run health summary. Three percentages, terse labels, color-coded so a
+ * reviewer scanning the page can immediately spot a run that produced 0%
+ * grounded findings (= ship-blocker before opening it).
+ */
+function HealthSummary({ health }: { health: ReviewHealth | undefined }) {
+  if (!health || health.total === 0) {
+    return (
+      <span className="text-[10px] text-muted-foreground/60">
+        No findings yet
+      </span>
+    );
+  }
+  const grounded = pct(health.grounded, health.total);
+  const lowConf = pct(health.lowConfidence, health.total);
+  const needsEyes = pct(health.needsEyes, health.total);
+
+  // Threshold colors are deliberately generous: a clean run is the bar, not
+  // an aspiration. Anything below 70% grounded is yellow; below 40% is red.
+  const groundedTone =
+    grounded === null
+      ? "text-muted-foreground"
+      : grounded >= 70
+        ? "text-primary"
+        : grounded >= 40
+          ? "text-warning"
+          : "text-destructive";
+  const lowConfTone =
+    lowConf === null
+      ? "text-muted-foreground"
+      : lowConf <= 10
+        ? "text-muted-foreground"
+        : lowConf <= 30
+          ? "text-warning"
+          : "text-destructive";
+  const needsEyesTone =
+    needsEyes === null
+      ? "text-muted-foreground"
+      : needsEyes <= 20
+        ? "text-muted-foreground"
+        : needsEyes <= 50
+          ? "text-warning"
+          : "text-destructive";
+
+  return (
+    <div className="flex items-center gap-3 text-[11px] tabular-nums">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className={cn("font-mono", groundedTone)}>
+            {grounded ?? 0}% grounded
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="text-xs max-w-xs">
+          {health.grounded} of {health.total} findings have a citation that
+          matches the canonical FBC text.
+        </TooltipContent>
+      </Tooltip>
+      <span className="text-border">·</span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className={cn("font-mono", lowConfTone)}>
+            {lowConf ?? 0}% low-conf
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="text-xs max-w-xs">
+          {health.lowConfidence} findings under 0.4 confidence — usually
+          worth reviewing or hiding before sending the comment letter.
+        </TooltipContent>
+      </Tooltip>
+      <span className="text-border">·</span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className={cn("font-mono", needsEyesTone)}>
+            {needsEyes ?? 0}% needs eyes
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="text-xs max-w-xs">
+          {health.needsEyes} findings the AI flagged for human verification.
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
 function ActivityRow({
   activity,
+  health,
   onCancel,
   onResume,
   cancelling,
   resuming,
 }: {
   activity: ReviewActivity;
+  health: ReviewHealth | undefined;
   onCancel: (id: string) => void;
   onResume: (id: string, stage: string) => void;
   cancelling: boolean;
@@ -161,7 +248,7 @@ function ActivityRow({
 
         <MiniStepper activity={activity} />
 
-        <div className="flex items-center justify-between text-xs">
+        <div className="flex items-center justify-between text-xs gap-3 flex-wrap">
           <div className="text-muted-foreground">
             {current ? (
               <>
@@ -178,12 +265,14 @@ function ActivityRow({
               "No active stage"
             )}
           </div>
-          {activity.isStuck && (
-            <span className="text-orange-600 dark:text-orange-400 text-[11px]">
-              ⚠ Stuck &gt;2 min — likely safe to cancel
-            </span>
-          )}
+          <HealthSummary health={health} />
         </div>
+
+        {activity.isStuck && (
+          <p className="text-orange-600 dark:text-orange-400 text-[11px]">
+            ⚠ Stuck &gt;2 min — likely safe to cancel
+          </p>
+        )}
 
         {current?.error_message && (
           <p className="text-[11px] text-destructive font-mono">
@@ -203,6 +292,11 @@ export default function PipelineActivity() {
   const [cancellingAll, setCancellingAll] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [resumingId, setResumingId] = useState<string | null>(null);
+
+  // Per-review health (% grounded / % low-conf / % needs-eyes). One bulk
+  // query for every review on the page; rows pluck their own values.
+  const reviewIds = useMemo(() => data.map((a) => a.planReviewId), [data]);
+  const healthMap = useReviewHealth(reviewIds);
 
   const handleResume = async (planReviewId: string, stage: string) => {
     setResumingId(planReviewId);
@@ -375,6 +469,7 @@ export default function PipelineActivity() {
                 <ActivityRow
                   key={a.planReviewId}
                   activity={a}
+                  health={healthMap[a.planReviewId]}
                   onCancel={handleCancel}
                   onResume={handleResume}
                   cancelling={cancellingId === a.planReviewId}
@@ -393,6 +488,7 @@ export default function PipelineActivity() {
                 <ActivityRow
                   key={a.planReviewId}
                   activity={a}
+                  health={healthMap[a.planReviewId]}
                   onCancel={handleCancel}
                   onResume={handleResume}
                   cancelling={cancellingId === a.planReviewId}
