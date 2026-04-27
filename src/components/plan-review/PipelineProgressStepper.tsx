@@ -65,6 +65,58 @@ const FRIENDLY_HINTS: Partial<Record<PipelineStage, string>> = {
 // the user a retry nudge.
 const STUCK_THRESHOLD_MS = 90_000;
 
+interface DisciplineReviewProgress {
+  discipline: string;
+  chunk: number;
+  total: number;
+  findings_so_far: number;
+  last_chunk_at: string;
+}
+
+/**
+ * Subscribe to ai_run_progress.discipline_review_progress so the stepper can
+ * render "Architectural — chunk 5 of 10 (8 findings so far)" live and avoid
+ * looking frozen during a slow Gemini chunk.
+ */
+function useDisciplineReviewProgress(planReviewId: string): DisciplineReviewProgress | null {
+  const [progress, setProgress] = useState<DisciplineReviewProgress | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const fetchOnce = async () => {
+      const { data } = await supabase
+        .from("plan_reviews")
+        .select("ai_run_progress")
+        .eq("id", planReviewId)
+        .maybeSingle();
+      if (cancelled) return;
+      const p = (data?.ai_run_progress as Record<string, unknown> | null)
+        ?.discipline_review_progress as DisciplineReviewProgress | undefined;
+      setProgress(p ?? null);
+    };
+    void fetchOnce();
+    const channel = supabase
+      .channel(`pr-progress-${planReviewId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "plan_reviews", filter: `id=eq.${planReviewId}` },
+        (payload) => {
+          const next = (payload.new as { ai_run_progress?: Record<string, unknown> | null } | null)
+            ?.ai_run_progress;
+          const p = (next as Record<string, unknown> | null)?.discipline_review_progress as
+            | DisciplineReviewProgress
+            | undefined;
+          setProgress(p ?? null);
+        },
+      )
+      .subscribe();
+    return () => {
+      cancelled = true;
+      void supabase.removeChannel(channel);
+    };
+  }, [planReviewId]);
+  return progress;
+}
+
 export function PipelineProgressStepper({
   planReviewId,
   className,
@@ -73,6 +125,7 @@ export function PipelineProgressStepper({
   mode = "core",
 }: PipelineProgressStepperProps) {
   const { data: rows = [] } = usePipelineStatus(planReviewId);
+  const disciplineProgress = useDisciplineReviewProgress(planReviewId);
   const [retryingStage, setRetryingStage] = useState<PipelineStage | null>(null);
   // Tick every 15s so the "stuck" detector re-evaluates without waiting for
   // a realtime row update (a stuck row by definition isn't getting updates).
