@@ -716,23 +716,81 @@ export async function stageDisciplineReview(
         }
 
         const wave = pendingChunks.slice(waveStart, waveStart + CHUNK_CONCURRENCY);
-        const settled = await Promise.allSettled(
-          wave.map(async (chunkIdx) => {
-            const cs = chunkIdx * DISCIPLINE_BATCH;
-            const chunkUrls = cappedUrls.slice(cs, cs + DISCIPLINE_BATCH);
-            const chunkSheets = disciplineSheets.slice(cs, cs + DISCIPLINE_BATCH);
-            const inserted = await runDisciplineChecks(admin, planReviewId, firmId, {
-              discipline,
-              disciplineSheets: chunkSheets,
-              disciplineImageUrls: chunkUrls,
-              generalImageUrls,
-              dna,
-              jurisdiction,
-              useType,
+        const waveStartedAt = Date.now();
+
+        // Hard stall watchdog: race the wave against STALL_TIMEOUT_MS. If no
+        // chunk in the wave settles in 2 minutes (and no beacon was written
+        // in that window), assume the worker is wedged. Throwing here lands
+        // in the dispatcher's NON_FATAL_RETRY path which reschedules the
+        // stage; per-discipline checkpoints make the retry resume from the
+        // last contiguous chunk rather than restart from zero.
+        let stallTimer: ReturnType<typeof setTimeout> | undefined;
+        const stallPromise = new Promise<never>((_, reject) => {
+          stallTimer = setTimeout(() => {
+            const sinceBeacon = Date.now() - lastBeaconAt;
+            if (sinceBeacon >= STALL_TIMEOUT_MS) {
+              reject(
+                new Error(
+                  `STALL_TIMEOUT: ${discipline} chunk ${(wave[0] ?? 0) + 1}/${totalChunks} produced no progress for ${Math.round(sinceBeacon / 1000)}s`,
+                ),
+              );
+            } else {
+              // A beacon landed mid-wave — not actually stalled. Resolve the
+              // race with a never-fulfilling promise; allSettled wins below.
+              // (This branch is rare since beacons are written *after* waves.)
+              reject(new Error("STALL_FALSE_POSITIVE"));
+            }
+          }, STALL_TIMEOUT_MS);
+        });
+
+        let settled: PromiseSettledResult<{ chunkIdx: number; cs: number; chunkSheets: typeof disciplineSheets; inserted: number }>[];
+        try {
+          settled = await Promise.race([
+            Promise.allSettled(
+              wave.map(async (chunkIdx) => {
+                const cs = chunkIdx * DISCIPLINE_BATCH;
+                const chunkUrls = cappedUrls.slice(cs, cs + DISCIPLINE_BATCH);
+                const chunkSheets = disciplineSheets.slice(cs, cs + DISCIPLINE_BATCH);
+                const inserted = await runDisciplineChecks(admin, planReviewId, firmId, {
+                  discipline,
+                  disciplineSheets: chunkSheets,
+                  disciplineImageUrls: chunkUrls,
+                  generalImageUrls,
+                  dna,
+                  jurisdiction,
+                  useType,
+                });
+                return { chunkIdx, cs, chunkSheets, inserted };
+              }),
+            ),
+            stallPromise,
+          ]);
+        } catch (stallErr) {
+          if (stallTimer) clearTimeout(stallTimer);
+          const message = stallErr instanceof Error ? stallErr.message : String(stallErr);
+          if (message === "STALL_FALSE_POSITIVE") {
+            // Treat as soft retry — re-throw STALL_TIMEOUT so dispatcher retries.
+            await recordPipelineError(admin, {
+              planReviewId,
+              firmId,
+              stage: "discipline_review",
+              errorClass: "stall_timeout",
+              errorMessage: `${discipline}: wave at chunk ${(wave[0] ?? 0) + 1}/${totalChunks} did not complete in ${Math.round((Date.now() - waveStartedAt) / 1000)}s — auto-retrying with resume.`,
+              metadata: { discipline, wave_start_chunk: (wave[0] ?? 0) + 1, total_chunks: totalChunks, elapsed_ms: Date.now() - waveStartedAt },
             });
-            return { chunkIdx, cs, chunkSheets, inserted };
-          }),
-        );
+            throw new Error(`STALL_TIMEOUT: ${discipline} wave at chunk ${(wave[0] ?? 0) + 1}/${totalChunks}`);
+          }
+          await recordPipelineError(admin, {
+            planReviewId,
+            firmId,
+            stage: "discipline_review",
+            errorClass: "stall_timeout",
+            errorMessage: message,
+            metadata: { discipline, wave_start_chunk: (wave[0] ?? 0) + 1, total_chunks: totalChunks, elapsed_ms: Date.now() - waveStartedAt },
+          });
+          throw stallErr;
+        }
+        if (stallTimer) clearTimeout(stallTimer);
 
         for (let i = 0; i < settled.length; i++) {
           const r = settled[i];
