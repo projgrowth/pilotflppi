@@ -24,8 +24,6 @@ import {
   type PipelineMode,
   type ChatMessage,
   STAGES,
-  CORE_STAGES,
-  DEEP_STAGES,
   stagesForMode,
   DISCIPLINES,
   normalizeAIDiscipline,
@@ -35,14 +33,9 @@ import {
 } from "./_shared/types.ts";
 import { setStage, recordPipelineError } from "./_shared/pipeline-status.ts";
 import { withRetry } from "./_shared/retry.ts";
-import {
-  setCostCtx,
-  withCostCtx,
-} from "./_shared/cost.ts";
+import { setCostCtx, withCostCtx } from "./_shared/cost.ts";
 import { callAI } from "./_shared/ai.ts";
 import {
-  PAGE_ASSET_INDEX_RE,
-  readSignedManifest,
   signedSheetUrls,
   invalidatePageManifestCache,
 } from "./_shared/storage.ts";
