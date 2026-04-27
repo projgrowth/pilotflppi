@@ -55,9 +55,10 @@ export function ReviewProvenanceStrip({ planReviewId, progress }: Props) {
         body: { plan_review_id: planReviewId },
       });
       if (error) throw error;
-      const g = (data as { ground?: { verified?: number; mismatch?: number; not_found?: number; hallucinated?: number } })?.ground;
+      const g = (data as { ground?: { verified?: number; verified_stub?: number; mismatch?: number; not_found?: number; hallucinated?: number; no_citation_required?: number } })?.ground;
+      const verifiedTotal = (g?.verified ?? 0) + (g?.verified_stub ?? 0);
       toast.success(
-        `Re-grounded: ${g?.verified ?? 0} verified, ${g?.mismatch ?? 0} mismatch, ${g?.hallucinated ?? 0} hallucinated`,
+        `Re-grounded: ${verifiedTotal} verified${g?.verified_stub ? ` (${g.verified_stub} via stub)` : ""}, ${g?.mismatch ?? 0} mismatch, ${g?.hallucinated ?? 0} hallucinated, ${g?.no_citation_required ?? 0} procedural`,
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Re-ground failed");
