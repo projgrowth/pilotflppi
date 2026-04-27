@@ -73,19 +73,20 @@ export async function sendCommentLetter(
     })),
   };
 
+  const insertRow = {
+    plan_review_id: args.planReviewId,
+    round: args.round,
+    sent_by: userId,
+    recipient: args.recipient ?? "",
+    letter_html: args.letterHtml,
+    findings_json: frozenFindings as unknown as Record<string, unknown>[],
+    firm_info_json: (args.firmInfo ?? {}) as Record<string, unknown>,
+    readiness_snapshot: readinessSnapshot as unknown as Record<string, unknown>,
+    override_reasons: args.overrideReason ?? null,
+  };
   const { data: snap, error: snapErr } = await supabase
     .from("comment_letter_snapshots")
-    .insert({
-      plan_review_id: args.planReviewId,
-      round: args.round,
-      sent_by: userId,
-      recipient: args.recipient ?? "",
-      letter_html: args.letterHtml,
-      findings_json: frozenFindings,
-      firm_info_json: args.firmInfo ?? {},
-      readiness_snapshot: readinessSnapshot,
-      override_reasons: args.overrideReason ?? null,
-    })
+    .insert(insertRow)
     .select("id, sent_at")
     .single();
 
