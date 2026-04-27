@@ -53,6 +53,8 @@ export function ReviewProvenanceStrip({ planReviewId, progress }: Props) {
   const total = health?.total ?? 0;
   const grounded = health?.grounded ?? 0;
   const needsEyes = health?.needsEyes ?? 0;
+  const libraryGap = health?.citationsLibraryGap ?? 0;
+  const merged = health?.mergedDuplicates ?? 0;
   const groundedPct = pct(grounded, total);
   const dnaMissing = Array.isArray(dna?.missing_fields) ? dna.missing_fields.length : 0;
   const dnaPresent = Math.max(0, DNA_FIELD_TOTAL - dnaMissing);
@@ -79,6 +81,15 @@ export function ReviewProvenanceStrip({ planReviewId, progress }: Props) {
               <span className="opacity-60">({groundedPct}%)</span>
             )}
           </span>
+          {libraryGap > 0 && (
+            <span
+              className="flex items-center gap-1 text-muted-foreground"
+              title="Citation points to a real FBC chapter we don't carry verbatim text for yet — finding still valid, citation just not double-checked."
+            >
+              <BookOpen className="h-3 w-3" />
+              <strong>{libraryGap}</strong> code lookup unavailable
+            </span>
+          )}
           {needsEyes > 0 && (
             <span
               className="flex items-center gap-1 text-warning"
@@ -86,6 +97,15 @@ export function ReviewProvenanceStrip({ planReviewId, progress }: Props) {
             >
               <Eye className="h-3 w-3" />
               <strong>{needsEyes}</strong> need review
+            </span>
+          )}
+          {merged > 0 && (
+            <span
+              className="flex items-center gap-1 text-muted-foreground"
+              title="Duplicate findings auto-merged so the reviewer reads one comment instead of N."
+            >
+              <Layers className="h-3 w-3" />
+              <strong>{merged}</strong> merged
             </span>
           )}
         </>
