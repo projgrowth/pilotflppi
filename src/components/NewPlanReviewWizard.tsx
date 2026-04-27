@@ -974,12 +974,14 @@ export function NewPlanReviewWizard({ open, onOpenChange, onComplete, preselecte
        </div>
      )}
 
-     <div className="rounded-lg border bg-card p-4">
-       <PipelineProgressStepper
-         planReviewId={createdReviewId}
-         onComplete={handlePipelineComplete}
-       />
-     </div>
+      <PagePrepProgress planReviewId={createdReviewId} />
+
+      <div className="rounded-lg border bg-card p-4">
+        <PipelineProgressStepper
+          planReviewId={createdReviewId}
+          onComplete={handlePipelineComplete}
+        />
+      </div>
 
      <div className="flex gap-3">
        <Button
