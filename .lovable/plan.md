@@ -1,77 +1,62 @@
-# Audit: "Prepare pages — pages haven't been prepared" in the wizard
+# Suncoast Porsche audit — root causes and fix plan
 
-## What's happening on the failing review
+I traced the latest 3 Suncoast Porsche reviews. The backend is healthy: 78/78 pages rasterized, 12–44 deficiencies written per run, sheet maps snapshotted, no pipeline errors. The bug is entirely in the **client adapter + viewer wiring**.
 
-Review `b443092b…f3bc8daff90b` (SUNCOAST PORSCHE, 78-page Arch set):
+## What's actually broken
 
-- `plan_review_files`: 1 PDF registered ✓
-- `plan_review_page_assets`: **0 rows** ✗
-- `pipeline_error_log`: 1 × `needs_browser_rasterization` from `prepare_pages` (retried 3×, then dead)
-- Wizard UI shows "Finishing on server 0 / 78" — but the server-side rasterizer was deliberately removed (see `stages/prepare-pages.ts` — verify-only, throws `NEEDS_BROWSER_RASTERIZATION` whenever the manifest is empty)
+### 1. Findings vanish from the list (the "doesn't show what the actual findings are")
 
-So the pipeline is working as designed. The bug is upstream: **the wizard's background rasterizer produced 0 page assets, then started the pipeline anyway, then told the user to "Retry" — but the Retry button only re-invokes the pipeline (which will keep failing forever because no browser is going to re-rasterize)**.
+- DB `deficiencies_v2.discipline` stores values like **`Architectural`, `General`, `Energy`** (71 of 75 findings on this project are `Architectural`).
+- `src/lib/deficiency-adapter.ts` lowercases + slugifies → `"architectural"`, `"general"`.
+- `src/lib/county-utils.ts` `DISCIPLINE_ORDER` only contains: `structural, life_safety, fire, mechanical, electrical, plumbing, energy, ada, site` — **no `architectural` and no `general`**.
+- `FindingsListPanel` renders only `DISCIPLINE_ORDER.filter(d => filteredGrouped[d])`, so 71 of 75 Architectural findings are silently filtered out of the accordion. The summary header still counts the raw array (that's why the user sees "14 findings" but a near-empty list).
 
-## Three real defects
+### 2. PDF viewer shows no pins (the "buggy PDF viewer")
 
-### 1. Wizard duplicates `uploadPlanReviewFiles` instead of using it
-`src/components/NewPlanReviewWizard.tsx` (handleLaunch, lines 392–517) hand-rolls the upload + rasterize + pipeline-start sequence. Meanwhile `src/lib/plan-review-upload.ts` already does this correctly with the **MIN_RASTERIZE_RATIO = 0.8 guard** — i.e. it refuses to start the pipeline when fewer than 80% of pages were prepared and returns `partialRasterize: true` so the UI can surface a recovery CTA.
+- `PlanMarkupViewer` keys every annotation off `finding.markup.page_index`.
+- The v2 adapter never sets `markup`. There is no `markup` column on `deficiencies_v2`.
+- `checklist_state.last_sheet_map` (78 entries per review) maps `sheet_ref → page_index`, but nothing on the client joins findings to it.
+- Result: pages render fine (eager + idle background), but every finding falls through `if (!finding.markup) return null;` so zero pins are drawn. From the user's perspective this looks like the viewer is broken.
 
-The wizard's hand-rolled version has none of that:
-- No success-ratio check — fires `invokePipeline` even when 0/78 pages rasterized
-- No `expected_pages` stamp on `ai_run_progress` (only `total_pages`), so `reprepareInBrowser`'s gap-repair planner can't reconcile anything
-- Silently swallows rasterization errors with `console.warn` — the user never learns *why* 0/78 happened
-- No retry of failed page batches
+### 3. Noisy console warning
 
-### 2. The "Retry analysis" button is the wrong action
-When `prepare_pages` fails with `needs_browser_rasterization`, re-invoking the pipeline does nothing useful — the manifest is still empty, so `prepare_pages` will throw the same error on the next attempt. The user needs to **re-run rasterization in this browser tab**, which is exactly what `reprepareInBrowser()` does (already wired into `ReviewDashboard` and `PlanReviewDetail` via `ReviewHealthStrip`).
+- `Badge` is a plain function component. Radix Accordion forwards a ref into it (line 193 of `FindingsListPanel`), producing the `Function components cannot be given refs` warning seen in the console. Cosmetic, but worth a 1‑line fix while we're in there.
 
-### 3. The wizard's progress strip lies
-`PagePrepProgress` reads `total_pages` and `pre_rasterized_pages`. The wizard writes those, but `uploadPlanReviewFiles` writes `expected_pages` instead. So whichever entry point you use, the other one's UI is wrong. Pick one schema and stick with it.
+## Fix plan
 
----
+### A. Expand the discipline taxonomy
+`src/lib/county-utils.ts`
+- Add `architectural`, `general`, `mep` (a common pipeline output), and `civil` to the `Discipline` union, `disciplineConfig`, and `DISCIPLINE_ORDER`.
+- Order: `general → architectural → structural → life_safety → fire → mechanical → electrical → plumbing → mep → energy → ada → site → civil`.
 
-# Plan — three changes, ~120 lines net
+### B. Make the list resilient to unknown disciplines
+`src/components/plan-review/FindingsListPanel.tsx`
+- Replace `DISCIPLINE_ORDER.filter((d) => props.filteredGrouped[d])` with: keys from `DISCIPLINE_ORDER` first (in canonical order), then **append any extra keys present in `filteredGrouped`** at the end. Guarantees no group is ever silently dropped, even if the AI emits a new label.
 
-### A. Replace the wizard's hand-rolled upload with `uploadPlanReviewFiles`
-`NewPlanReviewWizard.tsx > handleLaunch`:
-- After creating the `projects` and `plan_reviews` rows, call `uploadPlanReviewFiles({ reviewId, round: 1, existingFileUrls: [], existingPageCount: null, files: uploadedFiles.map(u => u.file), userId, onProgress })`.
-- Drive `PagePrepProgress` from the `onProgress` callback (set local state `{ prepared, expected, phase }`) instead of the DB poll, so the progress strip reflects what's actually happening in *this* tab.
-- Read `result.partialRasterize` and `result.pipelineStarted` to decide what to render in Step 3.
+### C. Compute deterministic pin coordinates from the sheet map
+`src/lib/deficiency-adapter.ts`
+- New signature: `adaptV2ToFindings(rows, sheetMap)` where `sheetMap = Array<{ sheet_ref, page_index }>` from `plan_reviews.checklist_state.last_sheet_map`.
+- For each finding, look up the first `sheet_refs[0]` in the map → `page_index`. Then derive deterministic `x/y/width/height` from a hash of `finding.id + sheet_ref` (per the existing `mem://logic/pin-placement` rule). Stamp `markup = { page_index, x, y, width: 0.06, height: 0.04, pin_confidence: 'low' }` so the viewer renders a pin even before grounding upgrades it.
+- If `sheetMap` is missing or the sheet isn't found, leave `markup` undefined (existing fallthrough). Do not crash.
 
-Delete the inline upload / rasterize / `invokePipeline` block (lines ~392–517) — it's all in `uploadPlanReviewFiles` now.
+### D. Pass the sheet map through
+`src/hooks/plan-review/usePlanReviewData.ts` / `src/pages/PlanReviewDetail.tsx`
+- Read `plan_review.checklist_state.last_sheet_map`, pass to `adaptV2ToFindings`. No DB changes — the column already exists.
 
-### B. Replace "Retry analysis" with a context-aware recovery CTA
-Step 3 panel logic:
+### E. Quiet the ref warning
+`src/components/ui/badge.tsx`
+- Convert `Badge` to `React.forwardRef<HTMLDivElement, BadgeProps>`. Two-line change.
 
-| State | CTA |
-|---|---|
-| `result.partialRasterize === true` OR pipeline error contains `needs_browser_rasterization` | **"Re-prepare in this browser"** → calls `reprepareInBrowser(createdReviewId)` |
-| Other pipeline-start error | Keep **"Retry analysis"** → calls `invokePipeline` |
-| Pipeline running normally | No CTA, just the stepper |
+## Out of scope (already-known, separate issues)
+- The earlier `b443092b…` zero-asset failure is the previously-tracked "needs browser rasterization" CTA work — not touched here.
+- The two soft-timeout `discipline_review` resumes seen in edge logs are the chunked-pause mechanism working as designed.
 
-Show a clear inline explanation when partial: *"Your browser only prepared X of Y pages. Click below to finish — keep this tab open."*
+## Files touched
+- `src/lib/county-utils.ts`
+- `src/components/plan-review/FindingsListPanel.tsx`
+- `src/lib/deficiency-adapter.ts`
+- `src/hooks/plan-review/usePlanReviewData.ts`
+- `src/pages/PlanReviewDetail.tsx`
+- `src/components/ui/badge.tsx`
 
-### C. Unify the progress schema
-In `uploadPlanReviewFiles` (and `reprepareInBrowser`), also write `total_pages` alongside `expected_pages` and `pre_rasterized_pages`. One-line change in two places. Existing `PagePrepProgress` keeps working everywhere with no UI churn.
-
-### D. Self-heal the existing stuck review (one-shot)
-For SUNCOAST PORSCHE specifically (`b443092b…`): once Change A is shipped, the user can click the new **Re-prepare in this browser** CTA from the dashboard's `ReviewHealthStrip` (already wired) and the 78 pages will render locally, then the pipeline restarts automatically. No migration needed.
-
----
-
-# Files touched
-
-- `src/components/NewPlanReviewWizard.tsx` — replace `handleLaunch` upload block; replace Retry CTA with recovery branch; pass `onProgress` to local `PagePrepProgress` state.
-- `src/lib/plan-review-upload.ts` — also write `total_pages` to `ai_run_progress` so the wizard's polling progress bar matches.
-- `src/lib/reprepare-in-browser.ts` — same one-line addition for consistency.
-- `src/components/plan-review/PagePrepProgress.tsx` — accept optional `localProgress` prop so the wizard can drive it directly (avoids a 1.2s polling delay during step 3).
-
-# Out of scope (intentional)
-
-- No edge-function changes — `stages/prepare-pages.ts` is correctly a verify-only gate; bringing back server-side MuPDF rasterization is what we just spent rounds 1–6 removing.
-- No DB schema changes.
-- No UI redesign of the wizard or recovery banner — copy/CTA only.
-
-# Risk
-
-Low. `uploadPlanReviewFiles` is the same code path used by the dashboard's "+ Add files" flow today, so this is consolidating two divergent implementations onto the well-tested one. The user-visible behavior change is: when rasterization is incomplete, they see "Re-prepare in this browser" instead of a Retry button that can't actually fix anything.
+After these changes, opening a Suncoast Porsche review should show all 71 Architectural findings grouped under an Architectural accordion, with a deterministic pin on the correct page for every finding that has a `sheet_refs[0]` resolvable in the sheet map.
