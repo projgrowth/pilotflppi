@@ -262,7 +262,9 @@ ${sheetIndex || "(none)"}
     `## Mandatory ${ctx.discipline} checklist
 ${checklistText}` +
     memoryBlock +
-    `\n\nAnalyze the attached pages (general-notes pages first, then ${ctx.discipline} sheets). ` +
+    `\n\n## Citation discipline (HARD RULE)
+Every finding MUST cite an FBC section you are confident exists in the Florida Building Code (e.g. "1010.1.1", "Table 1004.5"). If you are not sure the section exists or applies, do NOT guess — instead set requires_human_review=true with human_review_reason="Citation needs human verification". Hallucinated citations get auto-suppressed downstream and waste reviewer time.\n\n` +
+    `Analyze the attached pages (general-notes pages first, then ${ctx.discipline} sheets). ` +
     `Return findings via submit_discipline_findings.`;
 
   void fbcEdition;
