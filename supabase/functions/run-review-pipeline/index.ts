@@ -824,14 +824,10 @@ async function stageDnaReevaluate(
 }
 
 // Round-2 carryover helper: prior findings stored in plan_reviews.previous_findings
-// use Finding.severity (critical|major|minor); deficiencies_v2.priority uses
-// (high|medium|low). Map without losing fidelity.
-function mapSeverityToPriority(severity: string): string {
-  const s = severity.trim().toLowerCase();
-  if (s === "critical" || s === "high") return "high";
-  if (s === "minor" || s === "low") return "low";
-  return "medium";
-}
+// mapSeverityToPriority moved to ./_shared/types.ts (imported above).
+// `Finding.severity` (critical|major|minor) → `deficiencies_v2.priority`
+// (high|medium|low) without losing fidelity.
+
 
 async function stageDisciplineReview(
   admin: ReturnType<typeof createClient>,
@@ -3388,14 +3384,14 @@ Deno.serve(async (req) => {
 
     // Seed cost-telemetry context for this request. Individual stages can
     // refine via withCostCtx() to add discipline / chunk attribution.
-    CURRENT_COST_CTX = {
+    setCostCtx({
       admin,
       planReviewId: plan_review_id,
       firmId,
       stage: requestedStage ?? null,
       discipline: null,
       chunk: null,
-    };
+    });
 
 
     // Resolve which single stage this invocation runs.
