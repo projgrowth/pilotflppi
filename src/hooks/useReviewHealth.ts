@@ -86,7 +86,7 @@ export function useReviewHealth(planReviewIds: string[]): ReviewHealthMap {
         if (r.status === "resolved" || r.status === "waived") continue;
 
         bucket.total++;
-        if (r.citation_status === "verified") bucket.grounded++;
+        if (r.citation_status === "verified" || r.citation_status === "verified_stub" || r.citation_status === "no_citation_required") bucket.grounded++;
         if (r.citation_status === "not_found") bucket.citationsLibraryGap++;
         if (r.citation_status === "mismatch") bucket.citationsMismatch++;
         if (

@@ -96,9 +96,18 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
 
   // 2. Citations grounded — block on (a) hallucinated citations OR
   //    (b) unverified+low-confidence combos.
+  // verified, verified_stub, and no_citation_required are NOT blockers.
   const hallucinated = live.filter((f) => f.citation_status === "hallucinated");
+  const NON_BLOCKING = new Set([
+    "verified",
+    "verified_stub",
+    "no_citation_required",
+    "mismatch", // mismatch is informational — flagged in useLetterQualityCheck per-finding
+    "not_found",
+  ]);
   const weakCitations = live.filter(
     (f) =>
+      !NON_BLOCKING.has(f.citation_status ?? "unverified") &&
       (f.citation_status ?? "unverified") === "unverified" &&
       typeof f.confidence_score === "number" &&
       f.confidence_score < 0.7,

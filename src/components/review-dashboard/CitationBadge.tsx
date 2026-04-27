@@ -1,4 +1,4 @@
-import { CheckCircle2, AlertTriangle, HelpCircle, XCircle } from "lucide-react";
+import { CheckCircle2, AlertTriangle, HelpCircle, XCircle, Info } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -9,9 +9,11 @@ import { cn } from "@/lib/utils";
 
 type CitationStatus =
   | "verified"
+  | "verified_stub"
   | "mismatch"
   | "not_found"
   | "hallucinated"
+  | "no_citation_required"
   | "unverified"
   | string;
 
@@ -91,6 +93,22 @@ const STATUS_CONFIG: Record<
     icon: CheckCircle2,
     classes:
       "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  },
+  verified_stub: {
+    label: "Verified*",
+    description:
+      "Section exists in the FBC index but the canonical text is a placeholder. The citation is accepted; the canonical content seed is a separate workstream.",
+    icon: CheckCircle2,
+    classes:
+      "border-emerald-500/30 bg-emerald-500/5 text-emerald-700/80 dark:text-emerald-400/80",
+  },
+  no_citation_required: {
+    label: "Procedural",
+    description:
+      "This finding is about missing metadata, missing submittals, or AHJ verification — no FBC section is required to defend it.",
+    icon: Info,
+    classes:
+      "border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-400",
   },
   mismatch: {
     label: "Mismatch",

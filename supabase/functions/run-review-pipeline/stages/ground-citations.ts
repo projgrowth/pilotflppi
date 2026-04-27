@@ -1,8 +1,19 @@
 // Stage: ground_citations.
 // Compares each finding's cited FBC section against canonical fbc_code_sections
-// rows. Verdicts: verified | mismatch | not_found | hallucinated. Then attaches
-// a one-click visual receipt (signed sheet image URL) to each finding so
-// reviewers don't have to flip back to the PDF to confirm context.
+// rows. Verdicts: verified | verified_stub | mismatch | not_found | hallucinated
+// | no_citation_required. Then attaches a one-click visual receipt
+// (signed sheet image URL) to each finding so reviewers don't have to flip
+// back to the PDF to confirm context.
+//
+// IMPORTANT: many fbc_code_sections rows are *stubs* (placeholder text like
+// "See FBC for full requirement text"). Running token-overlap against a stub
+// always scores ~0 and would falsely flag every finding as "mismatch". When
+// the canonical row is a stub we accept the section as `verified_stub` based
+// on existence alone — the canonical content seed is a separate workstream.
+//
+// Findings with an empty code_reference that read as procedural (missing
+// metadata, "verify with AHJ", etc.) are classified `no_citation_required`
+// instead of `hallucinated` — they don't need a code section to be valid.
 
 import { createClient } from "../_shared/supabase.ts";
 import { signedSheetUrls } from "../_shared/storage.ts";
@@ -61,7 +72,15 @@ export async function stageGroundCitations(
 
   const defs = (defsRaw ?? []) as GroundingRow[];
   if (defs.length === 0) {
-    return { examined: 0, verified: 0, mismatch: 0, not_found: 0, hallucinated: 0 };
+    return {
+      examined: 0,
+      verified: 0,
+      verified_stub: 0,
+      mismatch: 0,
+      not_found: 0,
+      hallucinated: 0,
+      no_citation_required: 0,
+    };
   }
 
   type Key = { code: string; section: string; edition: string | null };
@@ -71,6 +90,41 @@ export async function stageGroundCitations(
     const code = (r.code_reference?.code || "FBC").toUpperCase();
     const edition = r.code_reference?.edition?.trim() || null;
     return { code, section, edition };
+  };
+
+  // Heuristic: an empty code_reference is "procedural" (not hallucinated) when
+  // the finding text is about missing metadata, missing submittals, or AHJ
+  // verification — none of which need a code section to be defensible.
+  const PROCEDURAL_PATTERNS = [
+    /\bmissing\b/i,
+    /\bnot provided\b/i,
+    /\bnot specified\b/i,
+    /\bnot indicated\b/i,
+    /\bnot shown\b/i,
+    /\bverify with\b/i,
+    /\bcoordinate with\b/i,
+    /\bAHJ\b/,
+    /\bauthority having jurisdiction\b/i,
+    /\bproject DNA\b/i,
+    /\bsubmittal\b/i,
+  ];
+  const looksProcedural = (def: GroundingRow): boolean => {
+    const text = `${def.finding}\n${def.required_action}`;
+    return PROCEDURAL_PATTERNS.some((re) => re.test(text));
+  };
+
+  // A canonical row counts as a "stub" when its requirement_text is the
+  // placeholder we seeded, or is too short to compare meaningfully.
+  const STUB_MARKERS = [
+    "see fbc for full requirement text",
+    "see fbc for the full requirement",
+    "placeholder",
+  ];
+  const isStubCanonical = (text: string | null | undefined): boolean => {
+    if (!text) return true;
+    const t = text.trim().toLowerCase();
+    if (t.length < 60) return true;
+    return STUB_MARKERS.some((m) => t.includes(m));
   };
 
   function parentSections(s: string): string[] {
@@ -122,18 +176,34 @@ export async function stageGroundCitations(
     return null;
   }
 
-  const counts = { verified: 0, mismatch: 0, not_found: 0, hallucinated: 0 };
+  const counts = {
+    verified: 0,
+    verified_stub: 0,
+    mismatch: 0,
+    not_found: 0,
+    hallucinated: 0,
+    no_citation_required: 0,
+  };
   const now = new Date().toISOString();
 
   for (const def of defs) {
     const key = keyOf(def);
-    let status: "verified" | "mismatch" | "not_found" | "hallucinated";
+    let status:
+      | "verified"
+      | "verified_stub"
+      | "mismatch"
+      | "not_found"
+      | "hallucinated"
+      | "no_citation_required";
     let score: number | null = null;
     let canonText: string | null = null;
     let matchedSection: string | null = null;
+    let stubMatched = false;
 
     if (!key) {
-      status = "hallucinated";
+      // Empty / unparseable code_reference. Distinguish AI hallucination from
+      // a legitimately citation-less finding (missing metadata, AHJ verify).
+      status = looksProcedural(def) ? "no_citation_required" : "hallucinated";
     } else {
       const found = lookup(key);
       if (!found) {
@@ -146,23 +216,49 @@ export async function stageGroundCitations(
           1500,
         );
         const aiBlob = `${def.finding} ${def.required_action}`;
-        score = citationOverlapScore(aiBlob, hit.requirement_text);
         const aiBlobLc = aiBlob.toLowerCase();
+        const titleLc = (hit.title ?? "").toLowerCase();
         const sectionLc = ms.toLowerCase();
-        const mentionsSection = aiBlobLc.includes(sectionLc) ||
+        const mentionsSection =
+          aiBlobLc.includes(sectionLc) ||
           aiBlobLc.includes(key.section.toLowerCase());
         const usedParent = ms !== key.section;
-        if (usedParent && mentionsSection) {
-          status = "verified";
+
+        if (isStubCanonical(hit.requirement_text)) {
+          // Canonical row is a placeholder — section existence is the only
+          // signal we have. Treat as verified_stub so reviewers know not to
+          // expect text-overlap evidence.
+          status = "verified_stub";
+          stubMatched = true;
         } else {
-          status = score >= 0.30 && mentionsSection ? "verified" : "mismatch";
+          score = citationOverlapScore(aiBlob, hit.requirement_text);
+          // Title-token overlap rescues findings that quote section titles
+          // verbatim ("Separated Occupancies") without lots of canonical body.
+          const titleOverlap =
+            titleLc.length > 3 && aiBlobLc.includes(titleLc) ? 0.25 : 0;
+          const effective = Math.max(score, titleOverlap);
+          if (usedParent && mentionsSection) {
+            status = "verified";
+          } else {
+            // Threshold lowered 0.30 → 0.20; mention of section number OR
+            // canonical title is required.
+            status =
+              effective >= 0.20 && (mentionsSection || titleOverlap > 0)
+                ? "verified"
+                : "mismatch";
+          }
         }
       }
     }
     counts[status]++;
 
+    // verified_stub and no_citation_required are NOT human-review triggers —
+    // they're informational. Only true mismatches / hallucinations / not_found
+    // require a human to look.
     const needsHumanReview =
-      status === "mismatch" || status === "hallucinated" || status === "not_found";
+      status === "mismatch" ||
+      status === "hallucinated" ||
+      status === "not_found";
     const update: Record<string, unknown> = {
       citation_status: status,
       citation_match_score: score,
@@ -171,6 +267,12 @@ export async function stageGroundCitations(
     };
     if (matchedSection && matchedSection !== key?.section) {
       update.evidence_crop_meta = { matched_parent_section: matchedSection };
+    }
+    if (stubMatched) {
+      update.evidence_crop_meta = {
+        ...((update.evidence_crop_meta as Record<string, unknown>) ?? {}),
+        canonical_is_stub: true,
+      };
     }
     if (needsHumanReview) {
       update.requires_human_review = true;
@@ -193,9 +295,11 @@ export async function stageGroundCitations(
   return {
     examined: defs.length,
     verified: counts.verified,
+    verified_stub: counts.verified_stub,
     mismatch: counts.mismatch,
     not_found: counts.not_found,
     hallucinated: counts.hallucinated,
+    no_citation_required: counts.no_citation_required,
     crops_attached: cropResult.attached,
     crops_skipped: cropResult.skipped,
     crops_unresolved_sheets: cropResult.unresolved_sheets,
