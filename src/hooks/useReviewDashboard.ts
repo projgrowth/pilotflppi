@@ -58,6 +58,7 @@ export type PipelineStage =
   | "upload"
   | "prepare_pages"
   | "sheet_map"
+  | "submittal_check"
   | "dna_extract"
   | "discipline_review"
   | "cross_check"
@@ -72,6 +73,7 @@ export const PIPELINE_STAGES: { key: PipelineStage; label: string }[] = [
   { key: "upload", label: "Upload" },
   { key: "prepare_pages", label: "Prepare Pages" },
   { key: "sheet_map", label: "Sheet Map" },
+  { key: "submittal_check", label: "Submittal Check" },
   { key: "dna_extract", label: "DNA Extract" },
   { key: "discipline_review", label: "Discipline Review" },
   { key: "cross_check", label: "Cross-Check" },
@@ -90,9 +92,11 @@ export const CORE_STAGE_KEYS: PipelineStage[] = [
   "upload",
   "prepare_pages",
   "sheet_map",
+  "submittal_check",
   "dna_extract",
   "discipline_review",
   "dedupe",
+  "ground_citations",
   "complete",
 ];
 
@@ -100,7 +104,6 @@ export const CORE_STAGE_KEYS: PipelineStage[] = [
 // from the dashboard. Reuses core artifacts.
 export const DEEP_STAGE_KEYS: PipelineStage[] = [
   "verify",
-  "ground_citations",
   "cross_check",
   "deferred_scope",
   "prioritize",
