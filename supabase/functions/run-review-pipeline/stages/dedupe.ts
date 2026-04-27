@@ -158,13 +158,27 @@ export async function stageDedupe(
         if (visited.has(j)) continue;
         const a = bucket[i];
         const b = bucket[j];
+        // Require an actual shared sheet — empty-sheet wildcard match used
+        // to silently merge two distinct findings on different sheets.
         const sheetOverlap =
-          a.sheets.size === 0 ||
-          b.sheets.size === 0 ||
+          a.sheets.size > 0 &&
+          b.sheets.size > 0 &&
           [...a.sheets].some((s) => b.sheets.has(s));
         if (!sheetOverlap) continue;
-        const threshold = a.row.discipline === b.row.discipline ? 0.45 : 0.35;
+        // Tighter token-set Jaccard. 0.55/0.45 was over-merging legitimate
+        // distinct findings on the same code section / sheet (e.g. two
+        // separate handrails both citing 1014.8).
+        const threshold = a.row.discipline === b.row.discipline ? 0.7 : 0.55;
         if (jaccard(a.tokens, b.tokens) < threshold) continue;
+        // Belt-and-suspenders: also require either a token-overlap on the
+        // evidence quotes OR an even higher finding-text similarity.
+        const aEv = (a.row.evidence ?? []).join(" ");
+        const bEv = (b.row.evidence ?? []).join(" ");
+        const evidenceJaccard = aEv && bEv
+          ? jaccard(tokenSet(aEv), tokenSet(bEv))
+          : 0;
+        const findingJaccard = jaccard(a.tokens, b.tokens);
+        if (evidenceJaccard < 0.4 && findingJaccard < 0.85) continue;
         group.push(j);
         visited.add(j);
       }
