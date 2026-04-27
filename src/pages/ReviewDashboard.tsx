@@ -32,6 +32,8 @@ import DashboardAlertStack, {
 import NextStepBar from "@/components/review-dashboard/NextStepBar";
 import FilterChips from "@/components/review-dashboard/FilterChips";
 import AuditCoveragePanel from "@/components/review-dashboard/AuditCoveragePanel";
+import LetterReadinessGate from "@/components/plan-review/LetterReadinessGate";
+import LetterSnapshotViewer from "@/components/plan-review/LetterSnapshotViewer";
 import { CRITICAL_DNA_FIELDS } from "@/lib/dna-fields";
 import { useLetterQualityCheck } from "@/hooks/useLetterQualityCheck";
 import {
