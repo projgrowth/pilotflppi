@@ -1,76 +1,178 @@
 
 
-# Round 7 — Highest-leverage improvements (UX + reliability)
+# Two plans, one approval
 
-After Rounds 1–6 the backend is stable: 0 stuck pendings, no active failures from the new code path, recovery cron working. The remaining wins are **upstream of the pipeline** (so the bad runs never start) and **on the user side** (so a single misclick doesn't burn an analysis).
+## A. Strip to "Plan Review only" (now)
+## B. Tighten review legitimacy + pipeline (after the strip)
 
-I'm proposing 5 fixes, ranked by impact. Pick any subset.
+You can approve both, A only, or B only.
 
-## 1. Block uploads that are guaranteed to fail (highest leverage)
+---
 
-**Problem:** Every "stuck at upload/prepare_pages" failure in the database started life as an upload that never completed in the browser. The user closes the tab while pdf.js is still rasterizing → server has the PDF, has no page assets, never recovers. Today we discover this 20 minutes later via cron.
+# A · Strip the app to plan-review core
 
-**Fix:**
-- Show a **persistent in-page progress bar** while `rasterizeAndUploadPagesResilient` runs (currently it's only a toast that disappears).
-- Add a `beforeunload` warning: "Pages are still being prepared. Closing now will require you to re-open the project to finish." Only attached while `pageAssetRows.length < totalExpectedPages`.
-- After upload, if rasterization succeeded for <80% of expected pages, **don't start the pipeline** — show "Prepare pages first" with a one-click retry. A pipeline run on a partial manifest is the silent-failure precursor.
-- File: `src/lib/plan-review-upload.ts` + a new `<UploadProgressBar>` component mounted in `PlanViewerPanel`.
+The sidebar has 12 destinations. Only ~4 are load-bearing for the review-and-issue-comments loop. Everything else is splitting attention and adding maintenance.
 
-## 2. Confirm dialog on Re-Analyze when findings already exist
-
-**Problem:** The mobile crash is fixed, but a misclick on "Re-Analyze" still discards findings and burns ~$0.30 of model time. The button looks identical whether there are 0 findings or 47.
-
-**Fix:**
-- If `findings.length > 0`, intercept `onRunAICheck` with the existing `useConfirm` dialog: *"Re-analyze 47 findings? This will replace current results and take 2-4 minutes."*
-- If `findings.length === 0`, run immediately (current behavior).
-- File: `src/pages/PlanReviewDetail.tsx` (`runAICheck` function).
-
-## 3. "Prepare pages" recovery banner is buried — promote it
-
-**Problem:** `StuckRecoveryBanner` only renders for `needs_user_action` / `needs_human_review` / `auto_recovered_at`. The much more common case — a stale review the user navigates back to where `pre_rasterized=false` and the pipeline never ran — has no banner. They just see a "Run AI Check" button and click it, which fails server-side.
-
-**Fix:**
-- Add a 4th banner variant: **"This review hasn't been prepared yet"** — shows when `file_urls.length > 0 && page_assets.count === 0`. CTA: "Prepare pages now" → calls `reprepareInBrowser(id)`.
-- Wired in the existing banner mount slot in `PlanReviewDetail.tsx`.
-- File: `src/components/plan-review/StuckRecoveryBanner.tsx`.
-
-## 4. Pipeline starts emitting structured cost telemetry
-
-**Problem:** No visibility into per-stage cost. We don't know if `discipline_review` chunk retries are actually saving money, or which discipline burns most tokens. Round 6 added checkpoints but no measurement.
-
-**Fix:**
-- In `run-review-pipeline/index.ts`, after each Lovable AI call, write `{ stage, discipline, chunk, input_tokens, output_tokens, model, ms }` to `pipeline_error_log` with `error_class='cost_metric'`.
-- Surface a small "Cost & timing" expander on the `PipelineActivity` page (already exists) reading the last 7d of `cost_metric` rows.
-- 90-day retention already prunes these (added in Round 6).
-- Files: `supabase/functions/run-review-pipeline/index.ts`, `src/pages/PipelineActivity.tsx`.
-
-## 5. PlanReviewDetail.tsx is 893 lines — split the action handlers
-
-**Problem:** Page is approaching maintenance cliff. Every recent fix touched the same monolith. The mobile crash, the auto-retry effect, the upload handler, the letter handler all live in one file.
-
-**Fix (low risk, no behavior change):**
-- Extract `useReviewActions(review, queryClient)` hook → owns `runAICheck`, `handlePipelineComplete`, `handleReprepareInBrowser`, `handleUploadFiles`. Returns the handlers + `aiRunning`/`aiCompleteFlash` state.
-- Page becomes ~600 lines, all action logic testable in isolation.
-- Files: new `src/hooks/plan-review/useReviewActions.ts` + diff in `src/pages/PlanReviewDetail.tsx`.
-
-## Recommended order
-
-Ship **1 + 2 + 3** together — they're the user-facing reliability story and prevent every silent-failure pattern still possible. **4** is a one-week-out diagnostic investment. **5** is housekeeping; do whenever convenient.
-
-## Files changed (if you approve all 5)
+## What stays (the workflow)
 
 ```text
-EDIT
-  src/lib/plan-review-upload.ts                    — partial-rasterize gate, no-pipeline-on-partial
-  src/pages/PlanReviewDetail.tsx                   — confirm on re-analyze, beforeunload guard, action extraction
-  src/components/plan-review/StuckRecoveryBanner.tsx — 4th variant: "not prepared yet"
-  supabase/functions/run-review-pipeline/index.ts  — cost_metric emission per AI call
-  src/pages/PipelineActivity.tsx                   — cost & timing expander
-
-CREATE
-  src/components/plan-review/UploadProgressBar.tsx
-  src/hooks/plan-review/useReviewActions.ts
+Dashboard         — landing, "what needs me" queue
+Projects          — list + create new review
+Plan Review       — list of reviews
+Pipeline Activity — the live stepper / debug surface (you depend on this)
+Settings          — firm settings, jurisdictions live as a tab here
 ```
 
-Tell me which subset you want and I'll implement.
+Plus the deep pages that already work:
+- `/plan-review/:id` (the actual review work surface)
+- `/plan-review/:id/dashboard` (the review dashboard / triage)
+
+## What gets parked (route stays, sidebar entry removed)
+
+Hide from sidebar but keep the page mounted so existing links/bookmarks still resolve. Behind a `VITE_FEATURE_EXTRAS` flag we flip to `true` later when you want them back.
+
+```text
+Inspections      → hidden
+Documents        → hidden
+Invoices         → hidden
+Deficiencies     → hidden  (it's a library, not a daily destination)
+Contractors      → hidden
+Analytics        → hidden
+Lead Radar       → hidden
+Milestone Radar  → hidden
+Jurisdictions    → moved into Settings as a tab
+```
+
+Bottom mobile tab bar shrinks from 5 → 3: **Dashboard · Review · Menu**.
+
+## What gets deleted (truly dead weight)
+
+After grepping links, these are unreferenced or only reachable from the hidden sidebar — safe to remove the route + page later, but in this pass we keep them mounted to avoid breaking anything. One follow-up cleanup PR.
+
+## Dashboard rewrite
+
+Today's `/dashboard` has deadline rings, statutory clocks, fee widgets, lead radar shortcuts. Replace with a **single "Active Reviews" board**:
+
+```text
+┌──────────────────────────────────────────────────┐
+│  ACTIVE REVIEWS (3)                  + New       │
+├──────────────────────────────────────────────────┤
+│  ▣ Pizza Restaurant       ── stuck at sheet_map  │
+│      ⓘ 2 min idle · resume                       │
+├──────────────────────────────────────────────────┤
+│  ▣ SUNCOAST PORSCHE       ── ready for letter    │
+│      47 findings · open                          │
+├──────────────────────────────────────────────────┤
+│  ▣ Site Plan              ── needs preparation   │
+│      open                                        │
+└──────────────────────────────────────────────────┘
+
+NEEDS MY REVIEW (7)                       view all
+─ findings flagged for human review across reviews
+```
+
+That's the entire page. Statutory clocks, fees, etc. survive at the project detail level. The dashboard becomes "what should I touch in the next hour".
+
+## Files
+
+```text
+EDIT  src/components/AppSidebar.tsx          ── trim mainNav + bottomTabs
+EDIT  src/pages/Dashboard.tsx                ── rewrite around active reviews
+EDIT  src/pages/Settings.tsx                 ── add Jurisdictions tab
+EDIT  src/App.tsx                            ── routes stay; no removal
+NEW   src/lib/feature-flags.ts               ── single VITE_FEATURE_EXTRAS gate
+```
+
+No DB changes, no backend changes. Reversible in one commit.
+
+---
+
+# B · Plan-review legitimacy + pipeline improvements
+
+This is where the app earns trust. A reviewer signing a comment letter needs to know **every finding is grounded**. Today the pipeline can ship findings whose citations were never matched against `fbc_code_sections`.
+
+## 1. Don't surface ungrounded findings as "verified"
+
+Today `deficiencies_v2.citation_status` defaults to `'unverified'` and only flips to `'grounded'` after the (deep-pass-only) `ground_citations` stage runs. Core pipeline never grounds. Result: reviewer sees a finding with `FBC 1011.5.4` cited and no signal that the citation was never validated.
+
+**Fix:** in `FindingCard` / `DeficiencyCard`, render an explicit badge:
+- `citation_status='grounded'` and `match_score >= 0.8` → green "Verified citation"
+- otherwise → amber "Citation unverified — review before sending"
+
+And gate the Comment Letter "Send" / "Export" button: if any included finding is unverified, require an explicit checkbox *"I've verified the citations on these N findings"*. No more silent shipping.
+
+## 2. Make grounding part of CORE, not deep-only
+
+Move `ground_citations` from `DEEP_STAGES` into `CORE_STAGES`, immediately after `dedupe`:
+
+```text
+CORE_STAGES (new):
+  upload → prepare_pages → sheet_map → dna_extract
+  → discipline_review → dedupe → ground_citations → complete
+```
+
+Cost: one extra cheap embedding/compare pass per finding. Benefit: every finding shipped from a default run has a real citation match score. Today's "deep" mode becomes **verify + cross_check + deferred_scope + prioritize** — the truly optional QA passes.
+
+## 3. Sheet-coverage gate before discipline review starts
+
+`sheet_map` produces `sheet_coverage` per discipline. If a discipline has zero mapped sheets we still spawn a discipline-review chunk and the AI hallucinates findings against thin air. Add a precondition:
+
+```ts
+// before launching discipline_review for a discipline:
+if (sheetsForDiscipline(d).length === 0) {
+  recordSkip(d, "no sheets mapped for this discipline");
+  continue;
+}
+```
+
+The skipped discipline shows on the dashboard as "Not reviewed — no sheets" with a one-click "Force review anyway" override. Honest > complete.
+
+## 4. Confidence floor + "low confidence" bucket
+
+`deficiencies_v2.confidence_score` exists but isn't used in the UI ranking. Two changes:
+
+- Hide findings with `confidence_score < 0.4` from the default list. Show a "12 low-confidence findings hidden — review" expander.
+- Sort the rest descending by `confidence_score` within each severity tier.
+
+Stops bottom-of-the-barrel guesses dominating the inbox.
+
+## 5. Round-over-round carryover requires reviewer confirmation
+
+`previous_findings` is already tracked. Today on round 2 the AI re-finds the same things and we dedupe. Better: on starting round N, present "**Carry-over: 14 findings unresolved from round N-1 — confirm before re-running**". Reviewer ticks which ones to keep watching. Round N pipeline knows to focus there. Cuts AI cost, kills duplicate findings, and is the reviewer's actual mental model.
+
+## 6. Pipeline observability the reviewer can trust
+
+Two small surface changes:
+
+- Every finding card shows a tiny footer: `sheet_map · discipline_review (Architectural) · dedupe · ground_citations` — the chain that produced it. Click → opens the relevant `pipeline_error_log` rows. Already 90-day retained.
+- Pipeline Activity gets a "Health" column per active run: `% findings grounded · % low-confidence · % requires_human_review`. If a run lands at "0% grounded, 80% low confidence" the reviewer sees that **before** opening it.
+
+## 7. Lock the model + prompt version per finding
+
+`deficiencies_v2` already has `model_version` and `prompt_version_id`. Today they get filled but aren't shown. Add to the finding's expand-detail view: "Generated by `gemini-2.5-pro` · prompt v3 · 2026-04-23 19:30". When you change a prompt next quarter and a reviewer asks "why did the same plan suddenly find 12 more things?" you have the answer.
+
+## Files
+
+```text
+EDIT  supabase/functions/run-review-pipeline/index.ts
+        ── ground_citations into CORE_STAGES
+        ── sheet-coverage precondition for discipline_review
+        ── emit chain metadata per finding
+EDIT  src/lib/pipeline-stages.ts                ── mirror CORE_STAGES change
+EDIT  src/components/FindingCard.tsx
+        ── citation badge, confidence sort, chain footer, model footer
+EDIT  src/components/CommentLetterExport.tsx    ── unverified-citation gate
+EDIT  src/components/plan-review/RoundCarryoverPanel.tsx
+        ── reviewer-confirms-carryover before round N pipeline
+EDIT  src/pages/PipelineActivity.tsx            ── per-run Health column
+NEW   src/components/plan-review/CitationStatusBadge.tsx
+```
+
+No new tables. All columns exist already. Reversible per file.
+
+---
+
+# Recommended path
+
+Ship **A** today (one-day change, immediate clarity). Then **B** in the same week — those are the changes that turn this from "AI-assisted draft" into "a reviewer can sign their name to it". The hidden routes from A re-light when you flip the env flag once invoices/CRM matter again.
 
