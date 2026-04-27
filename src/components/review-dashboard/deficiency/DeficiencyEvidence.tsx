@@ -114,3 +114,69 @@ export default function DeficiencyEvidence({ planReviewId, def }: Props) {
     </Collapsible>
   );
 }
+
+// ---------- inline subcomponent ----------
+interface AutoThumbProps {
+  planReviewId: string;
+  evidenceCropUrl: string | null;
+  evidenceCropMeta: Record<string, unknown> | null;
+  sheetRefs: string[];
+}
+
+function AutoEvidenceThumb({ planReviewId, evidenceCropUrl, evidenceCropMeta, sheetRefs }: AutoThumbProps) {
+  const meta = (evidenceCropMeta ?? {}) as { unresolved_sheet?: boolean; pinned?: boolean };
+  const isPinned = meta.pinned === true;
+  // Pinned crops are rendered by EvidenceSnippet — don't double-show.
+  if (isPinned) return null;
+
+  const thumb = useEvidencePageThumb({
+    planReviewId,
+    evidenceCropUrl,
+    evidenceCropMeta,
+    enabled: !!evidenceCropUrl || !!meta.unresolved_sheet,
+  });
+
+  if (meta.unresolved_sheet) {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-dashed border-amber-500/30 bg-amber-500/5 p-2 text-2xs text-amber-700 dark:text-amber-400">
+        <ImageOff className="h-3 w-3 shrink-0" />
+        <span>
+          Sheet {sheetRefs[0] ?? "—"} not located in plan set — open the plan to verify manually.
+        </span>
+      </div>
+    );
+  }
+
+  if (!thumb.url) return null;
+
+  return (
+    <div className="space-y-1.5 rounded-md border border-border/60 bg-card p-2">
+      <div className="flex items-center justify-between gap-2 text-2xs text-muted-foreground">
+        <span className="font-medium uppercase tracking-wide">
+          Sheet {thumb.sheetRef ?? sheetRefs[0] ?? "—"}
+          {thumb.pageIndex != null && (
+            <span className="ml-1 font-mono normal-case text-muted-foreground/70">
+              · page {thumb.pageIndex + 1}
+            </span>
+          )}
+        </span>
+        <a
+          href={thumb.url}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 text-2xs text-foreground/70 hover:text-foreground"
+        >
+          <ExternalLink className="h-3 w-3" /> Full size
+        </a>
+      </div>
+      <a href={thumb.url} target="_blank" rel="noreferrer" className="block">
+        <img
+          src={thumb.url}
+          alt={`Evidence page for ${thumb.sheetRef ?? "finding"}`}
+          className="w-full rounded border border-border bg-background"
+          loading="lazy"
+        />
+      </a>
+    </div>
+  );
+}
