@@ -450,6 +450,17 @@ export default function ReviewDashboard() {
         </div>
       )}
 
+      {/* Letter readiness checklist — shown when there are findings to send */}
+      {defs.length > 0 && (
+        <LetterReadinessGate
+          findings={defs}
+          qcStatus={review?.qc_status}
+          reviewerIsSoleSigner={true}
+          projectDnaMissingFields={dnaIssue?.missing ?? []}
+          onJumpToFinding={() => setActiveTab("triage")}
+        />
+      )}
+
       {/* Single-CTA next-step bar */}
       <NextStepBar
         pipelineRows={pipeRows.map((r) => ({ stage: r.stage, status: r.status }))}
