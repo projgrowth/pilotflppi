@@ -3658,6 +3658,7 @@ async function stageGroundCitations(
     hallucinated: counts.hallucinated,
     crops_attached: cropResult.attached,
     crops_skipped: cropResult.skipped,
+    crops_unresolved_sheets: cropResult.unresolved_sheets,
   };
 }
 
