@@ -1,4 +1,4 @@
-import { CheckCircle2, AlertTriangle, HelpCircle, XCircle } from "lucide-react";
+import { CheckCircle2, AlertTriangle, HelpCircle, XCircle, Info } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -9,9 +9,11 @@ import { cn } from "@/lib/utils";
 
 type CitationStatus =
   | "verified"
+  | "verified_stub"
   | "mismatch"
   | "not_found"
   | "hallucinated"
+  | "no_citation_required"
   | "unverified"
   | string;
 
