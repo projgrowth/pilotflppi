@@ -45,6 +45,26 @@ const DNA_FIELD_TOTAL = 14; // matches the DNA schema field count
 export function ReviewProvenanceStrip({ planReviewId, progress }: Props) {
   const healthMap = useReviewHealth([planReviewId]);
   const health = healthMap[planReviewId];
+  const isAdmin = useIsAdmin();
+  const [regrouping, setRegrouping] = useState(false);
+
+  async function handleRegroup() {
+    setRegrouping(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("regroup-citations", {
+        body: { plan_review_id: planReviewId },
+      });
+      if (error) throw error;
+      const g = (data as { ground?: { verified?: number; mismatch?: number; not_found?: number; hallucinated?: number } })?.ground;
+      toast.success(
+        `Re-grounded: ${g?.verified ?? 0} verified, ${g?.mismatch ?? 0} mismatch, ${g?.hallucinated ?? 0} hallucinated`,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Re-ground failed");
+    } finally {
+      setRegrouping(false);
+    }
+  }
 
   // DNA coverage — single small query, cached.
   const { data: dna } = useQuery({
