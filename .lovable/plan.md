@@ -1,62 +1,110 @@
-# Suncoast Porsche audit — root causes and fix plan
+## Plan Review — Precision & Reliability Plan
 
-I traced the latest 3 Suncoast Porsche reviews. The backend is healthy: 78/78 pages rasterized, 12–44 deficiencies written per run, sheet maps snapshotted, no pipeline errors. The bug is entirely in the **client adapter + viewer wiring**.
+The pipeline runs end-to-end, but the data shows real gaps. Across 313 current findings:
 
-## What's actually broken
+- **Only 8 of 313 (2.5%) have a verified FBC citation.** 47 are not-found, 19 are hallucinated, 69 are mismatched, 170 were never grounded.
+- **0 of 313 have an evidence crop.** Reviewers can't see what the AI saw.
+- **Discipline labels are fragmented**: "Architectural" vs "architectural", "MEP" vs "mechanical/electrical/plumbing", "Life Safety" vs "life_safety". 21 distinct buckets where there should be ~10.
+- **Verification is mostly skipped**: 234 of 313 are still `unverified`; only 25 verified, 24 overturned. The verifier isn't running on enough findings.
+- **Cross-check produced 3 findings ever** — likely too restrictive.
 
-### 1. Findings vanish from the list (the "doesn't show what the actual findings are")
+This plan tightens each weak link without rewriting the pipeline.
 
-- DB `deficiencies_v2.discipline` stores values like **`Architectural`, `General`, `Energy`** (71 of 75 findings on this project are `Architectural`).
-- `src/lib/deficiency-adapter.ts` lowercases + slugifies → `"architectural"`, `"general"`.
-- `src/lib/county-utils.ts` `DISCIPLINE_ORDER` only contains: `structural, life_safety, fire, mechanical, electrical, plumbing, energy, ada, site` — **no `architectural` and no `general`**.
-- `FindingsListPanel` renders only `DISCIPLINE_ORDER.filter(d => filteredGrouped[d])`, so 71 of 75 Architectural findings are silently filtered out of the accordion. The summary header still counts the raw array (that's why the user sees "14 findings" but a near-empty list).
+---
 
-### 2. PDF viewer shows no pins (the "buggy PDF viewer")
+### 1. Stop emitting findings with bad citations
 
-- `PlanMarkupViewer` keys every annotation off `finding.markup.page_index`.
-- The v2 adapter never sets `markup`. There is no `markup` column on `deficiencies_v2`.
-- `checklist_state.last_sheet_map` (78 entries per review) maps `sheet_ref → page_index`, but nothing on the client joins findings to it.
-- Result: pages render fine (eager + idle background), but every finding falls through `if (!finding.markup) return null;` so zero pins are drawn. From the user's perspective this looks like the viewer is broken.
+**Problem:** 41% of grounded findings (135/322) have a broken citation (mismatch / not-found / hallucinated). They still ship to the comment letter.
 
-### 3. Noisy console warning
+**Fix:**
+- In `discipline-review.ts`, add a citation-required rule to the system prompt: every finding must cite an FBC section that the model is confident exists. If unsure, use `requires_human_review=true` instead of guessing.
+- After `ground_citations` runs, auto-flip any finding with `citation_status in ('not_found','hallucinated')` to `verification_status='needs_human'` and downgrade `priority` one notch. They still appear, but never auto-publish to a letter.
+- Add a server-side guard in `letter-readiness.ts` (or its edge equivalent) blocking letter generation if any cited finding is `hallucinated`.
 
-- `Badge` is a plain function component. Radix Accordion forwards a ref into it (line 193 of `FindingsListPanel`), producing the `Function components cannot be given refs` warning seen in the console. Cosmetic, but worth a 1‑line fix while we're in there.
+### 2. Make every finding show its evidence crop
 
-## Fix plan
+**Problem:** 0 findings have `evidence_crop_url`. The viewer falls back to deterministic hash pins, which are only approximate.
 
-### A. Expand the discipline taxonomy
-`src/lib/county-utils.ts`
-- Add `architectural`, `general`, `mep` (a common pipeline output), and `civil` to the `Discipline` union, `disciplineConfig`, and `DISCIPLINE_ORDER`.
-- Order: `general → architectural → structural → life_safety → fire → mechanical → electrical → plumbing → mep → energy → ada → site → civil`.
+**Fix:**
+- Add a new sub-step at the end of `ground_citations` (or split into a new mini-stage `evidence-crop`) that, for each finding with a `sheet_refs[0]` and `page_index`, asks the AI vision model to return a normalized bounding box `{x,y,w,h}` for the cited element.
+- Persist the box to `evidence_crop_meta` and render the actual cropped PNG to storage; populate `evidence_crop_url`.
+- `PlanMarkupViewer` already supports markup coords — switch from the deterministic hash to the real crop when present.
+- Cap to 1 vision call per 4 findings via batching (group by sheet to amortize the page image).
 
-### B. Make the list resilient to unknown disciplines
-`src/components/plan-review/FindingsListPanel.tsx`
-- Replace `DISCIPLINE_ORDER.filter((d) => props.filteredGrouped[d])` with: keys from `DISCIPLINE_ORDER` first (in canonical order), then **append any extra keys present in `filteredGrouped`** at the end. Guarantees no group is ever silently dropped, even if the AI emits a new label.
+### 3. Canonicalize disciplines once, at write time
 
-### C. Compute deterministic pin coordinates from the sheet map
-`src/lib/deficiency-adapter.ts`
-- New signature: `adaptV2ToFindings(rows, sheetMap)` where `sheetMap = Array<{ sheet_ref, page_index }>` from `plan_reviews.checklist_state.last_sheet_map`.
-- For each finding, look up the first `sheet_refs[0]` in the map → `page_index`. Then derive deterministic `x/y/width/height` from a hash of `finding.id + sheet_ref` (per the existing `mem://logic/pin-placement` rule). Stamp `markup = { page_index, x, y, width: 0.06, height: 0.04, pin_confidence: 'low' }` so the viewer renders a pin even before grounding upgrades it.
-- If `sheetMap` is missing or the sheet isn't found, leave `markup` undefined (existing fallthrough). Do not crash.
+**Problem:** Adapter normalization happens at read time, but the DB stores raw labels, so analytics, dedupe bucketing, and learning patterns all see fragmented strings.
 
-### D. Pass the sheet map through
-`src/hooks/plan-review/usePlanReviewData.ts` / `src/pages/PlanReviewDetail.tsx`
-- Read `plan_review.checklist_state.last_sheet_map`, pass to `adaptV2ToFindings`. No DB changes — the column already exists.
+**Fix:**
+- Run `normalizeDiscipline` (already in `county-utils.ts`, port to `_shared/types.ts`) inside `discipline-review.ts` and `cross-check.ts` BEFORE the insert. Store the canonical lowercase slug.
+- Backfill migration: `UPDATE deficiencies_v2 SET discipline = lower(...)` mapping the existing 21 buckets to ~10 canonical ones.
+- Drop the read-side normalization so the rest of the system sees one source of truth.
 
-### E. Quiet the ref warning
-`src/components/ui/badge.tsx`
-- Convert `Badge` to `React.forwardRef<HTMLDivElement, BadgeProps>`. Two-line change.
+### 4. Make the verifier actually run on everything that matters
 
-## Out of scope (already-known, separate issues)
-- The earlier `b443092b…` zero-asset failure is the previously-tracked "needs browser rasterization" CTA work — not touched here.
-- The two soft-timeout `discipline_review` resumes seen in edge logs are the chunked-pause mechanism working as designed.
+**Problem:** 234 findings sit in `verification_status='unverified'`. The verify stage filters by `confidence_score < threshold OR priority = high`, but in practice few qualify.
 
-## Files touched
-- `src/lib/county-utils.ts`
-- `src/components/plan-review/FindingsListPanel.tsx`
-- `src/lib/deficiency-adapter.ts`
-- `src/hooks/plan-review/usePlanReviewData.ts`
-- `src/pages/PlanReviewDetail.tsx`
-- `src/components/ui/badge.tsx`
+**Fix:**
+- Lower the verifier trigger: ALL findings get verified except those with `confidence_score >= 0.9 AND priority='low'`.
+- Batch by sheet (verifier currently re-sends sheet images per finding) — pack 5–8 findings per call.
+- Add a hard rule in the verify prompt: if `cannot_locate`, route to human review (already there) — but also auto-set `requires_human_review=true` so it surfaces in the triage inbox.
 
-After these changes, opening a Suncoast Porsche review should show all 71 Architectural findings grouped under an Architectural accordion, with a deterministic pin on the correct page for every finding that has a `sheet_refs[0]` resolvable in the sheet map.
+### 5. Tune cross-check from "near-zero recall" to "useful"
+
+**Problem:** Only 3 cross-sheet findings across all reviews. The "must quote both sides verbatim" gate is too strict.
+
+**Fix:**
+- Allow `confidence_score >= 0.7` instead of requiring verbatim quotes from both sheets — but require the verifier to confirm before it can publish.
+- Expand the category enum with `accessibility_clearance_vs_plan` and `roof_uplift_vs_truss_layout` (common Florida gaps).
+- Always run cross-check on at least one Architectural × Structural pairing if both disciplines have findings.
+
+### 6. Stop the dedupe stage from collapsing legitimate distinct findings
+
+**Problem (audit):** Dedupe buckets by `fbc_section + sheet_ref` then merges by 0.55 token Jaccard. This silently kills two real issues that cite the same code section on the same sheet (e.g. two separate stair handrails both citing 1014.8).
+
+**Fix:**
+- Raise Jaccard threshold to 0.75.
+- Require a SECOND signal (overlapping `evidence` text or matching bounding box) before merging.
+- Log every merge to `activity_log` with the surviving + suppressed `def_number`s so dedupe can be audited and undone.
+
+### 7. Add a "review confidence" score per project
+
+**Problem:** Reviewers can't tell at-a-glance whether the AI run was high-quality or shaky.
+
+**Fix:**
+- Compute a single 0–100 score on `complete` stage and store in `plan_reviews.ai_run_progress.quality_score`:
+  - +30 if ≥80% of findings have `citation_status='verified'`
+  - +30 if ≥80% have `verification_status in ('verified','modified')`
+  - +20 if ≥80% have evidence crops
+  - +20 if no `hallucinated` citations
+- Surface as a chip on the review header. Below 60 → banner: "Low-confidence run, recommend human spot-check."
+
+---
+
+### Technical changes (concise file list)
+
+**Edge functions:**
+- `stages/discipline-review.ts` — citation-required prompt rule, normalize discipline at write
+- `stages/verify.ts` — broaden trigger, batch by sheet
+- `stages/ground-citations.ts` — auto-flip hallucinated/not_found to `needs_human`; chain into evidence crop
+- `stages/cross-check.ts` — relax verbatim rule, expand categories
+- `stages/dedupe.ts` — stricter merge gate, audit log
+- `stages/complete.ts` — compute quality_score
+- New: `stages/evidence-crop.ts` (or fold into ground-citations) — vision-extract bounding boxes
+
+**Frontend:**
+- `PlanMarkupViewer.tsx` — prefer real `evidence_crop_meta` box over deterministic hash
+- `ReviewSummaryHeader.tsx` — show quality_score chip
+- `letter-readiness.ts` — block letter on any `hallucinated` citation
+
+**Database (migrations):**
+- Backfill: canonicalize `deficiencies_v2.discipline` values
+- Index: `(plan_review_id, citation_status)` for the new auto-flip query
+- Add column: `plan_reviews.ai_run_quality_score numeric` (or store in `ai_run_progress` JSON)
+
+### Out of scope for this pass
+- New AI model selection (current Gemini 2.5 Pro is fine)
+- UI redesign of the findings panel
+- Replacing the deterministic hash pin (keep as fallback when no crop exists)
+
+Approve and I'll implement in order: 3 (canonicalize) → 1 (citation guard) → 4 (verifier) → 6 (dedupe) → 2 (evidence crops) → 5 (cross-check) → 7 (quality score).
