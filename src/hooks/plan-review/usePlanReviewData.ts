@@ -73,7 +73,8 @@ export function usePlanReviewData(reviewId: string | undefined) {
   // joins each row to the stored sheet_map snapshot so every finding gets
   // a deterministic pin on the right page in the viewer.
   const sheetMap: SheetMapEntry[] | null =
-    (review?.checklist_state as { last_sheet_map?: SheetMapEntry[] } | undefined)?.last_sheet_map ?? null;
+    ((review as unknown as { checklist_state?: { last_sheet_map?: SheetMapEntry[] } } | undefined)
+      ?.checklist_state?.last_sheet_map) ?? null;
   const findingsQuery = useQuery<Finding[]>({
     queryKey: ["v2-findings-for-viewer", review?.id, sheetMap?.length ?? 0],
     enabled: !!review?.id,
