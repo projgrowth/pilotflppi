@@ -1,0 +1,96 @@
+// Per-stage status writes that drive the dashboard stepper.
+//
+// FIX (2026-04-27): the old setStage() did SELECT-then-INSERT/UPDATE which
+// raced the prepare_pages watchdog and the self-invoke worker — both could
+// observe "no row" and both could insert, producing duplicate rows that broke
+// the dashboard's "one row per (plan_review_id, stage)" assumption. Replaced
+// with a single upsert on the unique constraint.
+
+import type { Admin } from "./supabase.ts";
+import type { Stage } from "./types.ts";
+
+export async function setStage(
+  admin: Admin,
+  planReviewId: string,
+  firmId: string | null,
+  stage: Stage,
+  patch: {
+    status: "pending" | "running" | "complete" | "error";
+    error_message?: string | null;
+    metadata?: Record<string, unknown>;
+  },
+) {
+  const now = new Date().toISOString();
+  const payload: Record<string, unknown> = {
+    plan_review_id: planReviewId,
+    firm_id: firmId,
+    stage,
+    status: patch.status,
+    updated_at: now,
+    error_message: patch.error_message ?? null,
+    metadata: patch.metadata ?? {},
+  };
+  if (patch.status === "running") payload.started_at = now;
+  if (patch.status === "complete" || patch.status === "error") {
+    payload.completed_at = now;
+  }
+
+  // Single upsert keyed on the (plan_review_id, stage) unique index. If the
+  // unique index doesn't exist yet, we fall back to the old read-then-write
+  // path so a missing migration can't break production.
+  const { error: upsertErr } = await admin
+    .from("review_pipeline_status")
+    .upsert(payload, { onConflict: "plan_review_id,stage" });
+
+  if (upsertErr) {
+    // Fallback: legacy schema without the unique index.
+    const { data: existing } = await admin
+      .from("review_pipeline_status")
+      .select("id")
+      .eq("plan_review_id", planReviewId)
+      .eq("stage", stage)
+      .maybeSingle();
+
+    if (existing?.id) {
+      await admin
+        .from("review_pipeline_status")
+        .update(payload)
+        .eq("id", existing.id);
+    } else {
+      await admin.from("review_pipeline_status").insert(payload);
+    }
+  }
+}
+
+/**
+ * Persist a structured row to public.pipeline_error_log so the dashboard
+ * Errors tab + the per-review error stream both have something to show.
+ * Best-effort — never throws (a failed insert can't be allowed to mask the
+ * real stage error that triggered this call).
+ */
+export async function recordPipelineError(
+  admin: Admin,
+  args: {
+    planReviewId: string;
+    firmId: string | null;
+    stage: Stage;
+    errorClass: string;
+    errorMessage: string;
+    attemptCount?: number;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<void> {
+  try {
+    await admin.from("pipeline_error_log").insert({
+      plan_review_id: args.planReviewId,
+      firm_id: args.firmId,
+      stage: args.stage,
+      error_class: args.errorClass,
+      error_message: (args.errorMessage ?? "").slice(0, 4000),
+      attempt_count: args.attemptCount ?? 1,
+      metadata: args.metadata ?? {},
+    });
+  } catch (err) {
+    console.error("[pipeline_error_log] insert failed:", err);
+  }
+}
