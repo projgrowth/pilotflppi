@@ -62,7 +62,15 @@ export function ReviewProvenanceStrip({ planReviewId, progress }: Props) {
   const hasHealth = !!health && health.total > 0;
   const hasDna = !!dna;
   const submittalIncomplete = progress?.submittal_incomplete === true;
-  if (!hasHealth && !hasDna && !submittalIncomplete) return null;
+  const qualityScore =
+    typeof progress?.quality_score === "number"
+      ? (progress.quality_score as number)
+      : null;
+  const qualityBreakdown =
+    (progress?.quality_breakdown as QualityBreakdown | undefined) ?? null;
+  if (!hasHealth && !hasDna && !submittalIncomplete && qualityScore === null) {
+    return null;
+  }
 
   const total = health?.total ?? 0;
   const grounded = health?.grounded ?? 0;
@@ -72,6 +80,15 @@ export function ReviewProvenanceStrip({ planReviewId, progress }: Props) {
   const groundedPct = pct(grounded, total);
   const dnaMissing = Array.isArray(dna?.missing_fields) ? dna.missing_fields.length : 0;
   const dnaPresent = Math.max(0, DNA_FIELD_TOTAL - dnaMissing);
+
+  const qualityTone =
+    qualityScore === null
+      ? "text-muted-foreground"
+      : qualityScore >= 80
+        ? "text-success"
+        : qualityScore >= 60
+          ? "text-warning"
+          : "text-destructive";
 
   return (
     <div className="rounded-md border border-border/60 bg-muted/30 px-2.5 py-1.5 flex items-center gap-3 text-2xs flex-wrap">
