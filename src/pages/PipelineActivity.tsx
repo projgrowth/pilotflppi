@@ -293,6 +293,11 @@ export default function PipelineActivity() {
   const [clearing, setClearing] = useState(false);
   const [resumingId, setResumingId] = useState<string | null>(null);
 
+  // Per-review health (% grounded / % low-conf / % needs-eyes). One bulk
+  // query for every review on the page; rows pluck their own values.
+  const reviewIds = useMemo(() => data.map((a) => a.planReviewId), [data]);
+  const healthMap = useReviewHealth(reviewIds);
+
   const handleResume = async (planReviewId: string, stage: string) => {
     setResumingId(planReviewId);
     try {
