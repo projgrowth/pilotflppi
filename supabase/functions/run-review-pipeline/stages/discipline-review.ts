@@ -458,14 +458,9 @@ export async function stageDisciplineReview(
     }
   };
 
-  // Seed an initial beacon so the watchdog and the UI have a t=0 reference
-  // even before the first chunk completes.
-  await writeChunkProgress({
-    discipline: disciplinesToRun[0] ?? "",
-    chunk: 0,
-    total: 0,
-    findingsSoFar: 0,
-  }).catch(() => {});
+  // `lastBeaconAt` is initialized at stage start; every successful wave
+  // refreshes it via writeChunkProgress(). The watchdog below trips if no
+  // beacon lands within STALL_TIMEOUT_MS.
 
   // Resumable chunk checkpoints. `stage_checkpoints.discipline_review` is a
   // map of `{ [discipline]: lastChunkCompleted }`. On retry we skip every
