@@ -32,6 +32,8 @@ import DashboardAlertStack, {
 import NextStepBar from "@/components/review-dashboard/NextStepBar";
 import FilterChips from "@/components/review-dashboard/FilterChips";
 import AuditCoveragePanel from "@/components/review-dashboard/AuditCoveragePanel";
+import LetterReadinessGate from "@/components/plan-review/LetterReadinessGate";
+import LetterSnapshotViewer from "@/components/plan-review/LetterSnapshotViewer";
 import { CRITICAL_DNA_FIELDS } from "@/lib/dna-fields";
 import { useLetterQualityCheck } from "@/hooks/useLetterQualityCheck";
 import {
@@ -448,6 +450,17 @@ export default function ReviewDashboard() {
         </div>
       )}
 
+      {/* Letter readiness checklist — shown when there are findings to send */}
+      {defs.length > 0 && (
+        <LetterReadinessGate
+          findings={defs}
+          qcStatus={review?.qc_status}
+          reviewerIsSoleSigner={true}
+          projectDnaMissingFields={dnaIssue?.missing ?? []}
+          onJumpToFinding={() => setActiveTab("triage")}
+        />
+      )}
+
       {/* Single-CTA next-step bar */}
       <NextStepBar
         pipelineRows={pipeRows.map((r) => ({ stage: r.stage, status: r.status }))}
@@ -477,6 +490,7 @@ export default function ReviewDashboard() {
           </TabsTrigger>
           <TabsTrigger value="findings">All findings</TabsTrigger>
           <TabsTrigger value="audit">Audit & Coverage</TabsTrigger>
+          <TabsTrigger value="history">Sent letters</TabsTrigger>
         </TabsList>
 
         <TabsContent value="triage" className="mt-4">
@@ -499,6 +513,10 @@ export default function ReviewDashboard() {
             onJumpToFindings={() => setActiveTab("findings")}
             onAfterDnaRerun={() => setActiveTab("triage")}
           />
+        </TabsContent>
+
+        <TabsContent value="history" className="mt-4">
+          {id && <LetterSnapshotViewer planReviewId={id} />}
         </TabsContent>
       </Tabs>
     </div>

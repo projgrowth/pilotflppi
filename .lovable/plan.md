@@ -1,99 +1,122 @@
-## Track 3 — Reviewer-side reliability: from AI output to a letter you'll sign
+# Codebase Audit & Cleanup Plan
 
-Tracks 1 and 2 made the AI output trustworthy (FBC-grounded citations, real evidence thumbnails). The biggest remaining gap is the **reviewer's path from "AI finished" to "letter sent to the state"**. Today the dashboard shows findings and lets a reviewer accept/reject, but there's nothing stopping someone from exporting a letter that:
+Goal: shrink surface area, eliminate dead code, and split a few mega-files so future edits are safer and faster. The codebase is in good shape overall (no `console.log` spam, only 1 `as any`, only 1 `TODO`), so this is targeted cleanup rather than a rewrite.
 
-- still has open low-confidence findings nobody triaged,
-- has citations marked `unverified`,
-- has unresolved sheet references,
-- was never QC'd,
-- can't be re-opened later because nothing was snapshotted.
+---
 
-Track 3 closes those gaps without changing the AI itself.
+## A. Dead code to delete (truly orphaned, zero imports)
 
-### Problems being fixed
+These files are not referenced anywhere in `src/` or routes:
 
-1. **No "ready to send" gate.** `CommentLetterExport` will print a PDF whether or not findings are triaged or QC'd. Reviewers can accidentally send half-reviewed letters.
-2. **Triage is per-finding only — no batch sanity check.** On a 60-finding job there's no single view of "what's left to decide."
-3. **No immutable snapshot at send time.** When a contractor resubmits 3 weeks later, we can't prove what the round-1 letter actually said — `comment_letter_draft` is just live text and findings can be edited after the fact.
-4. **No "stuck pipeline" recovery for the reviewer.** If `run-review-pipeline` errors mid-stage, the user sees the stepper stalled but has no one-click retry from the dashboard (only the existing background `reconcile-stuck-reviews` cron).
-5. **No reviewer activity trail on individual findings.** `finding_status_history` exists but isn't surfaced anywhere — reviewers can't see "who changed this from open to confirmed and why."
+| File | Notes |
+|---|---|
+| `src/components/ScanTimeline.tsx` | Old timeline visualization — replaced by `PipelineProgressStepper` |
+| `src/components/plan-review/RoundDiffPanel.tsx` | Round-diff UI not wired into ReviewDashboard |
+| `src/components/shared/SkeletonRow.tsx` | Replaced by shadcn `<Skeleton>` |
+| `src/hooks/plan-review/useReviewActions.ts` | Logic was inlined into `useReviewDashboard` |
+| `src/hooks/useCountUp.ts` | Animated counter hook, never used |
+| `src/hooks/useUserRole.ts` | Role check happens server-side via RLS now |
 
-### What we'll build
+Estimated removal: ~6 files, ~600 lines.
 
-**1. Pre-send readiness check (blocking)**
+## B. Orphaned components to wire up (just built, never mounted)
 
-New component `LetterReadinessGate` shown above the export button in `CommentLetterExport.tsx` and as a section in `NextStepBar`. It computes a checklist from live data:
+These were created last loop for Track 3 but never imported. Decision needed:
 
-- All non-deferred findings have a `reviewer_disposition` (confirm / reject / modify).
-- Zero findings with `citation_status = 'unverified'` AND `confidence_score < 0.7`.
-- Zero findings with `evidence_crop_meta.unresolved_sheet = true` that are still `open`.
-- `qc_status = 'qc_approved'` (unless reviewer is also the QC sign-off — single-reviewer firms).
-- Project DNA has no `missing_fields` flagged as critical.
+| File | Action |
+|---|---|
+| `src/components/plan-review/LetterReadinessGate.tsx` | **Wire into** `CommentLetterExport.tsx` above the export button |
+| `src/components/plan-review/LetterSnapshotViewer.tsx` | **Wire into** `ReviewDashboard.tsx` as a "History" tab |
+| `src/lib/send-letter-snapshot.ts` | **Call from** the "Mark Sent" handler in `ReviewDashboard` |
 
-Each row is green/amber/red with a "Jump to" link. Export PDF and "Mark sent" buttons are disabled until all required rows are green. An "Override and send anyway" requires a typed reason that gets logged to `activity_log`.
+Without wiring, Track 3 delivers zero user value.
 
-**2. Snapshot on send — immutable letter record**
+## C. Unused shadcn UI primitives (each used in only 1 file = self)
 
-New table `comment_letter_snapshots`:
+`accordion`, `command`, `form`, `resizable`, `scroll-area`, `table` — all show 1 hit (the file itself). Safe to delete:
+
+- `src/components/ui/accordion.tsx`
+- `src/components/ui/command.tsx`
+- `src/components/ui/form.tsx`
+- `src/components/ui/resizable.tsx`
+- `src/components/ui/scroll-area.tsx`
+- `src/components/ui/table.tsx`
+
+(Keep `sonner` — it's mounted in `App.tsx` via the Toaster.)
+
+Removes ~6 files and lets us prune deps: `@radix-ui/react-accordion`, `@radix-ui/react-scroll-area`, `cmdk`, `react-resizable-panels`, `react-hook-form` (verify no other consumers first).
+
+## D. Mega-file splits (high-impact)
+
+### 1. `supabase/functions/run-review-pipeline/index.ts` — **4,206 lines**
+Already has clean `// ----- section -----` markers. Split into siblings imported by `index.ts`:
+
 ```text
-id, plan_review_id, round, firm_id,
-sent_at, sent_by, recipient (text),
-letter_html (text),                  -- exact rendered HTML at send time
-findings_json (jsonb),               -- frozen array of findings with
-                                     --   id, def_number, finding, required_action,
-                                     --   code_reference, evidence_crop_url,
-                                     --   evidence_crop_meta, sheet_refs, status
-firm_info_json (jsonb),              -- frozen firm letterhead at send time
-override_reasons (text),             -- non-null if readiness gate was overridden
-pdf_storage_path (text),             -- optional rendered PDF
-created_at
+run-review-pipeline/
+  index.ts                  (handler + scheduleNextStage, ~400 lines)
+  _shared/cost.ts           (withCostCtx, recordCostMetric, callAI)
+  _shared/manifest.ts       (readSignedManifest, signedSheetUrls)
+  stages/upload.ts          (stageUpload, stagePreparePages, stageSheetMap)
+  stages/submittal.ts       (stageSubmittalCheck)
+  stages/dna.ts             (stageDnaExtract, evaluateDnaHealth, stageDnaReevaluate)
+  stages/discipline.ts      (stageDisciplineReview, runDisciplineChecks)
+  stages/cross-check.ts     (runCrossSheetConsistency, stageCrossCheck)
+  stages/dedupe.ts          (jaccard, stageDedupe)
+  stages/citations.ts       (stageGroundCitations)
+  stages/evidence.ts        (attachEvidenceCrops)
+  stages/verify.ts          (stageVerify)
+  stages/finalize.ts        (stageDeferredScope, stagePrioritize, stageComplete)
 ```
-RLS: firm-scoped. Insert-only for reviewers; no updates, no deletes (deletes restricted to admin).
+Pure refactor — no logic changes, no behavior change. Deno bundles siblings fine.
 
-A new "Mark sent" button writes the snapshot, sets `plan_reviews.qc_status = 'sent'`, and triggers the existing `reset_review_clock_on_resubmission` flow on the next round. The dashboard then shows "Round 1 letter sent on Apr 12 — view snapshot" for full audit.
+### 2. `src/pages/PlanReviewDetail.tsx` — **1,009 lines**
+Extract sub-components into `src/components/plan-review-detail/`:
+- `UploadSection.tsx`
+- `ProcessingSection.tsx`
+- `ResultsSection.tsx`
+- `useReviewPolling.ts` (hook)
 
-**3. Triage Inbox upgrade — "what's left" view**
+Target: page file under 300 lines.
 
-`TriageInbox.tsx` already exists. We'll add:
-- A "Needs decision" filter that shows only findings without a disposition.
-- Keyboard-driven workflow (already partly there in `TriageShortcutsOverlay`): J/K to move, C to confirm, R to reject, M to modify, D to defer, ?/H for help.
-- A persistent counter at the top: "12 of 47 triaged · 35 left" so reviewers know exactly how much work remains.
-- "Triage all by AI confidence" — bulk-confirm all findings with `confidence_score ≥ 0.9` AND `citation_status = 'verified'` in one click, with a confirm dialog showing the count.
+### 3. `src/components/NewPlanReviewWizard.tsx` — **1,007 lines**
+Each step into its own file:
+- `wizard/StepProjectInfo.tsx`
+- `wizard/StepUpload.tsx`
+- `wizard/StepReview.tsx`
+- `wizard/wizard-constants.ts` (counties, trades, services arrays)
+- `wizard/useWizardState.ts`
 
-**4. Stuck-pipeline recovery (user-initiated)**
+### 4. `src/lib/county-report.ts` (521) and `src/lib/county-requirements/data.ts` (480)
+Move large static county arrays into JSON under `src/data/counties/` and import — keeps diffable code small and lets Vite tree-shake.
 
-In `StuckRecoveryBanner.tsx`, surface a "Retry from last successful stage" button that calls `run-review-pipeline` with `{ resume_from: <last completed stage> }`. The edge function already has stage checkpointing in `stage_checkpoints` — we just need to expose it. Banner shows when:
-- Last `pipeline_error_log` entry is < 30 min old, OR
-- A stage has been `running` for > 5 min with no checkpoint update.
+## E. Quick wins
 
-**5. Per-finding history popover**
+- Remove the 2 stray `console.log`s in `PlanReviewDetail.tsx` and `NewPlanReviewWizard.tsx`.
+- Resolve the lone `TODO` in `src/lib/letter-linter.ts`.
+- Replace the 1 `as any` (per project memory: strict TS, no `as any`).
 
-`FindingProvenancePopover` already shows AI provenance. Add a second tab "Reviewer activity" that reads from `finding_status_history` for that finding's id and shows a vertical timeline: "Apr 12 14:22 — Sarah marked confirmed", "Apr 12 14:30 — Sarah added note 'verified on sheet A-201'". This is the trail a state inspector or auditor needs.
+---
 
-### Files to create
+## Execution order (proposed)
 
-- `src/components/plan-review/LetterReadinessGate.tsx` — the blocking checklist.
-- `src/lib/letter-readiness.ts` — pure function that computes the readiness checklist from `findings + qc_status + project_dna`.
-- `src/components/plan-review/LetterSnapshotViewer.tsx` — read-only viewer for past sent letters.
-- `supabase/migrations/<ts>_comment_letter_snapshots.sql` — new table + RLS.
+1. **Delete dead code (A + C)** — instant win, lowest risk.
+2. **Wire Track 3 components (B)** — unblocks shipped work.
+3. **Split `run-review-pipeline` (D1)** — biggest maintainability win, isolated to one edge function.
+4. **Split wizard + detail page (D2 + D3)** — improves preview hot-reload time.
+5. **Externalize county data (D4)** — last, smallest payoff.
+6. **Quick wins (E)** — bundle into the same PR as #1.
 
-### Files to edit
+## Expected impact
 
-- `src/components/CommentLetterExport.tsx` — wire the gate, add "Mark sent" → snapshot insert.
-- `src/components/review-dashboard/NextStepBar.tsx` — add a "Letter not ready: X items left" step when gate fails.
-- `src/components/review-dashboard/TriageInbox.tsx` — "Needs decision" filter, counter, "Triage by AI confidence" bulk action.
-- `src/components/plan-review/StuckRecoveryBanner.tsx` — add user-initiated retry button.
-- `src/components/review-dashboard/FindingProvenancePopover.tsx` — add "Reviewer activity" tab.
-- `supabase/functions/run-review-pipeline/index.ts` — accept `{ resume_from }` query param and skip stages already in `stage_checkpoints`.
+- ~12 files deleted, ~5 deps removable
+- Largest source file drops from 4,206 → ~600 lines
+- 3 orphaned Track 3 features become live
+- Bundle size: minor (most dead code already tree-shaken), but DX and review speed improve materially
 
-### What this does NOT change
+## What this plan does NOT do
 
-- No changes to the AI prompts, models, or extraction logic — Tracks 1 + 2 already covered that.
-- No changes to billing, projects, inspections, or contractor portal.
-- No new external secrets needed.
+- No behavior changes, no schema changes, no new features
+- No tests added (none exist today; would be a separate proposal)
+- No edge function logic rewrites — splits are mechanical moves only
 
-### Outcome
-
-After Track 3, a reviewer cannot accidentally send a half-reviewed letter, every sent letter is immutably archived with its exact findings + evidence at send time, the triage workflow has a clear "X left to decide" counter, and any stuck pipeline can be retried from the dashboard with one click. This is the layer that takes the tool from "AI gives me good findings" to "I'm comfortable signing this and sending it to the state."
-
-Approve and I'll implement Track 3.
+**Approve and I'll execute steps 1–2 first (lowest risk, highest signal), then check in before tackling the pipeline split.**
