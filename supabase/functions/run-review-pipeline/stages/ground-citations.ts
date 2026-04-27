@@ -72,7 +72,15 @@ export async function stageGroundCitations(
 
   const defs = (defsRaw ?? []) as GroundingRow[];
   if (defs.length === 0) {
-    return { examined: 0, verified: 0, mismatch: 0, not_found: 0, hallucinated: 0 };
+    return {
+      examined: 0,
+      verified: 0,
+      verified_stub: 0,
+      mismatch: 0,
+      not_found: 0,
+      hallucinated: 0,
+      no_citation_required: 0,
+    };
   }
 
   type Key = { code: string; section: string; edition: string | null };
@@ -82,6 +90,41 @@ export async function stageGroundCitations(
     const code = (r.code_reference?.code || "FBC").toUpperCase();
     const edition = r.code_reference?.edition?.trim() || null;
     return { code, section, edition };
+  };
+
+  // Heuristic: an empty code_reference is "procedural" (not hallucinated) when
+  // the finding text is about missing metadata, missing submittals, or AHJ
+  // verification — none of which need a code section to be defensible.
+  const PROCEDURAL_PATTERNS = [
+    /\bmissing\b/i,
+    /\bnot provided\b/i,
+    /\bnot specified\b/i,
+    /\bnot indicated\b/i,
+    /\bnot shown\b/i,
+    /\bverify with\b/i,
+    /\bcoordinate with\b/i,
+    /\bAHJ\b/,
+    /\bauthority having jurisdiction\b/i,
+    /\bproject DNA\b/i,
+    /\bsubmittal\b/i,
+  ];
+  const looksProcedural = (def: GroundingRow): boolean => {
+    const text = `${def.finding}\n${def.required_action}`;
+    return PROCEDURAL_PATTERNS.some((re) => re.test(text));
+  };
+
+  // A canonical row counts as a "stub" when its requirement_text is the
+  // placeholder we seeded, or is too short to compare meaningfully.
+  const STUB_MARKERS = [
+    "see fbc for full requirement text",
+    "see fbc for the full requirement",
+    "placeholder",
+  ];
+  const isStubCanonical = (text: string | null | undefined): boolean => {
+    if (!text) return true;
+    const t = text.trim().toLowerCase();
+    if (t.length < 60) return true;
+    return STUB_MARKERS.some((m) => t.includes(m));
   };
 
   function parentSections(s: string): string[] {
