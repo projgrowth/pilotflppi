@@ -354,6 +354,22 @@ async function persistToStorage(html: string, projectId: string | undefined, fil
 }
 
 export function CommentLetterExport(props: CommentLetterExportProps & { onDocumentGenerated?: () => void }) {
+  // Findings included in this letter that don't have a verified citation. We
+  // surface a hard confirmation step so the reviewer can't accidentally ship
+  // a letter that quotes FBC sections we never grounded.
+  const unverified = props.findings.filter(
+    (f) =>
+      // Only block when there's a code_ref to verify in the first place.
+      f.code_ref &&
+      f.code_ref.trim().length > 0 &&
+      // `confidence` field doubles as a citation status hint on the Finding
+      // shape: "verified" means ground_citations matched the canonical text.
+      f.confidence !== "verified",
+  );
+
+  const [open, setOpen] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+
   const buildAndExport = () => {
     const html = buildLetterHTML(props);
     const filename = `Comment-Letter-R${props.round}-${props.projectName.replace(/\s+/g, "_")}.html`;
@@ -361,19 +377,81 @@ export function CommentLetterExport(props: CommentLetterExportProps & { onDocume
     persistToStorage(html, props.projectId, filename).then(() => props.onDocumentGenerated?.());
   };
 
-  const handlePrint = () => buildAndExport();
-  const handleSaveAsPDF = () => buildAndExport();
+  const tryExport = () => {
+    if (unverified.length === 0) {
+      buildAndExport();
+      return;
+    }
+    setConfirmed(false);
+    setOpen(true);
+  };
 
   return (
-    <div className="flex gap-2">
-      <Button size="sm" variant="outline" onClick={handleSaveAsPDF} className="gap-1.5">
-        <FileDown className="h-3.5 w-3.5" />
-        Save as PDF
-      </Button>
-      <Button size="sm" variant="outline" onClick={handlePrint} className="gap-1.5">
-        <Printer className="h-3.5 w-3.5" />
-        Print
-      </Button>
-    </div>
+    <>
+      <div className="flex gap-2">
+        <Button size="sm" variant="outline" onClick={tryExport} className="gap-1.5">
+          <FileDown className="h-3.5 w-3.5" />
+          Save as PDF
+        </Button>
+        <Button size="sm" variant="outline" onClick={tryExport} className="gap-1.5">
+          <Printer className="h-3.5 w-3.5" />
+          Print
+        </Button>
+      </div>
+
+      <AlertDialog open={open} onOpenChange={setOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-warning" />
+              {unverified.length} citation{unverified.length === 1 ? "" : "s"} not verified
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <span className="block">
+                These findings cite an FBC section that the pipeline couldn't
+                match against the canonical code text. The letter will still
+                send — but the burden of accuracy moves to you.
+              </span>
+              <span className="block max-h-40 overflow-y-auto rounded border border-border bg-muted/40 p-2 text-xs font-mono">
+                {unverified.slice(0, 8).map((f, i) => (
+                  <span key={i} className="block truncate">
+                    · {f.code_ref} — {f.description?.slice(0, 80)}
+                  </span>
+                ))}
+                {unverified.length > 8 && (
+                  <span className="block text-muted-foreground">
+                    +{unverified.length - 8} more
+                  </span>
+                )}
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <label className="flex items-start gap-2 text-sm cursor-pointer select-none">
+            <Checkbox
+              checked={confirmed}
+              onCheckedChange={(v) => setConfirmed(v === true)}
+              className="mt-0.5"
+            />
+            <span>
+              I have verified the citations on these {unverified.length} finding
+              {unverified.length === 1 ? "" : "s"}.
+            </span>
+          </label>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!confirmed}
+              onClick={() => {
+                setOpen(false);
+                buildAndExport();
+              }}
+            >
+              Export anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
+}
 }
