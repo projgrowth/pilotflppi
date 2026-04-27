@@ -112,7 +112,7 @@ export default function Dashboard() {
       <PageHeader
         title="Plan Review"
         actions={
-          <Button onClick={() => navigate("/review")} size="sm">
+          <Button onClick={() => navigate("/projects?new=1")} size="sm">
             <Plus className="h-4 w-4 mr-1.5" />
             New Review
           </Button>
@@ -176,7 +176,7 @@ export default function Dashboard() {
             title="No active reviews"
             description="Upload a plan set to begin your first AI-assisted review."
             actionLabel="Start New Review"
-            onAction={() => navigate("/review")}
+            onAction={() => navigate("/projects?new=1")}
           />
         ) : (
           <Card className="shadow-subtle overflow-hidden divide-y">
