@@ -17,6 +17,7 @@ import {
   normalizeAIDiscipline,
   disciplineForSheetFallback,
   mapSeverityToPriority,
+  canonicalDiscipline,
 } from "../_shared/types.ts";
 
 const FINDINGS_SCHEMA = {
