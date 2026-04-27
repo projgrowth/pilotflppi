@@ -133,9 +133,46 @@ export function adaptV2ToFindings(
       .join("")
       .trim();
 
-    // Compute deterministic pin if we can resolve the sheet to a page.
+    // Pin placement priority:
+    //   1. Real bbox stored in evidence_crop_meta (set by an upstream
+    //      vision/crop pass or by a human reposition). High confidence.
+    //   2. Resolved page_index from evidence_crop_meta + deterministic xy.
+    //      Medium confidence — page is right, position is hashed.
+    //   3. Fall back to the sheet_map snapshot lookup + deterministic xy.
+    //      Low confidence — last-resort so the pin still appears.
     let markup: MarkupData | undefined;
-    if (firstSheet) {
+    const meta = (d.evidence_crop_meta ?? {}) as Record<string, unknown>;
+    const metaPage = typeof meta.page_index === "number" ? meta.page_index : null;
+    const metaBbox =
+      typeof meta.x === "number" &&
+      typeof meta.y === "number" &&
+      typeof meta.w === "number" &&
+      typeof meta.h === "number"
+        ? { x: meta.x as number, y: meta.y as number, w: meta.w as number, h: meta.h as number }
+        : null;
+    const userPinned = meta.pinned === true || meta.user_repositioned === true;
+
+    if (metaPage !== null && metaBbox) {
+      markup = {
+        page_index: metaPage,
+        x: metaBbox.x,
+        y: metaBbox.y,
+        width: metaBbox.w,
+        height: metaBbox.h,
+        pin_confidence: userPinned ? "high" : "medium",
+        user_repositioned: userPinned,
+      };
+    } else if (metaPage !== null) {
+      const { x, y, width, height } = deterministicPin(`${d.id}|${firstSheet}`);
+      markup = {
+        page_index: metaPage,
+        x,
+        y,
+        width,
+        height,
+        pin_confidence: "low",
+      };
+    } else if (firstSheet) {
       const pageIndex = sheetIndex.get(firstSheet.toUpperCase().trim());
       if (typeof pageIndex === "number") {
         const { x, y, width, height } = deterministicPin(`${d.id}|${firstSheet}`);
@@ -169,6 +206,7 @@ export function adaptV2ToFindings(
       reasoning: reasoning || undefined,
       resolved: resolvedFromV2(d),
       model_version: d.model_version ?? undefined,
+      evidence_crop_url: d.evidence_crop_url ?? null,
       markup,
     };
   });
