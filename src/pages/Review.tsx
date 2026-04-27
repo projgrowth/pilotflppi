@@ -10,7 +10,8 @@ import ConfidenceBar from "@/components/shared/ConfidenceBar";
 import ReviewStagePipeline from "@/components/shared/ReviewStagePipeline";
 import DaysActiveBadge from "@/components/shared/DaysActiveBadge";
 import FppEmptyState from "@/components/shared/FppEmptyState";
-import { Search, FolderOpen, Activity } from "lucide-react";
+import { Search, FolderOpen, Activity, Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageHeader";
 import { useActivePipelineCount } from "@/hooks/useAllActivePipelines";
 
@@ -83,6 +84,12 @@ export default function Review() {
       <PageHeader
         title="Plan Review"
         subtitle="Select a project to begin or continue a review"
+        actions={
+          <Button onClick={() => navigate("/projects?action=new")} size="sm">
+            <Plus className="h-4 w-4 mr-1.5" />
+            New Review
+          </Button>
+        }
       />
 
       {activePipelineCount > 0 && (
@@ -118,7 +125,15 @@ export default function Review() {
           ))}
         </div>
       ) : filtered.length === 0 ? (
-        <FppEmptyState icon={FolderOpen} headline="No projects found" body="Upload a plan set to begin your first AI-assisted review." />
+        <div className="space-y-4">
+          <FppEmptyState icon={FolderOpen} headline="No projects found" body="Upload a plan set to begin your first AI-assisted review." />
+          <div className="flex justify-center">
+            <Button onClick={() => navigate("/projects?action=new")}>
+              <Plus className="h-4 w-4 mr-1.5" />
+              Start a new review
+            </Button>
+          </div>
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((p) => (
