@@ -280,6 +280,20 @@ export function PipelineProgressStepper({
                       return ` — auto-restarted ${c}× (max reached, retry manually)`;
                     })()}
                   </span>
+                ) : status === "running" && s.key === "discipline_review" && disciplineProgress ? (
+                  (() => {
+                    const sinceMs =
+                      Date.now() - new Date(disciplineProgress.last_chunk_at).getTime();
+                    const slow = sinceMs > 30_000;
+                    return (
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        {disciplineProgress.discipline} — chunk {disciplineProgress.chunk} of{" "}
+                        {disciplineProgress.total} ({disciplineProgress.findings_so_far} finding
+                        {disciplineProgress.findings_so_far === 1 ? "" : "s"} so far)
+                        {slow ? " — vision model is taking longer than usual…" : ""}
+                      </span>
+                    );
+                  })()
                 ) : status === "running" && hint ? (
                   <span className="ml-2 text-xs text-muted-foreground">{hint}…</span>
                 ) : status === "complete" && hint ? (
