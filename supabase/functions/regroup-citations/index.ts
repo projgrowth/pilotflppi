@@ -1,0 +1,110 @@
+// Re-runs the citation grounding + verification stages for an existing
+// plan_review without redoing the expensive vision/plan-extraction passes.
+// Used by the "Re-ground citations" admin button to fix historical findings
+// whose citation_status is hallucinated/not_found/unverified.
+
+import { createClient } from "jsr:@supabase/supabase-js@2";
+import { stageGroundCitations } from "../run-review-pipeline/stages/ground-citations.ts";
+import { stageVerify } from "../run-review-pipeline/stages/verify.ts";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+};
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return json({ error: "Unauthorized" }, 401);
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const planReviewId = body?.plan_review_id;
+    const skipVerify = body?.skip_verify === true;
+
+    if (!planReviewId || typeof planReviewId !== "string") {
+      return json({ error: "plan_review_id required" }, 400);
+    }
+
+    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const token = authHeader.replace("Bearer ", "");
+    const { data: claimsData, error: claimsErr } = await userClient.auth.getClaims(token);
+    if (claimsErr || !claimsData?.claims) {
+      return json({ error: "Unauthorized" }, 401);
+    }
+    const userId = claimsData.claims.sub as string;
+
+    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    // Admin-only — has_role(uid, 'admin').
+    const { data: isAdmin } = await admin.rpc("has_role", {
+      _user_id: userId,
+      _role: "admin",
+    });
+    if (!isAdmin) {
+      return json({ error: "Admin role required" }, 403);
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(`[regroup-citations] start review=${planReviewId} by=${userId}`);
+
+    // Reset all non-resolved/non-waived rows back to unverified so the
+    // verify stage will re-examine them.
+    if (!skipVerify) {
+      await admin
+        .from("deficiencies_v2")
+        .update({ verification_status: "unverified" })
+        .eq("plan_review_id", planReviewId)
+        .neq("status", "resolved")
+        .neq("status", "waived")
+        .neq("verification_status", "overturned")
+        .neq("verification_status", "superseded");
+    }
+
+    const groundResult = await stageGroundCitations(admin, planReviewId);
+    const verifyResult = skipVerify
+      ? { skipped: true }
+      : await stageVerify(admin, planReviewId);
+
+    await admin.from("activity_log").insert({
+      event_type: "citations_regrounded",
+      description: `Re-grounded citations and re-ran verification for review ${planReviewId}.`,
+      project_id: null,
+      actor_id: userId,
+      actor_type: "admin",
+      metadata: {
+        plan_review_id: planReviewId,
+        ground: groundResult,
+        verify: verifyResult,
+      },
+    });
+
+    return json({ ok: true, ground: groundResult, verify: verifyResult });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[regroup-citations] error", err);
+    return json(
+      { error: err instanceof Error ? err.message : "Unknown error" },
+      500,
+    );
+  }
+});
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
