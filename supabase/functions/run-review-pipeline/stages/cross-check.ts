@@ -73,6 +73,8 @@ const CROSS_SHEET_SCHEMA = {
                 "room_finish_vs_schedule",
                 "fixture_count_vs_plumbing",
                 "egress_width_vs_capacity",
+                "accessibility_clearance_vs_plan",
+                "roof_uplift_vs_truss_layout",
                 "other",
               ],
             },
