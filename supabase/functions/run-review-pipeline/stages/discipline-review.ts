@@ -404,6 +404,14 @@ export async function stageDisciplineReview(
   const stageStartedAt = Date.now();
   const STAGE_SOFT_TIMEOUT_MS = 90_000;
 
+  // Hard stall watchdog: if no progress beacon has been written for this long,
+  // assume the worker is wedged (Gemini hung, gateway stuck, etc.) and bail.
+  // The dispatcher's NON_FATAL_RETRY_STAGES path will reschedule automatically
+  // and the per-discipline checkpoints make the retry resume from where we
+  // left off rather than restart.
+  const STALL_TIMEOUT_MS = 120_000;
+  let lastBeaconAt = Date.now();
+
   // How many chunks per discipline run concurrently. 3 is the sweet spot:
   // - high enough to crush a 10-chunk Architectural set in ~3 vision rounds
   //   (~30-45s vs ~100-150s sequentially)
