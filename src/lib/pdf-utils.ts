@@ -266,16 +266,34 @@ export async function rasterizeAndUploadPagesResilient(
     quality?: number;
     startGlobalIndex?: number;
     batchSize?: number;
+    /** Per-chunk render timeout in ms. A stuck PDF.js worker won't freeze the wizard. */
+    chunkTimeoutMs?: number;
+    /** Total wall-clock cap; once exceeded, remaining pages are abandoned and left to the server-side rasterizer. */
+    totalTimeoutMs?: number;
+    /** If failure ratio exceeds this (0-1), abort and let server fallback handle the rest. */
+    abortFailureRatio?: number;
+    /** Called after each page completes (success or failure). */
+    onProgress?: (done: number, total: number) => void;
+    /** Called after each successfully uploaded page so callers can persist incrementally. */
+    onPageReady?: (asset: PreparedPageAsset) => void | Promise<void>;
   } = {},
-): Promise<RasterizeResult> {
+): Promise<RasterizeResult & { aborted?: boolean }> {
   const dpi = opts.dpi ?? 96;
   const quality = opts.quality ?? 0.72;
   const batchSize = Math.max(1, opts.batchSize ?? 4);
+  const chunkTimeoutMs = opts.chunkTimeoutMs ?? 30_000;
+  const totalTimeoutMs = opts.totalTimeoutMs ?? 5 * 60_000;
+  const abortFailureRatio = opts.abortFailureRatio ?? 0.4;
+  const startedAt = Date.now();
   let nextGlobalPageIndex = opts.startGlobalIndex ?? 0;
   const succeeded: PreparedPageAsset[] = [];
+  const totalPages = files.reduce((sum, f) => sum + (f.pageCount || 0), 0);
+  let processed = 0;
+  let aborted = false;
   const failures: Array<{ fileName: string; pageIndex: number; reason: string }> = [];
 
   for (const uf of files) {
+    if (aborted) break;
     const isPdf = uf.file.type === "application/pdf" || uf.name.toLowerCase().endsWith(".pdf");
     if (!isPdf) continue;
 
@@ -283,14 +301,32 @@ export async function rasterizeAndUploadPagesResilient(
     // every canvas alive simultaneously. Browsers without aggressive GC will
     // OOM mid-PDF if we render all pages first then upload.
     for (let chunkStart = 0; chunkStart < uf.pageCount; chunkStart += batchSize) {
+      if (aborted) break;
+
+      // Global timeout — abandon remaining pages and let the server-side
+      // rasterizer pick up the slack. This is the key fix that prevents the
+      // wizard from hanging forever on a stuck PDF.js worker.
+      if (Date.now() - startedAt > totalTimeoutMs) {
+        aborted = true;
+        for (let p = chunkStart; p < uf.pageCount; p++) {
+          failures.push({ fileName: uf.name, pageIndex: p, reason: "aborted: total timeout" });
+          nextGlobalPageIndex += 1;
+          processed += 1;
+          opts.onProgress?.(processed, totalPages);
+        }
+        break;
+      }
+
       const chunkLen = Math.min(batchSize, uf.pageCount - chunkStart);
       let pageJpegs: Array<{ pageIndex: number; blob: Blob }> = [];
       try {
-        pageJpegs = await renderPDFPagesToJpegs(uf.file, chunkLen, dpi, quality, {
-          startPage: chunkStart,
-        });
+        pageJpegs = await Promise.race<Array<{ pageIndex: number; blob: Blob }>>([
+          renderPDFPagesToJpegs(uf.file, chunkLen, dpi, quality, { startPage: chunkStart }),
+          new Promise<Array<{ pageIndex: number; blob: Blob }>>((_, reject) =>
+            setTimeout(() => reject(new Error(`chunk render timed out after ${chunkTimeoutMs}ms`)), chunkTimeoutMs),
+          ),
+        ]);
       } catch (err) {
-        // Whole chunk failed to render — record one failure per page and move on.
         for (let p = chunkStart; p < chunkStart + chunkLen; p++) {
           failures.push({
             fileName: uf.name,
@@ -298,6 +334,14 @@ export async function rasterizeAndUploadPagesResilient(
             reason: `render: ${err instanceof Error ? err.message : String(err)}`,
           });
           nextGlobalPageIndex += 1;
+          processed += 1;
+          opts.onProgress?.(processed, totalPages);
+        }
+        // Abort threshold check — if too many pages are failing, give up and
+        // let the server-side rasterizer finish.
+        if (processed > 0 && failures.length / processed >= abortFailureRatio && processed >= 6) {
+          aborted = true;
+          break;
         }
         continue;
       }
@@ -318,13 +362,17 @@ export async function rasterizeAndUploadPagesResilient(
         const s = settled[i];
         const page = pageJpegs[i];
         if (s.status === "fulfilled") {
-          succeeded.push({
+          const asset: PreparedPageAsset = {
             plan_review_id: reviewId,
             source_file_path: uf.storagePath,
             page_index: nextGlobalPageIndex,
             storage_path: s.value.pagePath,
             status: "ready",
-          });
+          };
+          succeeded.push(asset);
+          if (opts.onPageReady) {
+            try { await opts.onPageReady(asset); } catch { /* incremental persist is best-effort */ }
+          }
         } else {
           failures.push({
             fileName: uf.name,
@@ -333,11 +381,13 @@ export async function rasterizeAndUploadPagesResilient(
           });
         }
         nextGlobalPageIndex += 1;
+        processed += 1;
+        opts.onProgress?.(processed, totalPages);
       }
     }
   }
 
-  return { succeeded, failures };
+  return { succeeded, failures, aborted };
 }
 
 // renderPDFPagesForVision removed — superseded by browser-side resilient
