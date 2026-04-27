@@ -55,6 +55,12 @@ const STAGES: Stage[] = [
 // `prepare_pages` here is a manifest-validation fast-pass (the wizard
 // pre-rasterizes in the browser); it does NOT loop through MuPDF chunks
 // in the default path.
+//
+// `ground_citations` lives in CORE (not DEEP) so every shipped run validates
+// every finding's FBC citation against `fbc_code_sections`. The cost is one
+// cheap deterministic comparison per finding (no AI call) — worth it because
+// it's the difference between a reviewer signing a letter with verified code
+// references vs. shipping AI guesses.
 const CORE_STAGES: Stage[] = [
   "upload",
   "prepare_pages",
@@ -62,15 +68,16 @@ const CORE_STAGES: Stage[] = [
   "dna_extract",
   "discipline_review",
   "dedupe",
+  "ground_citations",
   "complete",
 ];
 
 // Deep QA = optional secondary pass. Runs only when explicitly invoked
 // with mode='deep'. Reuses existing core artifacts (deficiencies,
 // project_dna, sheet_coverage) — does not re-run discipline_review.
+// `ground_citations` was promoted to CORE; deep keeps the heavier QA passes.
 const DEEP_STAGES: Stage[] = [
   "verify",
-  "ground_citations",
   "cross_check",
   "deferred_scope",
   "prioritize",

@@ -27,12 +27,12 @@ export const CORE_STAGES: PipelineStage[] = [
   "dna_extract",
   "discipline_review",
   "dedupe",
+  "ground_citations",
   "complete",
 ];
 
 export const DEEP_STAGES: PipelineStage[] = [
   "verify",
-  "ground_citations",
   "cross_check",
   "deferred_scope",
   "prioritize",
