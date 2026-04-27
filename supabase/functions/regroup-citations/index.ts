@@ -1,11 +1,10 @@
 // Re-runs the citation grounding + verification stages for an existing
-// plan_review without redoing the expensive vision/plan-extraction passes.
-// Used by the "Re-ground citations" admin button to fix historical findings
-// whose citation_status is hallucinated/not_found/unverified.
+// plan_review. Edge functions are bundled independently so we cannot import
+// stage modules from the run-review-pipeline folder; instead we reset stale
+// verification rows here and invoke the pipeline function over HTTP to
+// perform the actual ground+verify work.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { stageGroundCitations } from "../run-review-pipeline/stages/ground-citations.ts";
-import { stageVerify } from "../run-review-pipeline/stages/verify.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -73,10 +72,32 @@ Deno.serve(async (req) => {
         .neq("verification_status", "superseded");
     }
 
-    const groundResult = await stageGroundCitations(admin, planReviewId);
-    const verifyResult = skipVerify
-      ? { skipped: true }
-      : await stageVerify(admin, planReviewId);
+    // Trigger the pipeline function over HTTP to re-run ground + verify.
+    // Edge functions are bundled independently, so we cannot import stage
+    // modules directly across function folders.
+    const stages = skipVerify ? ["ground-citations"] : ["ground-citations", "verify"];
+    const pipelineResp = await fetch(
+      `${SUPABASE_URL}/functions/v1/run-review-pipeline`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+        body: JSON.stringify({
+          plan_review_id: planReviewId,
+          stages,
+          resume: true,
+        }),
+      },
+    );
+    const pipelinePayload = await pipelineResp.json().catch(() => ({}));
+    if (!pipelineResp.ok) {
+      return json(
+        { error: "Pipeline call failed", details: pipelinePayload },
+        502,
+      );
+    }
 
     await admin.from("activity_log").insert({
       event_type: "citations_regrounded",
@@ -86,12 +107,12 @@ Deno.serve(async (req) => {
       actor_type: "admin",
       metadata: {
         plan_review_id: planReviewId,
-        ground: groundResult,
-        verify: verifyResult,
+        stages,
+        pipeline: pipelinePayload,
       },
     });
 
-    return json({ ok: true, ground: groundResult, verify: verifyResult });
+    return json({ ok: true, stages, pipeline: pipelinePayload });
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("[regroup-citations] error", err);
