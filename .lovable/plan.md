@@ -1,178 +1,77 @@
 
+## What's actually wrong with Suncoast Porsche (and why)
 
-# Two plans, one approval
+I queried the latest run (`aa5638ef…`, 78 pages, 26 findings, status `complete`) and traced it through `pipeline_error_log`, `review_pipeline_status`, `sheet_coverage`, `project_dna`, and `deficiencies_v2`. Three independent failures stacked:
 
-## A. Strip to "Plan Review only" (now)
-## B. Tighten review legitimacy + pipeline (after the strip)
+### 1. Submittal is incomplete and nothing flagged it
+Sheet map is correct: every page is `A-`, `AD-`, or `G-` prefixed. There is **no Structural, MEP, Plumbing, Electrical, or Fire Protection** in the upload — for a 51,086 sf, 2-story, mixed A-3/S-2 auto dealership. The pipeline doesn't notice. It runs `discipline_review` on Architectural only, then ships 26 findings, most of which are unanswerable (e.g. "construction type missing from cover sheet" — true, but Structural/MEP wouldn't be in the set anyway). The reviewer can't tell from the dashboard that this is a partial submittal vs. a complete one with bad arch.
 
-You can approve both, A only, or B only.
+### 2. `ground_citations` silently skipped
+`review_pipeline_status` for this run lists 7 stages: `upload, prepare_pages, sheet_map, dna_extract, discipline_review, dedupe, complete`. **No `ground_citations` row exists.** Across the last 7 days, 11 of 16 reviews never created a `ground_citations` row. All 26 findings on Suncoast still have `citation_status='unverified'` and `citation_grounded_at IS NULL`. Cause: the orchestrator advances `activeChain[idx+1]` after dedupe, but `scheduleNextStage` for `ground_citations` is being lost (likely a worker crash with no `pipeline_error_log` entry, or the entry-point used a stale `activeChain` from before `ground_citations` was promoted to CORE). Either way, **the Plan B "core stage" promotion isn't actually executing.**
 
----
+### 3. Findings duplicate the DNA gap instead of being suppressed by it
+DNA extracted `construction_type=NULL`, `wind_speed_vult=NULL`, `flood_zone=NULL`, etc. (10 missing fields). Architectural expert then wrote **6 separate findings** (DEF-A001…A008) all saying variants of "construction type / FBC edition / code summary missing from cover sheet." The DNA stage already knows this; the discipline experts shouldn't be re-flagging the same gap 6 times.
 
-# A · Strip the app to plan-review core
-
-The sidebar has 12 destinations. Only ~4 are load-bearing for the review-and-issue-comments loop. Everything else is splitting attention and adding maintenance.
-
-## What stays (the workflow)
-
-```text
-Dashboard         — landing, "what needs me" queue
-Projects          — list + create new review
-Plan Review       — list of reviews
-Pipeline Activity — the live stepper / debug surface (you depend on this)
-Settings          — firm settings, jurisdictions live as a tab here
-```
-
-Plus the deep pages that already work:
-- `/plan-review/:id` (the actual review work surface)
-- `/plan-review/:id/dashboard` (the review dashboard / triage)
-
-## What gets parked (route stays, sidebar entry removed)
-
-Hide from sidebar but keep the page mounted so existing links/bookmarks still resolve. Behind a `VITE_FEATURE_EXTRAS` flag we flip to `true` later when you want them back.
-
-```text
-Inspections      → hidden
-Documents        → hidden
-Invoices         → hidden
-Deficiencies     → hidden  (it's a library, not a daily destination)
-Contractors      → hidden
-Analytics        → hidden
-Lead Radar       → hidden
-Milestone Radar  → hidden
-Jurisdictions    → moved into Settings as a tab
-```
-
-Bottom mobile tab bar shrinks from 5 → 3: **Dashboard · Review · Menu**.
-
-## What gets deleted (truly dead weight)
-
-After grepping links, these are unreferenced or only reachable from the hidden sidebar — safe to remove the route + page later, but in this pass we keep them mounted to avoid breaking anything. One follow-up cleanup PR.
-
-## Dashboard rewrite
-
-Today's `/dashboard` has deadline rings, statutory clocks, fee widgets, lead radar shortcuts. Replace with a **single "Active Reviews" board**:
-
-```text
-┌──────────────────────────────────────────────────┐
-│  ACTIVE REVIEWS (3)                  + New       │
-├──────────────────────────────────────────────────┤
-│  ▣ Pizza Restaurant       ── stuck at sheet_map  │
-│      ⓘ 2 min idle · resume                       │
-├──────────────────────────────────────────────────┤
-│  ▣ SUNCOAST PORSCHE       ── ready for letter    │
-│      47 findings · open                          │
-├──────────────────────────────────────────────────┤
-│  ▣ Site Plan              ── needs preparation   │
-│      open                                        │
-└──────────────────────────────────────────────────┘
-
-NEEDS MY REVIEW (7)                       view all
-─ findings flagged for human review across reviews
-```
-
-That's the entire page. Statutory clocks, fees, etc. survive at the project detail level. The dashboard becomes "what should I touch in the next hour".
-
-## Files
-
-```text
-EDIT  src/components/AppSidebar.tsx          ── trim mainNav + bottomTabs
-EDIT  src/pages/Dashboard.tsx                ── rewrite around active reviews
-EDIT  src/pages/Settings.tsx                 ── add Jurisdictions tab
-EDIT  src/App.tsx                            ── routes stay; no removal
-NEW   src/lib/feature-flags.ts               ── single VITE_FEATURE_EXTRAS gate
-```
-
-No DB changes, no backend changes. Reversible in one commit.
+### 4. DNA didn't read sheets G003/G004 (which are literally "Code Information")
+Sheets `G003 — Code Information - Occupancy` and `G004 — Code Information - Energy` exist in the set. DNA extracted `occupancy_classification = "A-3; S-2"` (good) but missed everything else. So either the DNA stage didn't include G003/G004 in its vision payload, or it did but parsed only occupancy. This is the upstream cause of #3.
 
 ---
 
-# B · Plan-review legitimacy + pipeline improvements
+## Plan: fix these four things in one pass
 
-This is where the app earns trust. A reviewer signing a comment letter needs to know **every finding is grounded**. Today the pipeline can ship findings whose citations were never matched against `fbc_code_sections`.
+### A. Add a Submittal Completeness Gate (new pipeline stage, runs after `sheet_map`)
+- New stage `submittal_check` inserted into `CORE_STAGES` between `sheet_map` and `dna_extract`.
+- Logic: given the DNA's `occupancy_classification`, `total_sq_ft`, `stories`, decide which trade disciplines are reasonably required for permit. For commercial > 5,000 sf: require S, M, P, E. For ≥2 stories or A/B/F/M occupancy: require FP. If a required discipline has **zero sheets** in `sheet_coverage`, write **one** `requires_human_review=true` finding to `deficiencies_v2` titled "Submittal incomplete — [Trade] drawings not provided" and set `plan_reviews.ai_run_progress.submittal_incomplete = true`.
+- New top-of-page banner on `PlanReviewDetail` shown when `submittal_incomplete=true`: "Architectural-only submittal — 5 trades not provided. Confirm whether resubmittal is required before issuing comments."
+- The discipline_review stage for the present trades still runs — but every finding from those reviews is annotated `submittal_context: "architectural_only"` so the letter export adds a preamble: "These comments cover the architectural set only. Structural, MEP, Plumbing, Electrical, and Fire Protection drawings must be submitted under separate cover."
 
-## 1. Don't surface ungrounded findings as "verified"
+### B. Fix `ground_citations` actually executing
+- Root cause hypothesis: when the chain advances from `dedupe`, `setStage(...,{status:'pending'})` for `ground_citations` is happening but the `scheduleNextStage` self-invoke is being dropped. Two reinforcing fixes:
+  1. **Watchdog sweep at the start of every `complete` stage**: before marking complete, call `runPendingTailStages()` which scans `review_pipeline_status` for any stage in `activeChain` that is not in (`complete`,`error`) and runs them inline before completing. Belt-and-suspenders.
+  2. **Make `ground_citations` idempotent + invokable on already-complete reviews**: add a "Re-ground citations" button on `PlanReviewDetail` (admin only) that POSTs `start_from=ground_citations` to the edge function. Cost: one DB query per finding, no AI.
+- One-time backfill: for every existing review with `citation_grounded_at IS NULL`, run `stageGroundCitations`. Use a small Node script via the edge function, not a migration.
 
-Today `deficiencies_v2.citation_status` defaults to `'unverified'` and only flips to `'grounded'` after the (deep-pass-only) `ground_citations` stage runs. Core pipeline never grounds. Result: reviewer sees a finding with `FBC 1011.5.4` cited and no signal that the citation was never validated.
+### C. DNA-Aware Discipline Review
+- Pass DNA's `missing_fields` array into every discipline expert's system prompt as: *"The cover-sheet code summary is already known to be missing the following items: [list]. **Do not** re-raise findings about these specific gaps — they're tracked separately. Focus on technical compliance issues you can identify from the drawings themselves."*
+- Add a post-discipline filter: any finding whose normalized text matches a DNA-gap pattern (`/cover sheet.*missing/i`, `/construction type.*not specified/i`, `/code summary.*required/i`) is auto-merged into a single "DNA gap" finding instead of being kept separately. Reuses the existing dedupe bucketing.
 
-**Fix:** in `FindingCard` / `DeficiencyCard`, render an explicit badge:
-- `citation_status='grounded'` and `match_score >= 0.8` → green "Verified citation"
-- otherwise → amber "Citation unverified — review before sending"
-
-And gate the Comment Letter "Send" / "Export" button: if any included finding is unverified, require an explicit checkbox *"I've verified the citations on these N findings"*. No more silent shipping.
-
-## 2. Make grounding part of CORE, not deep-only
-
-Move `ground_citations` from `DEEP_STAGES` into `CORE_STAGES`, immediately after `dedupe`:
-
-```text
-CORE_STAGES (new):
-  upload → prepare_pages → sheet_map → dna_extract
-  → discipline_review → dedupe → ground_citations → complete
-```
-
-Cost: one extra cheap embedding/compare pass per finding. Benefit: every finding shipped from a default run has a real citation match score. Today's "deep" mode becomes **verify + cross_check + deferred_scope + prioritize** — the truly optional QA passes.
-
-## 3. Sheet-coverage gate before discipline review starts
-
-`sheet_map` produces `sheet_coverage` per discipline. If a discipline has zero mapped sheets we still spawn a discipline-review chunk and the AI hallucinates findings against thin air. Add a precondition:
-
-```ts
-// before launching discipline_review for a discipline:
-if (sheetsForDiscipline(d).length === 0) {
-  recordSkip(d, "no sheets mapped for this discipline");
-  continue;
-}
-```
-
-The skipped discipline shows on the dashboard as "Not reviewed — no sheets" with a one-click "Force review anyway" override. Honest > complete.
-
-## 4. Confidence floor + "low confidence" bucket
-
-`deficiencies_v2.confidence_score` exists but isn't used in the UI ranking. Two changes:
-
-- Hide findings with `confidence_score < 0.4` from the default list. Show a "12 low-confidence findings hidden — review" expander.
-- Sort the rest descending by `confidence_score` within each severity tier.
-
-Stops bottom-of-the-barrel guesses dominating the inbox.
-
-## 5. Round-over-round carryover requires reviewer confirmation
-
-`previous_findings` is already tracked. Today on round 2 the AI re-finds the same things and we dedupe. Better: on starting round N, present "**Carry-over: 14 findings unresolved from round N-1 — confirm before re-running**". Reviewer ticks which ones to keep watching. Round N pipeline knows to focus there. Cuts AI cost, kills duplicate findings, and is the reviewer's actual mental model.
-
-## 6. Pipeline observability the reviewer can trust
-
-Two small surface changes:
-
-- Every finding card shows a tiny footer: `sheet_map · discipline_review (Architectural) · dedupe · ground_citations` — the chain that produced it. Click → opens the relevant `pipeline_error_log` rows. Already 90-day retained.
-- Pipeline Activity gets a "Health" column per active run: `% findings grounded · % low-confidence · % requires_human_review`. If a run lands at "0% grounded, 80% low confidence" the reviewer sees that **before** opening it.
-
-## 7. Lock the model + prompt version per finding
-
-`deficiencies_v2` already has `model_version` and `prompt_version_id`. Today they get filled but aren't shown. Add to the finding's expand-detail view: "Generated by `gemini-2.5-pro` · prompt v3 · 2026-04-23 19:30". When you change a prompt next quarter and a reviewer asks "why did the same plan suddenly find 12 more things?" you have the answer.
-
-## Files
-
-```text
-EDIT  supabase/functions/run-review-pipeline/index.ts
-        ── ground_citations into CORE_STAGES
-        ── sheet-coverage precondition for discipline_review
-        ── emit chain metadata per finding
-EDIT  src/lib/pipeline-stages.ts                ── mirror CORE_STAGES change
-EDIT  src/components/FindingCard.tsx
-        ── citation badge, confidence sort, chain footer, model footer
-EDIT  src/components/CommentLetterExport.tsx    ── unverified-citation gate
-EDIT  src/components/plan-review/RoundCarryoverPanel.tsx
-        ── reviewer-confirms-carryover before round N pipeline
-EDIT  src/pages/PipelineActivity.tsx            ── per-run Health column
-NEW   src/components/plan-review/CitationStatusBadge.tsx
-```
-
-No new tables. All columns exist already. Reversible per file.
+### D. Force DNA to actually read code-summary sheets
+- `stageDnaExtract` currently picks "cover/code-summary pages from sheet_coverage; fall back to first 3 pages." Looking at the code (line 1006-1009), the matcher is loose. Change it to **always include any sheet whose title contains "code", "occupancy", "summary", "data" (case-insensitive)** plus the first 2 sheets, and pass them all in one Gemini Pro call (not Flash). Cost is small (≤5 pages); accuracy gain is huge.
+- Add a logged metric `dna_pages_read` so we can audit which sheets DNA actually saw.
 
 ---
 
-# Recommended path
+## Diagnostics added to the dashboard (free, no schema change)
 
-Ship **A** today (one-day change, immediate clarity). Then **B** in the same week — those are the changes that turn this from "AI-assisted draft" into "a reviewer can sign their name to it". The hidden routes from A re-light when you flip the env flag once invoices/CRM matter again.
+- **Per-review provenance row** at top of `PlanReviewDetail`:
+  `Sheet map: 78 (A:74, G:4, S:0, M:0, P:0, E:0, FP:0)` · `DNA: 6/16 fields` · `Citations: 0/26 grounded` · `Disciplines run: 1/9`. Color-coded green/amber/red. Anyone looking at the page sees the gaps in 1 second.
+- **Pipeline tail check** on the existing `useReviewHealth` hook: surface `ground_citations_skipped: true` when the stage row is missing or `citation_grounded_at IS NULL` for any finding. Show as red badge in the dashboard "Active reviews" list.
+
+---
+
+## Out of scope for this pass (parking lot)
+
+- Switching sheet_map to a single-call Pro vision pass instead of 4-image Flash batches (would help differently-shaped projects but Suncoast wasn't a sheet_map failure).
+- Per-county "required disciplines" override matrix.
+- Auto-rejecting incomplete submittals at upload time (we should warn, not block — sometimes private-provider clients want partial review for early feedback).
+
+## Technical details
+
+**Files to change**
+
+- `supabase/functions/run-review-pipeline/index.ts`
+  - Insert `submittal_check` stage (`Stage` union, `STAGES`, `CORE_STAGES`, `stageImpls`).
+  - Add `stageSubmittalCheck()` (~80 lines).
+  - In `stageComplete()`, prepend `runPendingTailStages()` watchdog (~40 lines).
+  - In `stageDnaExtract()`, broaden cover/code-summary sheet selection (~15 line diff).
+  - In each discipline expert prompt builder, append DNA gap notice (~5 lines × 9 disciplines).
+  - In `stageDedupe()`, add DNA-gap auto-merge bucket (~25 lines).
+- `src/pages/PlanReviewDetail.tsx` — completeness banner + provenance strip (~60 lines added).
+- `src/hooks/useReviewHealth.ts` — `ground_citations_skipped` derivation (~10 lines).
+- `src/components/plan-review/StuckRecoveryBanner.tsx` — add "Re-ground citations" admin action (~20 lines).
+- One-shot backfill: invoke `start_from=ground_citations` for the 11 stuck reviews after deploy.
+
+**No DB schema changes required.** Existing columns (`citation_status`, `requires_human_review`, `ai_run_progress` JSONB) cover everything.
+
+**Estimated cost per run after changes**: +1 DB roundtrip for completeness check, +0 AI calls (the gap check is purely structural). DNA accuracy improves at the cost of ~1 extra page in the existing DNA call. Net pipeline cost: roughly flat.
 

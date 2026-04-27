@@ -10,6 +10,7 @@ export type PipelineStage =
   | "upload"
   | "prepare_pages"
   | "sheet_map"
+  | "submittal_check"
   | "dna_extract"
   | "discipline_review"
   | "cross_check"
@@ -24,6 +25,7 @@ export const CORE_STAGES: PipelineStage[] = [
   "upload",
   "prepare_pages",
   "sheet_map",
+  "submittal_check",
   "dna_extract",
   "discipline_review",
   "dedupe",
@@ -42,6 +44,7 @@ export const PIPELINE_STAGES: { key: PipelineStage; label: string }[] = [
   { key: "upload", label: "Upload" },
   { key: "prepare_pages", label: "Prepare Pages" },
   { key: "sheet_map", label: "Sheet Map" },
+  { key: "submittal_check", label: "Submittal Check" },
   { key: "dna_extract", label: "DNA Extract" },
   { key: "discipline_review", label: "Discipline Review" },
   { key: "cross_check", label: "Cross-Check" },
