@@ -176,18 +176,34 @@ export async function stageGroundCitations(
     return null;
   }
 
-  const counts = { verified: 0, mismatch: 0, not_found: 0, hallucinated: 0 };
+  const counts = {
+    verified: 0,
+    verified_stub: 0,
+    mismatch: 0,
+    not_found: 0,
+    hallucinated: 0,
+    no_citation_required: 0,
+  };
   const now = new Date().toISOString();
 
   for (const def of defs) {
     const key = keyOf(def);
-    let status: "verified" | "mismatch" | "not_found" | "hallucinated";
+    let status:
+      | "verified"
+      | "verified_stub"
+      | "mismatch"
+      | "not_found"
+      | "hallucinated"
+      | "no_citation_required";
     let score: number | null = null;
     let canonText: string | null = null;
     let matchedSection: string | null = null;
+    let stubMatched = false;
 
     if (!key) {
-      status = "hallucinated";
+      // Empty / unparseable code_reference. Distinguish AI hallucination from
+      // a legitimately citation-less finding (missing metadata, AHJ verify).
+      status = looksProcedural(def) ? "no_citation_required" : "hallucinated";
     } else {
       const found = lookup(key);
       if (!found) {
@@ -200,23 +216,49 @@ export async function stageGroundCitations(
           1500,
         );
         const aiBlob = `${def.finding} ${def.required_action}`;
-        score = citationOverlapScore(aiBlob, hit.requirement_text);
         const aiBlobLc = aiBlob.toLowerCase();
+        const titleLc = (hit.title ?? "").toLowerCase();
         const sectionLc = ms.toLowerCase();
-        const mentionsSection = aiBlobLc.includes(sectionLc) ||
+        const mentionsSection =
+          aiBlobLc.includes(sectionLc) ||
           aiBlobLc.includes(key.section.toLowerCase());
         const usedParent = ms !== key.section;
-        if (usedParent && mentionsSection) {
-          status = "verified";
+
+        if (isStubCanonical(hit.requirement_text)) {
+          // Canonical row is a placeholder — section existence is the only
+          // signal we have. Treat as verified_stub so reviewers know not to
+          // expect text-overlap evidence.
+          status = "verified_stub";
+          stubMatched = true;
         } else {
-          status = score >= 0.30 && mentionsSection ? "verified" : "mismatch";
+          score = citationOverlapScore(aiBlob, hit.requirement_text);
+          // Title-token overlap rescues findings that quote section titles
+          // verbatim ("Separated Occupancies") without lots of canonical body.
+          const titleOverlap =
+            titleLc.length > 3 && aiBlobLc.includes(titleLc) ? 0.25 : 0;
+          const effective = Math.max(score, titleOverlap);
+          if (usedParent && mentionsSection) {
+            status = "verified";
+          } else {
+            // Threshold lowered 0.30 → 0.20; mention of section number OR
+            // canonical title is required.
+            status =
+              effective >= 0.20 && (mentionsSection || titleOverlap > 0)
+                ? "verified"
+                : "mismatch";
+          }
         }
       }
     }
     counts[status]++;
 
+    // verified_stub and no_citation_required are NOT human-review triggers —
+    // they're informational. Only true mismatches / hallucinations / not_found
+    // require a human to look.
     const needsHumanReview =
-      status === "mismatch" || status === "hallucinated" || status === "not_found";
+      status === "mismatch" ||
+      status === "hallucinated" ||
+      status === "not_found";
     const update: Record<string, unknown> = {
       citation_status: status,
       citation_match_score: score,
@@ -225,6 +267,12 @@ export async function stageGroundCitations(
     };
     if (matchedSection && matchedSection !== key?.section) {
       update.evidence_crop_meta = { matched_parent_section: matchedSection };
+    }
+    if (stubMatched) {
+      update.evidence_crop_meta = {
+        ...((update.evidence_crop_meta as Record<string, unknown>) ?? {}),
+        canonical_is_stub: true,
+      };
     }
     if (needsHumanReview) {
       update.requires_human_review = true;
@@ -247,9 +295,11 @@ export async function stageGroundCitations(
   return {
     examined: defs.length,
     verified: counts.verified,
+    verified_stub: counts.verified_stub,
     mismatch: counts.mismatch,
     not_found: counts.not_found,
     hallucinated: counts.hallucinated,
+    no_citation_required: counts.no_citation_required,
     crops_attached: cropResult.attached,
     crops_skipped: cropResult.skipped,
     crops_unresolved_sheets: cropResult.unresolved_sheets,
