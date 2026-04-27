@@ -452,10 +452,20 @@ export async function stageDisciplineReview(
           },
         })
         .eq("id", planReviewId);
+      lastBeaconAt = Date.now();
     } catch (err) {
       console.error("[discipline_review] progress write failed:", err);
     }
   };
+
+  // Seed an initial beacon so the watchdog and the UI have a t=0 reference
+  // even before the first chunk completes.
+  await writeChunkProgress({
+    discipline: disciplinesToRun[0] ?? "",
+    chunk: 0,
+    total: 0,
+    findingsSoFar: 0,
+  }).catch(() => {});
 
   // Resumable chunk checkpoints. `stage_checkpoints.discipline_review` is a
   // map of `{ [discipline]: lastChunkCompleted }`. On retry we skip every
