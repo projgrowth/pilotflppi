@@ -1,8 +1,19 @@
 // Stage: ground_citations.
 // Compares each finding's cited FBC section against canonical fbc_code_sections
-// rows. Verdicts: verified | mismatch | not_found | hallucinated. Then attaches
-// a one-click visual receipt (signed sheet image URL) to each finding so
-// reviewers don't have to flip back to the PDF to confirm context.
+// rows. Verdicts: verified | verified_stub | mismatch | not_found | hallucinated
+// | no_citation_required. Then attaches a one-click visual receipt
+// (signed sheet image URL) to each finding so reviewers don't have to flip
+// back to the PDF to confirm context.
+//
+// IMPORTANT: many fbc_code_sections rows are *stubs* (placeholder text like
+// "See FBC for full requirement text"). Running token-overlap against a stub
+// always scores ~0 and would falsely flag every finding as "mismatch". When
+// the canonical row is a stub we accept the section as `verified_stub` based
+// on existence alone — the canonical content seed is a separate workstream.
+//
+// Findings with an empty code_reference that read as procedural (missing
+// metadata, "verify with AHJ", etc.) are classified `no_citation_required`
+// instead of `hallucinated` — they don't need a code section to be valid.
 
 import { createClient } from "../_shared/supabase.ts";
 import { signedSheetUrls } from "../_shared/storage.ts";
