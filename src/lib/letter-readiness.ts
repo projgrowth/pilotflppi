@@ -94,26 +94,33 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
     jumpFindingId: untriaged[0]?.id,
   });
 
-  // 2. Citations grounded — only block on the truly weak ones.
+  // 2. Citations grounded — block on (a) hallucinated citations OR
+  //    (b) unverified+low-confidence combos.
+  const hallucinated = live.filter((f) => f.citation_status === "hallucinated");
   const weakCitations = live.filter(
     (f) =>
       (f.citation_status ?? "unverified") === "unverified" &&
       typeof f.confidence_score === "number" &&
       f.confidence_score < 0.7,
   );
+  const citationProblems = hallucinated.length + weakCitations.length;
   checks.push({
     id: "citations",
     required: true,
-    severity: weakCitations.length === 0 ? "ok" : "block",
+    severity: citationProblems === 0 ? "ok" : "block",
     title:
-      weakCitations.length === 0
+      citationProblems === 0
         ? "Citations look defensible"
-        : `${weakCitations.length} ungrounded low-confidence citation${weakCitations.length === 1 ? "" : "s"}`,
+        : hallucinated.length > 0
+          ? `${hallucinated.length} hallucinated citation${hallucinated.length === 1 ? "" : "s"}${weakCitations.length ? ` + ${weakCitations.length} weak` : ""}`
+          : `${weakCitations.length} ungrounded low-confidence citation${weakCitations.length === 1 ? "" : "s"}`,
     detail:
-      weakCitations.length === 0
-        ? "No findings combine an unverified FBC citation with low AI confidence."
-        : "These cite an FBC section the system couldn't ground AND scored under 0.7. Verify them by hand or remove from the letter.",
-    jumpFindingId: weakCitations[0]?.id,
+      citationProblems === 0
+        ? "No findings combine an unverified FBC citation with low AI confidence, and no hallucinated citations remain."
+        : hallucinated.length > 0
+          ? "These cite an FBC section the system could not parse at all. Fix or remove them before sending."
+          : "These cite an FBC section the system couldn't ground AND scored under 0.7. Verify them by hand or remove from the letter.",
+    jumpFindingId: hallucinated[0]?.id ?? weakCitations[0]?.id,
   });
 
   // 3. Sheet refs resolved — Track-2 metadata flag.
