@@ -449,10 +449,13 @@ async function readSignedManifest(
   }>;
   if (ready.length === 0) return null;
 
-  // Reuse cached signed URLs that still have ≥10 minutes of life so 5 stages
-  // on a 78-page review aren't 5 × 78 fresh signed-URL calls.
-  const SIGN_TTL_SECONDS = 6 * 60 * 60; // 6h
-  const REUSE_MIN_REMAINING_MS = 10 * 60 * 1000; // 10 min
+  // Reuse cached signed URLs that still have ≥1h of life. Bumped from 6h to
+  // 7 days so evidence crops embedded in exported comment letters survive
+  // long enough for the building official to open the email/PDF the next
+  // day without 401s. Re-signing happens lazily via the resign-page-asset
+  // edge function when the cache approaches expiry.
+  const SIGN_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+  const REUSE_MIN_REMAINING_MS = 60 * 60 * 1000; // 1 hour
   const nowMs = Date.now();
   const out: Array<{ file_path: string; signed_url: string }> = [];
   const refreshed: Array<{ id?: never; storage_path: string; signed_url: string; expires_at: string }> = [];
