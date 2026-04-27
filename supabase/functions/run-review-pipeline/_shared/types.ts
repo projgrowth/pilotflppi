@@ -153,6 +153,82 @@ export function disciplineForSheetFallback(sheetRef: string): string | null {
   }
 }
 
+/**
+ * Canonical lowercase discipline slugs used across all stages and stored
+ * directly into deficiencies_v2.discipline. Frontend lookups (icons, colors,
+ * labels, dedupe ownership) all key off this list.
+ */
+export const CANONICAL_DISCIPLINES = [
+  "general",
+  "architectural",
+  "structural",
+  "life_safety",
+  "fire",
+  "mep",
+  "mechanical",
+  "electrical",
+  "plumbing",
+  "energy",
+  "ada",
+  "civil",
+  "site",
+  "landscape",
+  "cross_sheet",
+  "product_approvals",
+  "administrative",
+] as const;
+
+/**
+ * Map any AI- or legacy-emitted discipline label to its canonical slug.
+ * Mirrors src/lib/county-utils.ts:normalizeDiscipline so write-time and
+ * read-time normalization can never drift.
+ */
+export function canonicalDiscipline(raw: string | null | undefined): string {
+  if (!raw) return "general";
+  const k = raw.toLowerCase().trim().replace(/[\s/-]+/g, "_");
+  const aliases: Record<string, string> = {
+    arch: "architectural",
+    architecture: "architectural",
+    architectural: "architectural",
+    struct: "structural",
+    structural: "structural",
+    life_safety: "life_safety",
+    "life safety": "life_safety",
+    ls: "life_safety",
+    egress: "life_safety",
+    safety: "life_safety",
+    fire: "fire",
+    fire_protection: "fire",
+    fp: "fire",
+    mech: "mechanical",
+    mechanical: "mechanical",
+    hvac: "mechanical",
+    elec: "electrical",
+    electrical: "electrical",
+    plumb: "plumbing",
+    plumbing: "plumbing",
+    mep: "mep",
+    energy: "energy",
+    energy_conservation: "energy",
+    ada: "ada",
+    accessibility: "ada",
+    site: "site",
+    site_civil: "site",
+    civil: "civil",
+    landscape: "landscape",
+    irrigation: "landscape",
+    general: "general",
+    other: "general",
+    cross_sheet: "cross_sheet",
+    "cross-sheet": "cross_sheet",
+    product_approvals: "product_approvals",
+    "product approvals": "product_approvals",
+    administrative: "administrative",
+    building: "architectural",
+  };
+  return aliases[k] ?? k;
+}
+
 export function mapSeverityToPriority(severity: string): string {
   const s = severity.trim().toLowerCase();
   if (s === "critical" || s === "high") return "high";
