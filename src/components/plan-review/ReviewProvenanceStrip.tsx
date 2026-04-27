@@ -13,8 +13,22 @@
 import { useReviewHealth, pct } from "@/hooks/useReviewHealth";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { CheckCircle2, AlertCircle, Eye, FileSearch, BookOpen, Layers } from "lucide-react";
+import { CheckCircle2, AlertCircle, Eye, FileSearch, BookOpen, Layers, Gauge } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+
+interface QualityBreakdown {
+  verified_citations_pct?: number;
+  verified_findings_pct?: number;
+  with_evidence_crop_pct?: number;
+  has_hallucinated_citations?: boolean;
+  total_live_findings?: number;
+}
 
 interface Props {
   planReviewId: string;
