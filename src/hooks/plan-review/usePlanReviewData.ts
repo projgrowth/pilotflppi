@@ -69,10 +69,13 @@ export function usePlanReviewData(reviewId: string | undefined) {
   });
 
   // Findings live in deficiencies_v2 (verified, dedup'd, with human-review
-  // flags). The adapter shapes them into the legacy Finding interface so the
-  // existing viewer / letter / checklists consume v2 data unchanged.
+  // flags). The adapter shapes them into the legacy Finding interface and
+  // joins each row to the stored sheet_map snapshot so every finding gets
+  // a deterministic pin on the right page in the viewer.
+  const sheetMap: SheetMapEntry[] | null =
+    (review?.checklist_state as { last_sheet_map?: SheetMapEntry[] } | undefined)?.last_sheet_map ?? null;
   const findingsQuery = useQuery<Finding[]>({
-    queryKey: ["v2-findings-for-viewer", review?.id],
+    queryKey: ["v2-findings-for-viewer", review?.id, sheetMap?.length ?? 0],
     enabled: !!review?.id,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -83,7 +86,7 @@ export function usePlanReviewData(reviewId: string | undefined) {
         .eq("plan_review_id", review!.id)
         .order("def_number", { ascending: true });
       if (error) throw error;
-      return adaptV2ToFindings((data ?? []) as DeficiencyV2Lite[]);
+      return adaptV2ToFindings((data ?? []) as DeficiencyV2Lite[], sheetMap);
     },
   });
 
