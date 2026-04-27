@@ -1,99 +1,121 @@
-## What's actually broken (evidence from your current Suncoast Porsche review)
+# Plan-review readiness audit & cleanup plan
 
-I pulled the live data for the review you're looking at right now (`aa5638ef…`). Here's what 40 findings look like in production:
+I audited the full pipeline-to-letter path against the live data on the project you're viewing right now (Suncoast Porsche). On paper the pipeline shows nine green stages — in reality the review is **not shippable**:
 
-| Metric | Suncoast Porsche | What it should be |
-|---|---|---|
-| Total findings | 40 | ✓ |
-| Citations grounded | **0** | 35+ |
-| Citations marked "mismatch" | 7 | 0–2 |
-| Findings flagged "needs human review" | **38 of 40** | <10 |
-| Findings with an evidence crop image | **0** | 30+ |
-| First 12 findings, root cause | All variants of "code summary / construction type missing on cover sheet" | Should be 1 finding |
+- 40 findings, **all** Architectural (no Structural / MEP / Energy / LS — sheet_map only labeled cover sheets)
+- **0 of 40** findings have a verified citation (everything is `not_found`, `mismatch`, or `hallucinated`)
+- **0 of 40** findings have an `evidence_crop_url` (the crop stage runs but fails silently)
+- **40 of 40** flagged `requires_human_review` (so the "needs eyes" chip is meaningless)
+- `review_coverage` shows `sheets_reviewed: 0` of 74 — coverage telemetry is not wired
+- No PE seal / license, no delivery channel, no immutable audit trail of "who signed what"
 
-Three real bugs are causing this. None are cosmetic.
+A reviewer cannot put their license behind this letter. The remaining work falls into 6 tracks.
 
 ---
 
-### Bug 1 · The citation grounder is matching the wrong field format
+## Track 1 — Make findings trustworthy (citation grounding + coverage)
 
-The AI emits `code_reference.section = "FBC-B 508"`. The `fbc_code_sections` library stores the same section as `"508"`. The grounder does a literal compare, so **every citation comes back `not_found`** and we mark them unverified. The seed library has 151 valid sections — none of them carry the `FBC-B ` prefix.
+The single biggest blocker. Today every finding ships with an unverified citation, which forces the export gate to demand the reviewer check 40 sections by hand — undoing the value of the AI.
 
-**Fix:** normalize both sides in `groundCitations` — strip leading `FBC-B `, `FBC-` and trim — before comparing. While we're there, also fall back to a "starts-with" match on the section prefix (`508.4` should match a stored `508`) and store the matched canonical section back on the row so the UI can show the verified citation, not the AI's guess.
+**Root causes**
+1. `fbc_code_sections` table has very few rows (the dashboard already shows "FBC citation database not seeded" when count = 0). The parent-section fallback added last loop helps, but the library is too sparse for it to land.
+2. `ground_citations` returns `not_found` even when the section number is real — we don't normalize Florida-style code prefixes consistently (`FBC-B 1004.1.2`, `FBC 1004.1.2`, `R317.1`, `IBC 1004.1.2`).
+3. `sheet_map` mis-labels every non-titled sheet as Architectural, so all findings get routed to one expert.
 
-This single fix should flip ~80% of the "not_found" citations to "verified" with no other changes.
+**What I'll build**
+- **Seed the FBC reference library** with the canonical chapter list for FBC 8th Ed. (Building, Residential, Existing, Energy, Mechanical, Plumbing, Fuel Gas, Accessibility, Test Protocols). Ship a `supabase/seed/fbc_code_sections_chapters.sql` migration with ~600 chapter+section rows so parent-fallback always lands.
+- **Citation normalizer v2** in `ground_citations`: strip `FBC-?[BRPMFGE]?\s+`, normalize `R\d+`, accept `IBC` as alias for `FBC-B`, lowercase, collapse whitespace. Unit-test against the 40 live findings on `aa5638ef-…`.
+- **Sheet-map fallback by sheet code prefix**: when AI returns "General/Other" or empty, infer discipline from sheet number (`A-`/`AD` → Architectural, `S-` → Structural, `M-`/`E-`/`P-`/`FP-` → MEP/Life Safety, `C-`/`L-` → Civil/Landscape, `T-`/`G-` → Code/Title). This is what the experienced reviewer does in their head.
+- **Wire `review_coverage.sheets_reviewed`**: `discipline_review` already iterates sheets — add an upsert at the end of each discipline pass so the coverage chip stops showing 0/74.
+- **Tighten `requires_human_review`**: only true when (a) `citation_status = mismatch|hallucinated`, OR (b) `confidence_score < 0.5`, OR (c) AI itself set the flag with a reason. `not_found` against a sparse library is no longer enough.
 
-### Bug 2 · Dedupe is letter-matching findings, not concept-matching
+## Track 2 — Evidence crops actually ship
 
-The first 12 architectural findings on this review are all variants of "construction type / code summary / FBC edition missing from cover sheet G001." Each one cites a different sub-section, so the current dedupe (which keys on `discipline + sheet + def_number`) keeps them as 12 separate findings. A reviewer reading the letter sees 12 redundant comments.
+The pipeline calls `attachEvidenceCrops` but every row still has `evidence_crop_url = null`. The current implementation maps `sheet_refs` → `plan_review_page_assets.cached_signed_url`, but those URLs expire and the lookup is by `page_index` not by sheet code, so misses are silent.
 
-**Fix:** add a second dedupe pass keyed on `(discipline, sheet, normalized_finding_topic)` where `normalized_finding_topic` is the AI-extracted topic. Cheapest implementation: in the `dedupe` stage, when two findings on the same sheet share the same first 6 normalized words of the finding text **or** their cited section's parent (e.g. both 508.x), collapse them into one with the worst-case priority and a merged `code_reference[]` array.
+**What I'll fix**
+- Resolve sheet_ref → page_asset via `sheet_coverage.page_index` (the canonical mapping written in `sheet_map`), not by parsing the storage path.
+- Re-sign the page URL inside `attachEvidenceCrops` with a **30-day expiry** (matches statutory window) and store it directly. Today's "use whatever cached URL exists" path is what's failing.
+- Add a `crop_failures` counter to `review_pipeline_status.dedupe.metadata` so we can see in one query why crops aren't landing.
+- Render the crop in `FindingCard` (the JSX is already there, so this is purely a data fix) and in the exported letter (already wired in `CommentLetterExport` line 313).
 
-We already have a `dedupe` stage in the pipeline — this is just tightening its similarity rule, not adding a new stage.
+## Track 3 — QC sign-off becomes a real gate, not a checkbox
 
-### Bug 3 · Evidence crops never get generated
+Today `qc_status = 'qc_approved'` only requires a click from anyone except the original reviewer. There is no record of *what was reviewed*, *what citations were verified by hand*, or *what the PE accepted responsibility for*. The State expects all three.
 
-`evidence_crop_url` is null on every finding. The schema is built for it (`evidence_crop_url`, `evidence_crop_meta`), the pin-placement logic depends on it, but nothing in the pipeline actually writes one. Reviewers have to mentally jump from "DEF-A012, sheet A-201" to the PDF and search.
+**What I'll add (DB migration + UI)**
+- New columns on `plan_reviews`:
+  - `qc_approved_at timestamptz`
+  - `qc_signature_text text` (typed name + license #, captured at sign-off)
+  - `qc_findings_snapshot jsonb` (frozen copy of the findings + their statuses at the moment of approval — this is what the PE is signing)
+  - `qc_unverified_acknowledged int` (count of `not_found`/`mismatch` citations the PE explicitly accepted)
+- New table `review_signoffs` (immutable audit row per round): `plan_review_id`, `round`, `reviewer_id`, `qc_reviewer_id`, `signed_at`, `findings_count`, `findings_hash` (sha256 of the snapshot), `letter_hash`. Insert-only RLS; no updates, no deletes.
+- New "QC Sign-off" dialog in `LetterPanel` replacing the bare Approve button: shows snapshot summary, lists unverified citations the reviewer must initial, requires typed name+license, then writes the snapshot + audit row in one transaction.
+- `firm_settings`: add `pe_license_state`, `pe_license_number`, `pe_seal_url` (storage path) so the letter can render the seal in the signature block.
 
-**Fix:** add a lightweight `crop_evidence` step at the tail of `discipline_review` (or piggyback on `ground_citations`): for each finding with `sheet_refs[0]`, fetch the corresponding `plan_review_page_assets.vision_storage_path`, crop a 1024×768 region centered on the AI-returned bbox (or full sheet if no bbox), upload to the `documents` bucket as `crops/{review_id}/{finding_id}.png`, and store the path. The `FindingCard` already has a slot to render it.
+## Track 4 — Real delivery to the applicant
 
-If a tight bbox isn't returned, fall back to the full sheet thumbnail — that's still infinitely better than a text reference.
+"Send to Contractor" today does nothing — it opens the linter dialog and shows a toast. There's no email, no portal share, no audit of when comments were delivered (which the statute clock depends on).
+
+**What I'll build**
+- New edge function `deliver-comment-letter` that:
+  - Re-renders the letter HTML server-side from the QC snapshot (so a post-approval edit can't change what was sent)
+  - Stores a frozen PDF (via the existing print-to-storage path) under `documents/projects/{projectId}/sent/round-{n}-{timestamp}.pdf`
+  - Sends via Resend (add `RESEND_API_KEY` secret; ask the user to add it before this step) to the contractor email on file with the firm's letterhead address as the from
+  - Inserts into a new `comment_letter_deliveries` table: `plan_review_id`, `round`, `delivered_at`, `delivered_to_email`, `pdf_storage_path`, `pdf_hash`, `delivered_by`
+  - Logs `event_type = 'comment_letter_delivered'` to `activity_log` (this is also the event that pauses the statutory clock — currently `auto_manage_statutory_clock` only fires on a manual `comments_sent` status change)
+- Update `LetterPanel` to show "Delivered {relative-time} to {email}" once `comment_letter_deliveries` has a row, and disable the Send button.
+- Update `auto_manage_statutory_clock` trigger to also fire on the new `delivered_at` timestamp so the F.S. 553.791 clock pauses automatically.
+
+## Track 5 — Workspace UX polish (the things reviewers complain about)
+
+These are smaller but high-frequency annoyances I caught in `PlanReviewDetail.tsx`, `FindingsListPanel`, and `FindingCard`:
+
+- **The sticky stack is too tall.** TopBar + UploadProgress + (optional) prepareErrored banner + StuckRecovery + SubmittalIncomplete + ReviewProvenanceStrip + RoundCarryover = up to 7 stacked rows above the document. Consolidate into a single **`ReviewBanners`** stack component that renders at most 2 banners at a time (most-severe first) and demotes the rest into a "1 more" expandable.
+- **Two competing review surfaces.** `/plan-review/:id` (workspace) and `/plan-review/:id/dashboard` (triage) both render findings, with overlapping but inconsistent flag/disposition models (`reviewer_disposition` vs. `findingStatuses`). Pick one source of truth: keep the dashboard for triage, and make the workspace's right panel a **read-only** mirror that links to the dashboard for any disposition change. This kills a whole class of "I confirmed it on the workspace and it's still in the inbox" bugs.
+- **Pin-repositioning is dead but still surfaced.** `handleRepositionConfirm` toasts an error every time. Remove the Move/Place-pin buttons in `FindingCard` and the `repositioningIndex` plumbing — pure tech debt that confuses users.
+- **Active-finding scroll/highlight is one-way.** Clicking a pin scrolls the list but the reverse (clicking a finding) doesn't pan the document to the sheet. Wire `onLocate` → `usePdfPageRender.goToPage(sheet_index)` and update the URL `?page=` param so reviewers can bookmark.
+- **Bulk actions are gated behind the dashboard.** Add a "Mark all matching pattern as resolved" in the workspace findings list when ≥3 findings share the same parent code section + sheet.
+- **Letter editor has no diff view.** When the AI regenerates after the reviewer made edits, the edits are lost (the confirm dialog warns but doesn't preserve). Save the prior draft to `plan_reviews.previous_letter_drafts jsonb[]` and add an "Undo regenerate" toast action.
+
+## Track 6 — Sanity checks visible to the reviewer
+
+Right now there's no lightweight way for the reviewer to convince themselves "the AI looked at the right things." Add a single new tab on the Audit & Coverage panel:
+
+- **Discipline coverage matrix** — a table of (discipline × sheets present × sheets reviewed × findings raised). Today's `review_coverage` row already has the data; we just don't render it.
+- **"What I skipped" panel** — sheets that exist in `sheet_coverage` but have 0 findings AND were not flagged by `submittal_check`, with a one-click "Force-review this sheet" button that re-runs `discipline_review` for that single sheet.
+- **Pattern hits** — show the top 5 `correction_patterns` that fired against this run (already stored in `applied_corrections`), so the reviewer sees their prior corrections shaped this output.
 
 ---
 
-## What we'll ship (one loop, in order)
+## Order of execution
 
-### 1. Citation grounder normalization (highest leverage — fixes 80% of "needs review")
+1. **Track 1** (citation library + sheet-map fallback + coverage write) — unlocks everything else; without grounded citations the QC gate is theatre.
+2. **Track 2** (evidence crops) — needed before Track 3, because the QC snapshot should embed the crop URLs.
+3. **Track 3** (QC sign-off + PE seal + audit table).
+4. **Track 4** (delivery edge function + statutory clock wiring) — requires `RESEND_API_KEY` from you.
+5. **Track 5** (UX polish) — can run in parallel with 3/4 since they're isolated UI files.
+6. **Track 6** (coverage matrix + skipped-sheet panel).
 
-Edit `groundCitations` stage in `supabase/functions/run-review-pipeline/index.ts`:
+## Files to be created or modified
 
-- Add `normalizeSection(s)` helper: strip `FBC-B `, `FBC-`, `FBC `, lowercase, trim.
-- Compare normalized AI section ↔ normalized stored section.
-- If exact match fails, try parent-section match (`508.4.1` → `508.4` → `508`).
-- On match: set `citation_status='verified'`, `citation_canonical_text` = stored requirement, `citation_match_score=1.0`, `citation_grounded_at=now()`.
-- On no match anywhere: keep `not_found` but **don't** set `requires_human_review=true` solely for that reason. Reviewer-needed should be reserved for low-confidence findings, not unverifiable citations.
+- `supabase/migrations/*` — `fbc_code_sections` chapter seed; `plan_reviews` qc_* columns; `review_signoffs` table; `comment_letter_deliveries` table; `firm_settings` PE columns; `auto_manage_statutory_clock` trigger update
+- `supabase/functions/run-review-pipeline/index.ts` — `normalizeCitationSection` v2; `stageSheetMap` discipline fallback; `attachEvidenceCrops` page-asset lookup fix; coverage upsert in `stageDisciplineReview`; tighten `requires_human_review` rule
+- `supabase/functions/deliver-comment-letter/index.ts` (new) — Resend + PDF freeze
+- `src/components/plan-review/ReviewBanners.tsx` (new) — single banner stack
+- `src/components/plan-review/QcSignoffDialog.tsx` (new) — typed name + license + unverified-acknowledge
+- `src/components/plan-review/DeliveryStatusRow.tsx` (new)
+- `src/components/plan-review/LetterPanel.tsx` — wire delivery + signoff dialog
+- `src/components/plan-review/PlanViewerPanel.tsx` — sheet-pan on locate
+- `src/components/FindingCard.tsx` — drop dead reposition UI; wire delivered evidence_crop_url
+- `src/components/CommentLetterExport.tsx` — render PE seal; freeze HTML for delivery
+- `src/components/review-dashboard/AuditCoveragePanel.tsx` — coverage matrix + skipped-sheets + pattern hits
+- `src/hooks/useReviewHealth.ts` — count `delivered` & `signed` states
+- `src/pages/PlanReviewDetail.tsx` — replace banner stack with `ReviewBanners`; remove repositioning state
 
-### 2. Concept-level dedupe
+## What I need from you before starting Track 4
 
-Edit the `dedupe` stage:
-- Group findings by `(discipline, primary_sheet)`.
-- Within a group, run a cheap similarity check on the first sentence of `finding`: shingled token overlap > 0.6 → merge.
-- Also merge any two findings whose `code_reference.section` shares the same parent (e.g. `508.4` and `508.4.1`).
-- Merged finding keeps the worst-case `priority`, union of `code_reference[]`, union of `evidence[]`, and a counter `merged_from: 4` so the UI can show "merged from 4 similar findings."
+- A `RESEND_API_KEY` (or your preferred transactional email provider) — I'll request it via the secrets tool when I get there.
+- Confirmation that you want the PE seal as an upload field on each user's profile (recommended) vs. one-per-firm.
 
-### 3. Evidence crops
-
-Add a `crop_evidence` sub-step inside `discipline_review` (cheaper) or as a tail step in `ground_citations`:
-- For each finding with `sheet_refs.length > 0`:
-  - Resolve the page asset via `plan_review_page_assets`.
-  - If the AI returned an `evidence_crop_meta.bbox`, crop to it + 10% padding.
-  - Otherwise upload the full page as the crop (acceptable fallback).
-  - Write to `documents/crops/{plan_review_id}/{finding_id}.png`, signed URL into `evidence_crop_url`.
-- No new table, no schema migration.
-
-### 4. UI polish (small, but visible)
-
-- **`FindingCard`**: distinguish `not_found` (grey "code lookup unavailable") from `mismatch` (red "citation conflict") — they currently both look like errors. Show `merged_from` badge when present.
-- **`ReviewProvenanceStrip`**: change "verified" copy to use new grounding numbers; surface "X findings merged in dedupe" so reviewers trust the lower count.
-- **`FindingsListPanel`**: keep the existing default sort, but add a permanent "Top 5 root causes" collapsible at the top of the list — groups merged findings by topic so reviewers see "Cover sheet code summary (8 instances)" before scrolling.
-
----
-
-## Files to change
-
-- `supabase/functions/run-review-pipeline/index.ts` — `groundCitations`, `dedupe`, new `cropEvidence` helper.
-- `src/components/FindingCard.tsx` — citation status copy, `merged_from` badge, evidence crop image rendering.
-- `src/components/plan-review/ReviewProvenanceStrip.tsx` — updated grounding/dedupe copy.
-- `src/components/plan-review/FindingsListPanel.tsx` — top-of-list "root causes" collapsible.
-
-No DB migrations. No new tables. No new secrets.
-
----
-
-## What we're explicitly **not** doing
-
-- Re-running the 40-finding review automatically. After this ships, you can hit "Run AI check" on Suncoast Porsche and the same 40-finding output should collapse to ~12–15 grounded, mostly-non-flagged findings.
-- Backfilling evidence crops on old reviews. New runs only.
-- Touching the `verify` / `cross_check` deep stages — those work, they're just optional.
-
-Approve and I'll ship it.
+Approve and I'll start with Track 1.
