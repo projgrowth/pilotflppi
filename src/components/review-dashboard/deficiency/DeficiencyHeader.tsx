@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, ShieldCheck, ShieldX, ShieldAlert, GitMerge } from "lucide-react";
+import { ExternalLink, ShieldCheck, ShieldX, ShieldAlert, GitMerge, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -14,6 +14,8 @@ import {
   type DeficiencyV2Row,
   useSheetCoverage,
 } from "@/hooks/useReviewDashboard";
+import CitationBadge from "../CitationBadge";
+import { useRegroundCitation } from "@/hooks/useRegroundCitation";
 
 interface Props {
   planReviewId: string;
