@@ -215,6 +215,43 @@ Deno.serve(async (req) => {
           }
         }
 
+        // Submittal gate: when the firm has opted into hard-blocking,
+        // an incomplete submittal halts the chain so we don't burn AI
+        // spend (and reviewer trust) on a partial set. Default firm
+        // setting is OFF so existing flows keep their advisory behavior.
+        if (stageToRun === "submittal_check") {
+          const m = meta as { complete?: boolean; missing?: string[] };
+          if (m.complete === false) {
+            const { data: settingsRow } = await admin
+              .from("firm_settings")
+              .select("block_review_on_incomplete_submittal")
+              .eq("user_id", firmId ?? "00000000-0000-0000-0000-000000000000")
+              .maybeSingle();
+            // firm_settings is keyed by user_id (firm owner), so fall back to
+            // any row in the firm if the owner row isn't present.
+            let block = (settingsRow as { block_review_on_incomplete_submittal?: boolean } | null)
+              ?.block_review_on_incomplete_submittal ?? false;
+            if (!settingsRow && firmId) {
+              const { data: anyRow } = await admin
+                .from("firm_settings")
+                .select("block_review_on_incomplete_submittal")
+                .limit(1)
+                .maybeSingle();
+              block = (anyRow as { block_review_on_incomplete_submittal?: boolean } | null)
+                ?.block_review_on_incomplete_submittal ?? false;
+            }
+            if (block) {
+              const missingLabel = (m.missing ?? []).join(", ") || "required disciplines";
+              await setStage(admin, plan_review_id, firmId, stageToRun, {
+                status: "error",
+                error_message: `Submittal gate: incomplete set — missing ${missingLabel}. Re-upload the missing trades or disable the firm-level submittal block to continue.`,
+                metadata: meta as Record<string, unknown>,
+              });
+              return;
+            }
+          }
+        }
+
         if (await isCancelled()) return;
         const idx = activeChain.indexOf(stageToRun);
         const next = idx >= 0 ? activeChain[idx + 1] : undefined;
