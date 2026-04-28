@@ -1,13 +1,16 @@
 /**
- * Browser-side SHA-256 fingerprinting helpers used for plan-set chain of
- * custody (Sprint 3, P2). Two callers:
+ * Browser-side SHA-256 fingerprinting helpers used for plan-set and
+ * inspection chain of custody. Callers:
  *
  *   1. `plan-review-upload.ts` — hashes each uploaded PDF before it leaves
  *      the browser so we can prove later that the bytes the AHJ received are
  *      the bytes the contractor uploaded.
- *   2. `send-letter-snapshot.ts` — hashes the final letter HTML (and its
- *      generated PDF, if one is attached) at the instant of "Mark sent" so
- *      the snapshot row is cryptographically tied to its rendered output.
+ *   2. `send-inspection-report.ts` — hashes the final inspection report HTML
+ *      at the instant of "Send to AHJ" (F.S. 553.791(7)).
+ *   3. `certificate-of-compliance.ts` — chains report hashes into the final
+ *      tamper-evident CoC hash (F.S. 553.791(10)).
+ *   4. Inspection photo upload — hashes EXIF-stripped JPEGs and extracts
+ *      GPS/timestamp metadata for chain of custody.
  *
  * Uses the Web Crypto API; no extra dependency. Returns lowercase hex so the
  * column comparison is straightforward.

@@ -9,6 +9,10 @@ import { ClipboardList, ShieldAlert, CheckCircle2, AlertCircle, Loader2 } from "
 import { toast } from "sonner";
 import { deriveRequiredInspections } from "@/lib/required-inspections";
 import { detectThresholdBuilding } from "@/lib/threshold-building";
+import {
+  computeInspectionWindow,
+  getInspectionDaysRemaining,
+} from "@/lib/inspection-window";
 
 interface Props {
   projectId: string;
