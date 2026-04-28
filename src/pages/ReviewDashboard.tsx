@@ -110,6 +110,28 @@ export default function ReviewDashboard() {
     },
     staleTime: 5 * 60 * 1000,
   });
+
+  // Pull the signing reviewer's per-discipline professional licenses so the
+  // readiness gate can block sending letters that include disciplines the
+  // reviewer isn't licensed to sign for (F.S. 553.791(2)).
+  const { data: reviewerLicensedDisciplines = [] } = useQuery({
+    queryKey: ["reviewer_discipline_licenses_self"],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return [] as string[];
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("discipline_licenses")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (error) throw error;
+      const map = (data?.discipline_licenses ?? {}) as Record<string, unknown>;
+      return Object.entries(map)
+        .filter(([, v]) => typeof v === "string" && v.trim().length > 0)
+        .map(([k]) => k.toLowerCase());
+    },
+    staleTime: 60 * 1000,
+  });
   const letterCheck = useLetterQualityCheck({
     deficiencies: defs,
     letterDraft: review?.comment_letter_draft ?? null,
