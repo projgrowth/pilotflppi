@@ -147,7 +147,7 @@ export function CanonicalCodeLibrary() {
             <p className="text-xs text-muted-foreground mt-1">
               {isLoading
                 ? "Loading…"
-                : `${rows?.length ?? 0} sections shown · ${stubs.length} stubs · ${realRows.length} real`}
+                : `${rows?.length ?? 0} sections shown · ${stubs.length} stubs · ${realRows.length} real · ${unembedded} unembedded`}
             </p>
           </div>
           <div className="flex items-center gap-2">
