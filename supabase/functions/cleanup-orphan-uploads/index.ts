@@ -17,6 +17,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 const FAILED_REVIEW_AGE_DAYS = 30;
 const ERROR_LOG_RETENTION_DAYS = 90;
+const COST_METRIC_RETENTION_DAYS = 30;
 const MAX_REVIEWS_PER_TICK = 100;
 
 // deno-lint-ignore no-explicit-any
@@ -105,6 +106,21 @@ Deno.serve(async (req) => {
       logsDeleted = count ?? 0;
     } catch (err) {
       console.error("[cleanup] log retention failed:", err);
+    }
+
+    // Retention: cost_metric rows have shorter retention (30d) — they accumulate
+    // ~100/review and are only useful for short-term cost dashboards.
+    const costCutoff = new Date(Date.now() - COST_METRIC_RETENTION_DAYS * 86400 * 1000).toISOString();
+    let costsDeleted = 0;
+    try {
+      const { count } = await admin
+        .from("pipeline_error_log")
+        .delete({ count: "estimated" })
+        .eq("error_class", "cost_metric")
+        .lt("created_at", costCutoff);
+      costsDeleted = count ?? 0;
+    } catch (err) {
+      console.error("[cleanup] cost retention failed:", err);
     }
 
     return new Response(
