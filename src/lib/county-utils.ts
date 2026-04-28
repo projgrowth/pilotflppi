@@ -137,17 +137,6 @@ export const DISCIPLINE_ORDER: Discipline[] = [
   "civil",
 ];
 
-export const SCANNING_STEPS = [
-  { discipline: "structural", label: "Structural Analysis" },
-  { discipline: "life_safety", label: "Life Safety & Egress" },
-  { discipline: "fire", label: "Fire Protection" },
-  { discipline: "mechanical", label: "Mechanical Systems" },
-  { discipline: "electrical", label: "Electrical Systems" },
-  { discipline: "plumbing", label: "Plumbing Systems" },
-  { discipline: "energy", label: "Energy Code" },
-  { discipline: "ada", label: "ADA Compliance" },
-  { discipline: "site", label: "Site & Civil" },
-];
 
 /* ── Site Plan Completeness Required Elements ── */
 
