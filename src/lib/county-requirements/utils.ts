@@ -27,27 +27,3 @@ export function getSupplementalSectionLabel(section: SupplementalSection): strin
   return labels[section] || section;
 }
 
-/** List all registered county keys */
-export function getRegisteredCounties(): string[] {
-  return Object.keys(COUNTY_REGISTRY);
-}
-
-/** Get all counties grouped by region */
-export function getCountiesByRegion(): Record<string, string[]> {
-  const regions: Record<string, string[]> = {
-    "Southeast": ["miami-dade", "broward", "palm-beach", "martin", "st-lucie", "indian-river", "okeechobee"],
-    "Southwest": ["lee", "collier", "charlotte", "sarasota", "manatee", "hendry", "glades", "desoto"],
-    "Tampa Bay": ["hillsborough", "pinellas", "pasco", "polk", "hernando"],
-    "Central": ["orange", "osceola", "seminole", "lake", "sumter", "brevard", "volusia"],
-    "Northeast": ["duval", "st-johns", "clay", "nassau", "baker", "flagler", "putnam"],
-    "Northwest / Panhandle": [
-      "escambia", "santa-rosa", "okaloosa", "walton", "holmes", "washington",
-      "bay", "jackson", "calhoun", "gulf", "liberty", "gadsden", "leon",
-      "wakulla", "franklin", "jefferson", "madison", "taylor", "hamilton",
-      "suwannee", "lafayette", "dixie"
-    ],
-    "North Central": ["alachua", "columbia", "bradford", "union", "gilchrist", "levy", "marion", "citrus"],
-    "Treasure Coast / Keys": ["monroe", "hardee", "highlands"],
-  };
-  return regions;
-}

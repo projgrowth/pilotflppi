@@ -3,7 +3,5 @@ export type { CountyRequirements, SupplementalSection } from "./county-requireme
 export {
   getCountyRequirements,
   getSupplementalSectionLabel,
-  getRegisteredCounties,
-  getCountiesByRegion,
 } from "./county-requirements/utils";
-export { DEFAULT_REQUIREMENTS, COUNTY_REGISTRY } from "./county-requirements/data";
+export { COUNTY_REGISTRY } from "./county-requirements/data";
