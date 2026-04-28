@@ -71,10 +71,55 @@ interface CriticRow {
   evidence_crop_meta: Record<string, unknown> | null;
 }
 
+// Tier 3.2: Bias the critic with firm-specific reject patterns the human
+// reviewers have already corrected. The model gets a short list of "this
+// firm has rejected findings that look like X for reason Y" so it
+// preferentially flags repeats of the same shape as `weak`/`junk`.
+async function loadFirmRejectPatterns(
+  admin: ReturnType<typeof createClient>,
+  firmId: string | null,
+  disciplines: string[],
+): Promise<string> {
+  if (!firmId || disciplines.length === 0) return "";
+  const { data, error } = await admin
+    .from("correction_patterns")
+    .select("discipline, pattern_summary, rejection_reason, reason_notes, rejection_count")
+    .eq("firm_id", firmId)
+    .eq("is_active", true)
+    .in("discipline", disciplines)
+    .order("rejection_count", { ascending: false })
+    .limit(12);
+  if (error || !data || data.length === 0) return "";
+  const lines = (data as Array<{
+    discipline: string;
+    pattern_summary: string;
+    rejection_reason: string;
+    reason_notes: string | null;
+    rejection_count: number;
+  }>).map(
+    (p) =>
+      `- [${p.discipline}] ${p.pattern_summary} — rejected ${p.rejection_count}× because: ${p.rejection_reason}${
+        p.reason_notes ? ` (${p.reason_notes.slice(0, 120)})` : ""
+      }`,
+  );
+  return (
+    "\n\nThis firm has previously REJECTED findings matching these shapes. " +
+    "If a finding below resembles any of these, downgrade it (weak or junk):\n" +
+    lines.join("\n")
+  );
+}
+
 export async function stageCritic(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
 ) {
+  const { data: prRow } = await admin
+    .from("plan_reviews")
+    .select("firm_id")
+    .eq("id", planReviewId)
+    .maybeSingle();
+  const firmId = (prRow as { firm_id: string | null } | null)?.firm_id ?? null;
+
   const { data: rowsRaw, error } = await admin
     .from("deficiencies_v2")
     .select(
@@ -97,11 +142,16 @@ export async function stageCritic(
     return { examined: 0, kept: 0, weak: 0, junk: 0, skipped: rows.length };
   }
 
+  const disciplines = Array.from(new Set(targets.map((t) => t.discipline).filter(Boolean)));
+  const learnedPatternsBlock = await loadFirmRejectPatterns(admin, firmId, disciplines);
+  const criticSystem = CRITIC_SYSTEM + learnedPatternsBlock;
+
   const BATCH = 10;
   let kept = 0;
   let weak = 0;
   let junk = 0;
   let failed = 0;
+  const usedLearnedPatterns = learnedPatternsBlock.length > 0;
 
   for (let i = 0; i < targets.length; i += BATCH) {
     const slice = targets.slice(i, i + BATCH);
@@ -130,7 +180,7 @@ export async function stageCritic(
     try {
       result = (await callAI(
         [
-          { role: "system", content: CRITIC_SYSTEM },
+          { role: "system", content: criticSystem },
           {
             role: "user",
             content: `Critique each of the ${slice.length} findings below. Return one entry per deficiency_id via submit_critiques.\n\n${userText}`,
@@ -181,5 +231,13 @@ export async function stageCritic(
     }
   }
 
-  return { examined: targets.length, kept, weak, junk, failed, skipped: rows.length - targets.length };
+  return {
+    examined: targets.length,
+    kept,
+    weak,
+    junk,
+    failed,
+    skipped: rows.length - targets.length,
+    used_learned_patterns: usedLearnedPatterns,
+  };
 }
