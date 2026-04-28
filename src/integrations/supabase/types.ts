@@ -143,6 +143,51 @@ export type Database = {
           },
         ]
       }
+      beta_feedback: {
+        Row: {
+          category: string
+          context: Json
+          created_at: string
+          firm_id: string | null
+          id: string
+          message: string
+          plan_review_id: string | null
+          project_id: string | null
+          severity: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category?: string
+          context?: Json
+          created_at?: string
+          firm_id?: string | null
+          id?: string
+          message: string
+          plan_review_id?: string | null
+          project_id?: string | null
+          severity?: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category?: string
+          context?: Json
+          created_at?: string
+          firm_id?: string | null
+          id?: string
+          message?: string
+          plan_review_id?: string | null
+          project_id?: string | null
+          severity?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       certificates_of_compliance: {
         Row: {
           ahj_recipient: string | null
