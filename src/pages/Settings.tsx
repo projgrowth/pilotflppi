@@ -11,8 +11,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Building2, Users, MapPin, Plus, X, Loader2, Receipt } from "lucide-react";
+import { Building2, Users, MapPin, Plus, X, Loader2, Receipt, BookOpen } from "lucide-react";
 import { FeeScheduleSettings } from "@/components/FeeScheduleSettings";
+import { CanonicalCodeLibrary } from "@/components/CanonicalCodeLibrary";
+import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
 
@@ -45,6 +47,7 @@ export default function SettingsPage() {
  const queryClient = useQueryClient();
  const { data: profile, isLoading: profileLoading } = useProfile();
  const { firmSettings, isLoading: firmLoading, saveFirmSettings, isSaving } = useFirmSettings();
+ const isAdmin = useIsAdmin();
 
  const [fullName, setFullName] = useState("");
  const [saving, setSaving] = useState(false);
@@ -171,6 +174,9 @@ export default function SettingsPage() {
  <TabsTrigger value="firm" className="gap-1.5"><Building2 className="h-3.5 w-3.5" />Firm Info</TabsTrigger>
  <TabsTrigger value="jurisdictions" className="gap-1.5"><MapPin className="h-3.5 w-3.5" />Jurisdictions</TabsTrigger>
  <TabsTrigger value="fees" className="gap-1.5"><Receipt className="h-3.5 w-3.5" />Fee Schedule</TabsTrigger>
+ {isAdmin && (
+  <TabsTrigger value="code-library" className="gap-1.5"><BookOpen className="h-3.5 w-3.5" />Code Library</TabsTrigger>
+ )}
  </TabsList>
 
  <TabsContent value="profile">
@@ -306,6 +312,12 @@ export default function SettingsPage() {
  <TabsContent value="fees">
  <FeeScheduleSettings />
  </TabsContent>
+
+ {isAdmin && (
+  <TabsContent value="code-library">
+   <CanonicalCodeLibrary />
+  </TabsContent>
+ )}
  </Tabs>
  </div>
  );
