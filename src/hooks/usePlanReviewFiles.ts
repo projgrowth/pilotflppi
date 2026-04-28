@@ -37,4 +37,3 @@ export function usePlanReviewFilesByProject(projectId: string | undefined) {
   });
 }
 
-export function groupFilesByRound() {} void groupFilesByRound;
