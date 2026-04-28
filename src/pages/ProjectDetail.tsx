@@ -26,7 +26,8 @@ import { PageHeader } from "@/components/PageHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FileText, ClipboardCheck, Activity, Upload, Loader2, Download, Building2, Pencil, CalendarPlus, Receipt } from "lucide-react";
+import { FileText, ClipboardCheck, Activity, Upload, Loader2, Download, Building2, Pencil, CalendarPlus, Receipt, Archive } from "lucide-react";
+import { useExportProjectArchive } from "@/hooks/useExportProjectArchive";
 import { InvoiceBillingTab } from "@/components/InvoiceBillingTab";
 import { ZoningAnalysisPanel } from "@/components/ZoningAnalysisPanel";
 import { ZoningData } from "@/lib/zoning-utils";
@@ -119,7 +120,8 @@ export default function ProjectDetail() {
  const [scheduleOpen, setScheduleOpen] = useState(false);
  const [wizardOpen, setWizardOpen] = useState(false);
  const [statusUpdating, setStatusUpdating] = useState(false);
- const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { exportArchive, exporting } = useExportProjectArchive();
 
  const DOC_CATEGORIES = [
  { value: "all", label: "All" },
@@ -272,11 +274,26 @@ export default function ProjectDetail() {
  <Button variant="outline" size="sm" className="text-xs" onClick={() => setScheduleOpen(true)}>
  <CalendarPlus className="h-3.5 w-3.5 mr-1" /> Inspect
  </Button>
- <Button variant="outline" size="sm" className="text-xs" onClick={() => fileInputRef.current?.click()}>
- <Upload className="h-3.5 w-3.5 mr-1" /> Upload
- </Button>
- {reviews && reviews.length > 0 ? (
- <Button
+  <Button variant="outline" size="sm" className="text-xs" onClick={() => fileInputRef.current?.click()}>
+  <Upload className="h-3.5 w-3.5 mr-1" /> Upload
+  </Button>
+  <Button
+    variant="outline"
+    size="sm"
+    className="text-xs"
+    onClick={() => exportArchive(project.id, project.name)}
+    disabled={exporting}
+    title="Download AHJ records-retention bundle (letters, reports, COCs, activity log, hashes)"
+  >
+    {exporting ? (
+      <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+    ) : (
+      <Archive className="h-3.5 w-3.5 mr-1" />
+    )}
+    Archive
+  </Button>
+  {reviews && reviews.length > 0 ? (
+  <Button
  size="sm"
  className="text-xs"
  onClick={() => navigate(`/plan-review/${reviews[0].id}`)}
