@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/EmptyState";
+import { OnboardingChecklist } from "@/components/OnboardingChecklist";
 import { PageHeader } from "@/components/PageHeader";
 import { useProjects, getDaysElapsed } from "@/hooks/useProjects";
 import { useAllActivePipelines } from "@/hooks/useAllActivePipelines";
@@ -119,6 +120,8 @@ export default function Dashboard() {
           </Button>
         }
       />
+
+      <OnboardingChecklist />
 
       {/* Needs my review banner */}
       {(needsReviewCount ?? 0) > 0 && (

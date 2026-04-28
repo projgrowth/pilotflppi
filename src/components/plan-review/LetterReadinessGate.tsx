@@ -17,6 +17,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { MetricExplainer } from "@/components/MetricExplainer";
 import { cn } from "@/lib/utils";
 import {
   computeLetterReadiness,
@@ -156,8 +157,9 @@ function CheckRow({
     <li className="flex items-start gap-2 rounded-md px-1 py-1 text-xs">
       <Icon className={cn("mt-0.5 h-3.5 w-3.5 flex-shrink-0", iconColor)} />
       <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
+        <div className="flex items-baseline gap-1.5">
           <span className="font-medium">{check.title}</span>
+          <MetricExplainer term={check.id} />
           {!check.required && (
             <span className="text-2xs uppercase tracking-wide text-muted-foreground">
               advisory
