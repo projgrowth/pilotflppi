@@ -16,6 +16,11 @@ export interface FirmSettings {
   block_letter_on_low_coverage?: boolean;
   block_letter_on_ungrounded?: boolean;
   block_review_on_incomplete_submittal?: boolean;
+  // F.S. 553.791(20) — minimum $1M E&O coverage required for FL private providers
+  eo_carrier?: string | null;
+  eo_policy_number?: string | null;
+  eo_coverage_amount?: number | null;
+  eo_expires_on?: string | null;
 }
 
 const DEFAULT_FIRM: Omit<FirmSettings, "id" | "user_id"> = {
@@ -29,6 +34,10 @@ const DEFAULT_FIRM: Omit<FirmSettings, "id" | "user_id"> = {
   block_letter_on_low_coverage: true,
   block_letter_on_ungrounded: true,
   block_review_on_incomplete_submittal: false,
+  eo_carrier: "",
+  eo_policy_number: "",
+  eo_coverage_amount: null,
+  eo_expires_on: null,
 };
 
 export function useFirmSettings() {
