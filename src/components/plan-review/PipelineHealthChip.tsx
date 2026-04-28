@@ -24,7 +24,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 const db: any = supabase;
 
 interface Props {
-  projectId: string;
+  /** Project-level: aggregates errors across all plan_reviews of the project. */
+  projectId?: string;
+  /** Plan-review-level: errors for one specific review only. */
+  planReviewId?: string;
   /** Lookback window in hours. Defaults to 48h to catch overnight runs. */
   hours?: number;
   className?: string;
@@ -40,20 +43,29 @@ interface ErrorRow {
   plan_review_id: string;
 }
 
-export default function PipelineHealthChip({ projectId, hours = 48, className }: Props) {
+export default function PipelineHealthChip({
+  projectId,
+  planReviewId,
+  hours = 48,
+  className,
+}: Props) {
   const navigate = useNavigate();
 
   const { data: errors } = useQuery({
-    queryKey: ["pipeline-health", projectId, hours],
+    queryKey: ["pipeline-health", projectId ?? "_", planReviewId ?? "_", hours],
     queryFn: async () => {
       const since = new Date(Date.now() - hours * 3600 * 1000).toISOString();
-      // Find this project's plan reviews first so we can scope the error query.
-      const { data: prs } = await supabase
-        .from("plan_reviews")
-        .select("id")
-        .eq("project_id", projectId)
-        .is("deleted_at", null);
-      const ids = (prs ?? []).map((p) => p.id);
+      let ids: string[] = [];
+      if (planReviewId) {
+        ids = [planReviewId];
+      } else if (projectId) {
+        const { data: prs } = await supabase
+          .from("plan_reviews")
+          .select("id")
+          .eq("project_id", projectId)
+          .is("deleted_at", null);
+        ids = (prs ?? []).map((p) => p.id);
+      }
       if (ids.length === 0) return [] as ErrorRow[];
       const { data, error } = await db
         .from("pipeline_error_log")
@@ -65,7 +77,7 @@ export default function PipelineHealthChip({ projectId, hours = 48, className }:
       if (error) throw error;
       return (data ?? []) as ErrorRow[];
     },
-    enabled: !!projectId,
+    enabled: !!(projectId || planReviewId),
     staleTime: 30_000,
   });
 
