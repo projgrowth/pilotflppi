@@ -13,6 +13,9 @@ export interface FirmSettings {
   address: string;
   logo_url: string;
   closing_language: string;
+  block_letter_on_low_coverage?: boolean;
+  block_letter_on_ungrounded?: boolean;
+  block_review_on_incomplete_submittal?: boolean;
 }
 
 const DEFAULT_FIRM: Omit<FirmSettings, "id" | "user_id"> = {
@@ -23,6 +26,9 @@ const DEFAULT_FIRM: Omit<FirmSettings, "id" | "user_id"> = {
   address: "",
   logo_url: "",
   closing_language: "",
+  block_letter_on_low_coverage: true,
+  block_letter_on_ungrounded: true,
+  block_review_on_incomplete_submittal: false,
 };
 
 export function useFirmSettings() {

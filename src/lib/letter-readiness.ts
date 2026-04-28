@@ -31,7 +31,8 @@ export interface ReadinessCheck {
     | "notice_filed"
     | "affidavit_signed"
     | "reviewer_licensed"
-    | "threshold_special_inspector";
+    | "threshold_special_inspector"
+    | "coverage";
   severity: ReadinessSeverity;
   /** Required vs advisory — only required checks gate the export button. */
   required: boolean;
@@ -76,6 +77,15 @@ export interface ReadinessInput {
   thresholdTriggers: string[];
   /** Has the EOR designated a Special Inspector for this threshold building? */
   specialInspectorDesignated: boolean;
+  /** Sheet-coverage percentage (0-100): % of expected sheets that were
+   *  reviewed by every required discipline. Below 100 = some sheets weren't
+   *  examined. Used by the coverage gate when firm settings opt in. */
+  coveragePct?: number | null;
+  /** Firm setting: block the letter when coverage_pct < 100. */
+  blockLetterOnLowCoverage?: boolean;
+  /** Firm setting: block the letter when any live finding has a stub
+   *  citation (canonical text shorter than ~60 chars). */
+  blockLetterOnUngrounded?: boolean;
 }
 
 export interface ReadinessResult {
@@ -122,14 +132,19 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
   const hallucinated = live.filter((f) => f.citation_status === "hallucinated");
   const NON_BLOCKING = new Set([
     "verified",
-    "verified_stub",
     "no_citation_required",
     "mismatch",
     "not_found",
   ]);
+  // verified_stub becomes blocking when the firm setting is on (default true).
+  const blockStubs = input.blockLetterOnUngrounded !== false;
+  const stubCitations = blockStubs
+    ? live.filter((f) => f.citation_status === "verified_stub")
+    : [];
   const weakCitations = live.filter(
     (f) =>
       !NON_BLOCKING.has(f.citation_status ?? "unverified") &&
+      f.citation_status !== "verified_stub" &&
       (f.citation_status ?? "unverified") === "unverified" &&
       typeof f.confidence_score === "number" &&
       f.confidence_score < 0.7,
@@ -140,7 +155,7 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
   const unverifiedPct = live.length === 0 ? 0 : unverified.length / live.length;
   const verifierStalled = unverifiedPct > 0.25;
 
-  const citationProblems = hallucinated.length + weakCitations.length;
+  const citationProblems = hallucinated.length + weakCitations.length + stubCitations.length;
   checks.push({
     id: "citations",
     required: true,
@@ -149,15 +164,19 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
       citationProblems === 0
         ? "Citations look defensible"
         : hallucinated.length > 0
-          ? `${hallucinated.length} hallucinated citation${hallucinated.length === 1 ? "" : "s"}${weakCitations.length ? ` + ${weakCitations.length} weak` : ""}`
-          : `${weakCitations.length} ungrounded low-confidence citation${weakCitations.length === 1 ? "" : "s"}`,
+          ? `${hallucinated.length} hallucinated citation${hallucinated.length === 1 ? "" : "s"}${weakCitations.length || stubCitations.length ? ` + ${weakCitations.length + stubCitations.length} ungrounded` : ""}`
+          : stubCitations.length > 0
+            ? `${stubCitations.length} citation${stubCitations.length === 1 ? "" : "s"} reference an FBC stub (no canonical text)`
+            : `${weakCitations.length} ungrounded low-confidence citation${weakCitations.length === 1 ? "" : "s"}`,
     detail:
       citationProblems === 0
-        ? "No findings combine an unverified FBC citation with low AI confidence, and no hallucinated citations remain."
+        ? "No findings combine an unverified FBC citation with low AI confidence, no hallucinated citations remain, and every grounded section has full canonical text."
         : hallucinated.length > 0
           ? "These cite an FBC section the system could not parse. Fix or remove them before sending."
-          : "These cite an FBC section the system couldn't ground AND scored under 0.7. Verify by hand or remove.",
-    jumpFindingId: hallucinated[0]?.id ?? weakCitations[0]?.id,
+          : stubCitations.length > 0
+            ? "These cite real FBC sections, but the canonical requirement text isn't seeded yet — so the AI can't prove the citation actually supports the finding. Verify by hand or remove."
+            : "These cite an FBC section the system couldn't ground AND scored under 0.7. Verify by hand or remove.",
+    jumpFindingId: hallucinated[0]?.id ?? stubCitations[0]?.id ?? weakCitations[0]?.id,
   });
 
   // 2b. Verifier completion — required check (two-pair-of-eyes promise).
@@ -305,6 +324,26 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
       detail: ok
         ? `F.S. 553.79(5) Special Inspector designation recorded. Triggers: ${triggers}.`
         : `F.S. 553.79(5) requires the Engineer of Record to designate a Special Inspector for threshold buildings. Triggers: ${triggers}. Record the designation under the Statutory Compliance panel.`,
+    });
+  }
+
+  // 10. Sheet coverage — block when not every sheet was reviewed by every
+  // required discipline (firm setting, default on). Coverage < 100% means
+  // we'd be sending a letter with blind spots.
+  const coverageGateOn = input.blockLetterOnLowCoverage !== false;
+  if (coverageGateOn && typeof input.coveragePct === "number") {
+    const pct = input.coveragePct;
+    const covOk = pct >= 100;
+    checks.push({
+      id: "coverage",
+      required: true,
+      severity: covOk ? "ok" : "block",
+      title: covOk
+        ? "Every sheet reviewed by every required discipline"
+        : `Sheet coverage incomplete — ${Math.round(pct)}%`,
+      detail: covOk
+        ? "All expected sheets were examined by each discipline assigned to this review."
+        : `Some sheets were skipped by one or more disciplines. Re-run the AI check or attach the missing sheets before sending.`,
     });
   }
 

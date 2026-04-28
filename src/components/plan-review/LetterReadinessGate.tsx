@@ -44,6 +44,9 @@ export default function LetterReadinessGate({
   isThresholdBuilding,
   thresholdTriggers,
   specialInspectorDesignated,
+  coveragePct,
+  blockLetterOnLowCoverage,
+  blockLetterOnUngrounded,
   onJumpToFinding,
   onCompute,
   className,
@@ -62,6 +65,9 @@ export default function LetterReadinessGate({
         isThresholdBuilding,
         thresholdTriggers,
         specialInspectorDesignated,
+        coveragePct,
+        blockLetterOnLowCoverage,
+        blockLetterOnUngrounded,
       }),
     [
       findings,
@@ -75,6 +81,9 @@ export default function LetterReadinessGate({
       isThresholdBuilding,
       thresholdTriggers,
       specialInspectorDesignated,
+      coveragePct,
+      blockLetterOnLowCoverage,
+      blockLetterOnUngrounded,
     ],
   );
 

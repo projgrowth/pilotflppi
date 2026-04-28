@@ -287,10 +287,22 @@ export async function stageGroundCitations(
           aiBlobLc.includes(key.section.toLowerCase());
         const usedParent = ms !== key.section;
 
-        if (isStubCanonical(hit.requirement_text)) {
+        // Edition-mismatch hard-block: if the AI explicitly cited an edition
+        // and it doesn't match the canonical row we found, that's a citation
+        // error regardless of whether the canonical text is a stub. The
+        // reviewer cannot defend a finding citing the wrong code edition.
+        const editionMismatch =
+          !!key.edition &&
+          !!hit.edition &&
+          key.edition.trim().toLowerCase() !== hit.edition.trim().toLowerCase();
+
+        if (editionMismatch) {
+          status = "mismatch";
+        } else if (isStubCanonical(hit.requirement_text)) {
           // Canonical row is a placeholder — section existence is the only
           // signal we have. Treat as verified_stub so reviewers know not to
-          // expect text-overlap evidence.
+          // expect text-overlap evidence. Letter-readiness gate may still
+          // block these via firm_settings.block_letter_on_ungrounded.
           status = "verified_stub";
           stubMatched = true;
         } else {

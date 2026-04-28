@@ -6,9 +6,13 @@
  * upload status, repositioning index) lives in the parent and is forwarded
  * here as props.
  */
-import { Loader2, Upload, Check } from "lucide-react";
+import { Loader2, Upload, Check, X } from "lucide-react";
+import { useState } from "react";
 import { Progress } from "@/components/ui/progress";
 import { PlanMarkupViewer } from "@/components/PlanMarkupViewer";
+import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
+import { deletePlanReviewFile } from "@/lib/delete-plan-review-file";
+import { toast } from "sonner";
 import type { PDFPageImage } from "@/lib/pdf-utils";
 import type { Finding } from "@/components/FindingCard";
 
@@ -36,9 +40,33 @@ interface Props {
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (files: FileList | null) => void;
   showFileTabs?: boolean;
+  /** Plan review id — when present, file chips become deletable. */
+  planReviewId?: string;
+  /** Refresh callback after a file is deleted. */
+  onFileDeleted?: () => void;
 }
 
 export function PlanViewerPanel(props: Props) {
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleConfirmDelete = async () => {
+    if (!pendingDelete || !props.planReviewId) return;
+    setDeleting(true);
+    const result = await deletePlanReviewFile({
+      planReviewId: props.planReviewId,
+      filePath: pendingDelete,
+    });
+    setDeleting(false);
+    if (result.ok) {
+      toast.success("File removed");
+      setPendingDelete(null);
+      props.onFileDeleted?.();
+    } else {
+      toast.error(result.blocker ?? "Could not delete file");
+    }
+  };
+
   if (!props.hasDocuments) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -109,12 +137,23 @@ export function PlanViewerPanel(props: Props) {
           )}
           {props.fileUrls.map((url, i) => {
             const name = decodeURIComponent(url.split("/").pop() || `Doc ${i + 1}`);
+            const canDelete = !!props.planReviewId;
             return (
               <span
                 key={i}
-                className="text-2xs text-muted-foreground bg-muted px-2 py-0.5 rounded truncate max-w-[200px]"
+                className="group inline-flex items-center gap-1 text-2xs text-muted-foreground bg-muted px-2 py-0.5 rounded max-w-[240px]"
               >
-                {name}
+                <span className="truncate">{name}</span>
+                {canDelete && (
+                  <button
+                    type="button"
+                    aria-label={`Remove ${name}`}
+                    onClick={() => setPendingDelete(url)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity hover:text-destructive shrink-0"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
               </span>
             );
           })}
@@ -133,6 +172,18 @@ export function PlanViewerPanel(props: Props) {
             onChange={(e) => props.onFileUpload(e.target.files)}
           />
         </div>
+      )}
+      {pendingDelete && (
+        <DeleteConfirmDialog
+          open={!!pendingDelete}
+          onOpenChange={(o) => !o && setPendingDelete(null)}
+          resourceLabel="file"
+          expectedConfirmText={decodeURIComponent(pendingDelete.split("/").pop() || "file")}
+          title="Remove this file?"
+          description="The PDF will be removed from this review and from storage. Page renderings stay until the review is re-prepared. Sent letters block deletion."
+          loading={deleting}
+          onConfirm={handleConfirmDelete}
+        />
       )}
     </>
   );

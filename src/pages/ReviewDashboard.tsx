@@ -46,6 +46,7 @@ import {
   usePipelineStatus,
 } from "@/hooks/useReviewDashboard";
 import { useFirmSettings } from "@/hooks/useFirmSettings";
+import { useReviewCoveragePct } from "@/hooks/useReviewCoverage";
 import { generateCountyReport } from "@/lib/county-report";
 import { determineReviewStatus } from "@/lib/review-status";
 import { cancelPipelineForReview } from "@/lib/pipeline-cancel";
@@ -104,6 +105,7 @@ export default function ReviewDashboard() {
   const { data: deferredItems = [] } = useDeferredScope(id);
   const { data: pipeRows = [] } = usePipelineStatus(id);
   const { firmSettings } = useFirmSettings();
+  const { data: coveragePct = null } = useReviewCoveragePct(id);
   const { data: citationCount } = useQuery({
     queryKey: ["fbc_code_sections_count"],
     queryFn: async () => {
@@ -515,6 +517,9 @@ export default function ReviewDashboard() {
           isThresholdBuilding={detectThresholdBuilding(dna).isThresholdBuilding}
           thresholdTriggers={detectThresholdBuilding(dna).triggers}
           specialInspectorDesignated={!!review?.special_inspector_designated}
+          coveragePct={coveragePct}
+          blockLetterOnLowCoverage={firmSettings?.block_letter_on_low_coverage ?? true}
+          blockLetterOnUngrounded={firmSettings?.block_letter_on_ungrounded ?? true}
           onJumpToFinding={() => setActiveTab("triage")}
         />
       )}
