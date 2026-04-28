@@ -86,7 +86,7 @@ export default function ReviewDashboard() {
       const { data, error } = await supabase
         .from("plan_reviews")
         .select(
-          "id, project_id, round, qc_status, comment_letter_draft, notice_to_building_official_filed_at, compliance_affidavit_signed_at, project:projects(name, address, jurisdiction, county)",
+          "id, project_id, round, qc_status, comment_letter_draft, notice_to_building_official_filed_at, compliance_affidavit_signed_at, special_inspector_designated, special_inspector_name, special_inspector_license, project:projects(name, address, jurisdiction, county)",
         )
         .eq("id", id!)
         .maybeSingle();
