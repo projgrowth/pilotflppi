@@ -230,6 +230,21 @@ function buildLetterHTML(props: CommentLetterExportProps): string {
   .signature-block { margin-top: 40px; }
   .signature-line { border-top: 1px solid #1a1a1a; width: 250px; margin-top: 40px; padding-top: 4px; font-size: 9pt; }
   .footer { margin-top: 30px; padding-top: 8px; border-top: 1px solid #cbd5e0; font-size: 7.5pt; color: #718096; text-align: center; }
+  .appendix-divider { page-break-before: always; }
+  .appendix-cover { padding: 24px 0 16px; border-bottom: 2px solid #1a365d; margin-bottom: 16px; }
+  .appendix-cover h2 { font-size: 14pt; color: #1a365d; letter-spacing: 1px; margin-bottom: 8px; }
+  .appendix-cover p { font-size: 9.5pt; line-height: 1.55; margin-bottom: 6px; }
+  .appendix-cover-meta { font-size: 8.5pt; color: #4a5568; font-style: italic; }
+  .appendix-list { display: block; }
+  .appendix-item { page-break-inside: avoid; margin-bottom: 18px; padding: 10px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fafbfc; }
+  .appendix-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
+  .appendix-num { font-weight: bold; color: #1a365d; font-size: 10pt; }
+  .appendix-disc { font-size: 8pt; color: #4a5568; margin-left: auto; text-transform: uppercase; letter-spacing: 0.5px; }
+  .appendix-refs { font-size: 9pt; color: #2d3748; margin-bottom: 6px; }
+  .appendix-sheet { margin-left: 8px; font-family: 'Courier New', monospace; font-size: 8.5pt; color: #4a5568; }
+  .appendix-img { display: block; max-width: 100%; max-height: 4.5in; margin: 6px 0; border: 1px solid #cbd5e0; }
+  .appendix-no-crop { padding: 8px; background: #f7fafc; border: 1px dashed #cbd5e0; font-size: 8.5pt; color: #718096; font-style: italic; margin: 6px 0; }
+  .appendix-caption { font-size: 9pt; color: #2d3748; line-height: 1.5; margin-top: 4px; }
 </style>
 </head><body>
 
