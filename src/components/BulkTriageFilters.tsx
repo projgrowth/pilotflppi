@@ -16,6 +16,7 @@ import { CheckCheck, Clock, ArrowRightLeft, SlidersHorizontal, X } from "lucide-
 import type { FindingStatus } from "@/types";
 
 export type ConfidenceFilter = "high" | "medium" | "low" | "all";
+export type QualityFilter = "all" | "unverified" | "hallucinated";
 
 interface Props {
   statusCounts: Record<FindingStatus | "all", number>;
