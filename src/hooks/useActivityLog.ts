@@ -1,46 +1,57 @@
-/**
- * Project activity log hook — fetches activity_log rows for a project,
- * newest first. Used by ProjectDetail's Activity tab.
- */
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
 export interface ActivityEntry {
   id: string;
+  project_id: string | null;
+  actor_type: string;
   event_type: string;
   description: string;
+  metadata: Record<string, unknown>;
   created_at: string;
-  actor_type: string | null;
-  metadata: Record<string, unknown> | null;
 }
 
-export function useProjectActivityLog(projectId: string) {
+export function useActivityLog(limit = 10) {
   return useQuery({
-    queryKey: ["activity_log", "project", projectId],
-    enabled: !!projectId,
-    queryFn: async (): Promise<ActivityEntry[]> => {
+    queryKey: ["activity-log", limit],
+    queryFn: async () => {
       const { data, error } = await supabase
         .from("activity_log")
-        .select("id, event_type, description, created_at, actor_type, metadata")
-        .eq("project_id", projectId)
+        .select("*")
         .order("created_at", { ascending: false })
-        .limit(100);
+        .limit(limit);
       if (error) throw error;
-      return (data ?? []) as ActivityEntry[];
+      return data as ActivityEntry[];
     },
   });
 }
 
-/** Maps an activity event_type to a Tailwind bg-color class for the timeline dot. */
+export function useProjectActivityLog(projectId: string) {
+  return useQuery({
+    queryKey: ["activity-log", "project", projectId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("activity_log")
+        .select("*")
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data as ActivityEntry[];
+    },
+    enabled: !!projectId,
+  });
+}
+
+const eventColorMap: Record<string, string> = {
+  intake: "bg-accent",
+  plan_review_started: "bg-teal",
+  comments_sent: "bg-warning",
+  approved: "bg-success",
+  inspection_scheduled: "bg-teal",
+  deadline_warning: "bg-destructive",
+  certificate_issued: "bg-success",
+};
+
 export function getEventColor(eventType: string): string {
-  if (eventType.includes("error") || eventType.includes("overdue") || eventType.includes("failed")) {
-    return "bg-destructive";
-  }
-  if (eventType.includes("warning") || eventType.includes("paused") || eventType.includes("hold")) {
-    return "bg-warning";
-  }
-  if (eventType.includes("complete") || eventType.includes("issued") || eventType.includes("approved")) {
-    return "bg-primary";
-  }
-  return "bg-muted-foreground";
+  return eventColorMap[eventType] || "bg-muted-foreground";
 }
