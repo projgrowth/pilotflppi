@@ -440,13 +440,20 @@ export default function PlanReviewDetail() {
   const diff = useRoundDiff(findings, previousFindings, review?.round ?? 1);
 
   // Pipeline completion handler — declared as a hook here (above the early
-  // returns) so React's hook-order invariant holds. Idempotent: only flips
-  // state when a run is actually in flight, so a stray re-fire from the
-  // stepper can't loop us into a render storm (which crashed mobile).
+  // returns) so React's hook-order invariant holds. The stepper's internal
+  // `firedForRef` already latches on the terminal row's started_at, so this
+  // is called exactly once per pipeline run. Used by both the in-page
+  // ProcessingOverlay and the top-bar popover stepper.
+  const completeFiredFor = useRef<string | null>(null);
   const handlePipelineComplete = useCallback(() => {
-    if (!aiRunning) return;
+    // Belt-and-braces idempotency: also key on the review id so a fresh round
+    // can re-arm. The stepper handles same-round dedupe.
+    const key = review?.id ?? "no-review";
+    if (completeFiredFor.current === key) return;
+    completeFiredFor.current = key;
     queryClient.invalidateQueries({ queryKey: ["plan-review-findings-v2", review?.id] });
     queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+    queryClient.invalidateQueries({ queryKey: ["plan-review-page-asset-count", id] });
     setAiRunning(false);
     setAiCompleteFlash(findings.length);
     setTimeout(() => setAiCompleteFlash(null), 3000);
@@ -458,7 +465,7 @@ export default function PlanReviewDetail() {
         ? `Review complete — ${findings.length} finding${findings.length === 1 ? "" : "s"}`
         : "Review complete — no findings",
     );
-  }, [aiRunning, queryClient, review?.id, id, findings.length]);
+  }, [queryClient, review?.id, id, findings.length]);
 
   if (isLoading) {
     return (
