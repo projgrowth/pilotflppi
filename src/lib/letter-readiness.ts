@@ -69,6 +69,13 @@ export interface ReadinessInput {
   /** Disciplines the signing reviewer is licensed for (lowercase keys
    *  from profiles.discipline_licenses). Empty array = no licenses on file. */
   reviewerLicensedDisciplines: string[];
+  /** F.S. 553.79(5): true when DNA detected the project meets the threshold-
+   *  building definition (>3 stories, >50 ft, or >5,000 sf assembly w/ >500 occ). */
+  isThresholdBuilding: boolean;
+  /** Triggers that classified the project as a threshold building, for the UI detail. */
+  thresholdTriggers: string[];
+  /** Has the EOR designated a Special Inspector for this threshold building? */
+  specialInspectorDesignated: boolean;
 }
 
 export interface ReadinessResult {
