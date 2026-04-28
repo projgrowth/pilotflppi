@@ -111,11 +111,6 @@ export const DEEP_STAGE_KEYS: PipelineStage[] = [
 
 export type PipelineMode = "core" | "deep";
 
-function stagesForPipelineMode(mode: PipelineMode): PipelineStage[] {
-  return mode === "deep" ? DEEP_STAGE_KEYS : CORE_STAGE_KEYS;
-}
-void stagesForPipelineMode;
-
 
 export interface PipelineRow {
   id: string;
@@ -451,13 +446,3 @@ export function useDeferredScope(planReviewId?: string) {
   return query;
 }
 
-export async function updateDeferredScopeItem(
-  id: string,
-  patch: Partial<Pick<DeferredScopeItem, "status" | "reviewer_notes">>,
-) {
-  const { error } = await supabase
-    .from("deferred_scope_items")
-    .update(patch)
-    .eq("id", id);
-  if (error) throw error;
-}
