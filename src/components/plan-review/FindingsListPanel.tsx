@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sparkles, Upload } from "lucide-react";
 import { FindingCard, type Finding } from "@/components/FindingCard";
-import { BulkTriageFilters, type ConfidenceFilter } from "@/components/BulkTriageFilters";
+import { BulkTriageFilters, type ConfidenceFilter, type QualityFilter } from "@/components/BulkTriageFilters";
 import { ConfidenceMeter } from "@/components/shared/ConfidenceMeter";
 import type { FindingStatus } from "@/components/FindingStatusFilter";
 import {
