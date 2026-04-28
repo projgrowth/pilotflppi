@@ -61,6 +61,10 @@ import { RoundCarryoverPanel } from "@/components/plan-review/RoundCarryoverPane
 import { UploadProgressBar } from "@/components/plan-review/UploadProgressBar";
 import { SubmittalIncompleteBanner } from "@/components/plan-review/SubmittalIncompleteBanner";
 import { ReviewProvenanceStrip } from "@/components/plan-review/ReviewProvenanceStrip";
+import { sendCommentLetter } from "@/lib/send-comment-letter";
+import { fetchReadinessForSend } from "@/lib/letter-readiness-fetch";
+import { useFirmId } from "@/hooks/useFirmId";
+import type { ReadinessResult } from "@/lib/letter-readiness";
 
 import { Wand2, AlertTriangle, Loader2 } from "lucide-react";
 
@@ -139,6 +143,9 @@ export default function PlanReviewDetail() {
   // showShortcuts removed — workspace shortcuts surface via the dashboard's TriageShortcutsOverlay.
   const [lintIssues, setLintIssues] = useState<LintIssue[]>([]);
   const [showLintDialog, setShowLintDialog] = useState(false);
+  const [pendingReadiness, setPendingReadiness] = useState<ReadinessResult | null>(null);
+  const [sending, setSending] = useState(false);
+  const { firmId } = useFirmId();
   const [aiRunning, setAiRunning] = useState(false);
   const [aiCompleteFlash, setAiCompleteFlash] = useState<number | null>(null);
   const [reprepping, setReprepping] = useState(false);
@@ -594,6 +601,7 @@ export default function PlanReviewDetail() {
     round: review.round,
     aiCheckStatus: review.ai_check_status,
     qcStatus: review.qc_status || "pending_qc",
+    qcNotes: review.qc_notes || "",
     hasFindings,
     findings,
     findingStatuses,
@@ -621,22 +629,48 @@ export default function PlanReviewDetail() {
     onCancelLetter: cancelCommentLetter,
     onCopyLetter: copyLetter,
     onLetterChange: setCommentLetter,
-    onSendToContractor: () => {
+    onSendToContractor: async () => {
       const indexedStatuses: Record<number, FindingStatus> = {};
       findings.forEach((f, i) => { if (f.finding_id && findingStatuses[f.finding_id]) indexedStatuses[i] = findingStatuses[f.finding_id]; });
       const issues = lintCommentLetter(commentLetter, findings, indexedStatuses);
       setLintIssues(issues);
+      // Compute readiness from the live deficiencies_v2 rows so the gate the
+      // reviewer sees in the dialog matches what we'll snapshot at send-time.
+      try {
+        const r: any = review as any;
+        const readiness = await fetchReadinessForSend({
+          planReviewId: review.id,
+          qcStatus: review.qc_status,
+          noticeFiledAt: r.notice_to_building_official_filed_at ?? null,
+          affidavitSignedAt: r.compliance_affidavit_signed_at ?? null,
+          isThresholdBuilding: !!r.threshold_building,
+          thresholdTriggers: Array.isArray(r.threshold_triggers) ? r.threshold_triggers : [],
+          specialInspectorDesignated: !!r.special_inspector_designated,
+          reviewerLicensedDisciplines: [],
+          projectDnaMissingFields: [],
+        });
+        setPendingReadiness(readiness);
+      } catch {
+        setPendingReadiness(null);
+      }
       setShowLintDialog(true);
     },
-    onQcApprove: async () => {
+    onQcApprove: async (notes?: string) => {
       // FS 553.791 sign-off integrity: a reviewer cannot QC their own work.
       if (review.reviewer_id && review.reviewer_id === user?.id) {
         toast.error("You ran this review — a different team member must approve QC.");
         return;
       }
+      const trimmedNotes = (notes ?? "").trim().slice(0, 4000);
       await supabase
         .from("plan_reviews")
-        .update({ qc_status: "qc_approved", qc_reviewer_id: user?.id })
+        .update({
+          qc_status: "qc_approved",
+          qc_reviewer_id: user?.id,
+          qc_approved_by: user?.id,
+          qc_approved_at: new Date().toISOString(),
+          qc_notes: trimmedNotes,
+        })
         .eq("id", review.id);
       await supabase.from("activity_log").insert({
         event_type: "qc_approved",
@@ -644,14 +678,20 @@ export default function PlanReviewDetail() {
         project_id: review.project_id,
         actor_id: user?.id,
         actor_type: "user",
+        metadata: { notes_length: trimmedNotes.length },
       });
       queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
       toast.success("QC approved — exports unlocked");
     },
-    onQcReject: async () => {
+    onQcReject: async (notes?: string) => {
+      const trimmedNotes = (notes ?? "").trim().slice(0, 4000);
       await supabase
         .from("plan_reviews")
-        .update({ qc_status: "qc_rejected", qc_reviewer_id: user?.id })
+        .update({
+          qc_status: "qc_rejected",
+          qc_reviewer_id: user?.id,
+          qc_notes: trimmedNotes,
+        })
         .eq("id", review.id);
       await supabase.from("activity_log").insert({
         event_type: "qc_rejected",
@@ -659,6 +699,7 @@ export default function PlanReviewDetail() {
         project_id: review.project_id,
         actor_id: user?.id,
         actor_type: "user",
+        metadata: { notes_length: trimmedNotes.length },
       });
       queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
       toast.error("QC rejected");
@@ -999,9 +1040,44 @@ export default function PlanReviewDetail() {
         onOpenChange={setShowLintDialog}
         issues={lintIssues}
         blocked={hasBlockingIssues(lintIssues)}
-        onConfirmSend={() => {
-          setShowLintDialog(false);
-          toast.success("Letter ready to send");
+        readinessBlockingCount={pendingReadiness?.blockingCount ?? 0}
+        onConfirmSend={async (overrideReason) => {
+          if (!user || !review) return;
+          if (sending) return;
+          setSending(true);
+          try {
+            const recipient =
+              (review as any).contractor_email ??
+              (review.project as any)?.contractor_email ??
+              "";
+            const result = await sendCommentLetter({
+              planReviewId: review.id,
+              projectId: review.project_id,
+              round: review.round,
+              recipient,
+              letterHtml: commentLetter,
+              findings: findings as unknown as Array<Record<string, unknown>>,
+              firmInfo: (firmSettings ?? {}) as Record<string, unknown>,
+              readiness:
+                pendingReadiness ?? {
+                  checks: [],
+                  allRequiredPassing: true,
+                  blockingCount: 0,
+                },
+              overrideReason,
+              sentByUserId: user.id,
+              firmId: firmId ?? null,
+            });
+            setShowLintDialog(false);
+            toast.success("Letter sent — snapshot saved");
+            queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+            queryClient.invalidateQueries({ queryKey: ["project", review.project_id] });
+            void result;
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : "Failed to send letter");
+          } finally {
+            setSending(false);
+          }
         }}
       />
     </div>

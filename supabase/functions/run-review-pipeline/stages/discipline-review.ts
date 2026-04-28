@@ -520,7 +520,27 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
     return { suspicious: false, reason: "" };
   };
 
-  const rows = findings.map((f, i) => {
+  // Hard-drop findings whose verbatim plan-evidence array is empty AFTER
+  // cleaning. The prompt mandates `evidence[]`; an empty array means the model
+  // gave up and "hallucinated by omission." Keeping these poisons the comment
+  // letter (no quote a building official can verify on the sheet). Life-safety
+  // / permit-blocker items are kept but flagged for mandatory human review so
+  // catastrophic risks don't silently disappear.
+  const filteredFindings = findings.filter((f) => {
+    const cleaned = (f.evidence ?? [])
+      .map((s) => (typeof s === "string" ? s.trim() : ""))
+      .filter((s) => s.length > 0);
+    if (cleaned.length > 0) return true;
+    return !!f.life_safety_flag || !!f.permit_blocker;
+  });
+  const droppedNoEvidence = findings.length - filteredFindings.length;
+  if (droppedNoEvidence > 0) {
+    console.log(
+      `[discipline-review] dropped ${droppedNoEvidence}/${findings.length} findings with no verbatim plan evidence`,
+    );
+  }
+
+  const rows = filteredFindings.map((f, i) => {
     const validSection = cleanSection(f.code_section);
     const cleanedEvidence = (f.evidence ?? [])
       .slice(0, 3)

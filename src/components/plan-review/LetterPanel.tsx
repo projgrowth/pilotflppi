@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Sparkles, Loader2, Send, Check, Copy, X, Save, Cloud, AlertCircle } from "lucide-react";
@@ -18,6 +19,8 @@ interface LetterPanelProps {
   round: number;
   aiCheckStatus: string;
   qcStatus: string;
+  /** Reviewer-supplied audit notes captured at QC sign-off (persisted in plan_reviews.qc_notes). */
+  qcNotes?: string;
   hasFindings: boolean;
   findings: Finding[];
   findingStatuses: Record<string, FindingStatus>;
@@ -33,8 +36,8 @@ interface LetterPanelProps {
   onCancelLetter?: () => void;
   onCopyLetter: () => void;
   onLetterChange: (value: string) => void;
-  onQcApprove: () => void;
-  onQcReject: () => void;
+  onQcApprove: (notes?: string) => void;
+  onQcReject: (notes?: string) => void;
   onDocumentGenerated: () => void;
   /** Validate then trigger send. Parent owns the linter dialog. */
   onSendToContractor?: () => void;
@@ -50,12 +53,13 @@ function formatRelative(date: Date): string {
 }
 
 export function LetterPanel({
-  qcStatus, hasFindings, findings, findingStatuses, firmSettings,
+  qcStatus, qcNotes, hasFindings, findings, findingStatuses, firmSettings,
   commentLetter, generatingLetter, copied, county, jurisdiction,
   tradeType, round, projectId, projectName, address, aiCheckStatus,
   autosaveState, autosaveLastSavedAt,
   onGenerateLetter, onCancelLetter, onCopyLetter, onLetterChange, onQcApprove, onQcReject, onDocumentGenerated, onSendToContractor,
 }: LetterPanelProps) {
+  const [notesDraft, setNotesDraft] = useState<string>(qcNotes ?? "");
   return (
     <div className="p-3 space-y-3">
       {/* QC Status Bar */}
@@ -79,14 +83,37 @@ export function LetterPanel({
           </div>
           {qcStatus === "pending_qc" && (
             <div className="flex gap-1">
-              <Button size="sm" variant="outline" className="h-6 text-2xs text-destructive border-destructive/30" onClick={onQcReject}>
+              <Button size="sm" variant="outline" className="h-6 text-2xs text-destructive border-destructive/30" onClick={() => onQcReject(notesDraft)}>
                 Reject
               </Button>
-              <Button size="sm" className="h-6 text-2xs bg-success text-success-foreground hover:bg-success/90" onClick={onQcApprove}>
+              <Button size="sm" className="h-6 text-2xs bg-success text-success-foreground hover:bg-success/90" onClick={() => onQcApprove(notesDraft)}>
                 Approve
               </Button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* QC reviewer notes — saved with sign-off into plan_reviews.qc_notes
+          for the legitimacy audit trail (FS 553.791 reviewer accountability). */}
+      {hasFindings && aiCheckStatus === "complete" && qcStatus === "pending_qc" && (
+        <div className="space-y-1.5">
+          <label className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+            QC notes (optional, saved with sign-off)
+          </label>
+          <Textarea
+            value={notesDraft}
+            onChange={(e) => setNotesDraft(e.target.value.slice(0, 4000))}
+            rows={2}
+            placeholder="e.g. Verified §1006 egress dimension on A-101 against site survey."
+            className="text-xs"
+          />
+        </div>
+      )}
+      {hasFindings && qcStatus !== "pending_qc" && qcNotes && qcNotes.trim().length > 0 && (
+        <div className="rounded border bg-muted/40 px-2.5 py-1.5">
+          <div className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground">QC notes</div>
+          <p className="text-xs whitespace-pre-wrap text-foreground/85">{qcNotes}</p>
         </div>
       )}
 
