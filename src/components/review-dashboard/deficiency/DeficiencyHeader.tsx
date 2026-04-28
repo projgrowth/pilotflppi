@@ -38,6 +38,32 @@ export default function DeficiencyHeader({ planReviewId, def }: Props) {
       : { sheet: firstSheet, page: null };
   }, [coverage, def.sheet_refs]);
 
+  // Tier 4: surface cross-discipline conflict link on the SOURCE finding.
+  // The XD conflict row stores both source IDs in evidence_crop_meta. We
+  // scan the cached deficiency list and look for any DEF-XD* row that
+  // names this finding's id in its conflict_with array.
+  const qc = useQueryClient();
+  const conflictLink = useMemo(() => {
+    const all =
+      qc.getQueryData<DeficiencyV2Row[]>(["deficiencies_v2", planReviewId]) ??
+      [];
+    for (const row of all) {
+      if (!row.def_number?.startsWith("DEF-XD")) continue;
+      const meta = (row.evidence_crop_meta ?? {}) as {
+        cross_discipline_conflict_with?: string[];
+      };
+      const linked = meta.cross_discipline_conflict_with ?? [];
+      if (linked.includes(def.id)) {
+        const otherId = linked.find((id) => id !== def.id) ?? null;
+        const otherDef = otherId
+          ? all.find((d) => d.id === otherId) ?? null
+          : null;
+        return { conflictRow: row, otherDef };
+      }
+    }
+    return null;
+  }, [qc, planReviewId, def.id]);
+
   const codeRef = def.code_reference;
   const codeRefStr = codeRef
     ? [codeRef.code, codeRef.section, codeRef.edition && `(${codeRef.edition})`]
