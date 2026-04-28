@@ -50,7 +50,7 @@ export async function sendInspectionReport(
     .update({
       report_html: input.reportHtml,
       report_html_sha256: htmlSha256,
-      readiness_snapshot: input.readinessSnapshot,
+      readiness_snapshot: input.readinessSnapshot as never,
       sent_to_ahj_at: sentAt,
       ahj_recipient: input.recipient.trim(),
     })
