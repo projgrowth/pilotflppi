@@ -305,13 +305,42 @@ export async function stageGroundCitations(
       };
     }
     if (needsHumanReview) {
-      update.requires_human_review = true;
-      update.human_review_reason =
-        status === "mismatch"
-          ? `Citation ${def.code_reference?.section ?? "?"} doesn't match the canonical FBC text — verify the section is correct.`
-          : status === "not_found"
-            ? `Cited FBC section ${def.code_reference?.section ?? "?"} was not found in the code library — verify or correct.`
-            : `No FBC section parseable from this finding — add or correct the citation.`;
+      // Tier 2.3: try the vector grounder before flagging for human review.
+      // If we find a high-confidence semantic match, attach it as a suggestion
+      // and (for `not_found`/`hallucinated`) auto-promote to `mismatch` so the
+      // reviewer sees a concrete alternative rather than "we don't know".
+      const suggestion = await vectorSuggestSection(
+        admin,
+        def.finding,
+        def.required_action,
+      );
+      if (suggestion && suggestion.similarity >= 0.6) {
+        const prevMeta = (update.evidence_crop_meta as Record<string, unknown>) ?? {};
+        update.evidence_crop_meta = {
+          ...prevMeta,
+          vector_suggestion: {
+            section: suggestion.section,
+            title: suggestion.title,
+            similarity: Number(suggestion.similarity.toFixed(3)),
+            preview: suggestion.requirement_text.slice(0, 240),
+          },
+        };
+        update.requires_human_review = true;
+        update.human_review_reason =
+          status === "mismatch"
+            ? `Citation ${def.code_reference?.section ?? "?"} doesn't match the canonical FBC text — the AI suggests ${suggestion.section} (${suggestion.title}) is a better fit. Verify and update.`
+            : status === "not_found"
+              ? `Cited FBC section ${def.code_reference?.section ?? "?"} was not found — the AI suggests ${suggestion.section} (${suggestion.title}) instead. Verify and update.`
+              : `No FBC section parseable — the AI suggests ${suggestion.section} (${suggestion.title}). Verify and add the citation.`;
+      } else {
+        update.requires_human_review = true;
+        update.human_review_reason =
+          status === "mismatch"
+            ? `Citation ${def.code_reference?.section ?? "?"} doesn't match the canonical FBC text — verify the section is correct.`
+            : status === "not_found"
+              ? `Cited FBC section ${def.code_reference?.section ?? "?"} was not found in the code library — verify or correct.`
+              : `No FBC section parseable from this finding — add or correct the citation.`;
+      }
     }
     const { error: updErr } = await admin
       .from("deficiencies_v2")
