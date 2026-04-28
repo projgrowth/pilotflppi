@@ -481,6 +481,17 @@ export default function ReviewDashboard() {
           qcStatus={review?.qc_status}
           reviewerIsSoleSigner={true}
           projectDnaMissingFields={dnaIssue?.missing ?? []}
+          noticeToBuildingOfficialFiledAt={review?.notice_to_building_official_filed_at}
+          complianceAffidavitSignedAt={review?.compliance_affidavit_signed_at}
+          disciplinesInLetter={Array.from(
+            new Set(
+              defs
+                .filter((f) => (f.status ?? "open") === "open" || f.status === "needs_info")
+                .map((f) => (f.discipline ?? "").toLowerCase())
+                .filter(Boolean),
+            ),
+          )}
+          reviewerLicensedDisciplines={reviewerLicensedDisciplines}
           onJumpToFinding={() => setActiveTab("triage")}
         />
       )}
