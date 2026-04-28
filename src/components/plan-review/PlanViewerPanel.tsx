@@ -177,10 +177,11 @@ export function PlanViewerPanel(props: Props) {
         <DeleteConfirmDialog
           open={!!pendingDelete}
           onOpenChange={(o) => !o && setPendingDelete(null)}
+          resourceLabel="file"
+          expectedConfirmText={decodeURIComponent(pendingDelete.split("/").pop() || "file")}
           title="Remove this file?"
-          description="The PDF will be removed from this review and from storage. Page renderings stay until the review is re-prepared. Sent letters are unaffected."
-          confirmName={decodeURIComponent(pendingDelete.split("/").pop() || "file")}
-          confirming={deleting}
+          description="The PDF will be removed from this review and from storage. Page renderings stay until the review is re-prepared. Sent letters block deletion."
+          loading={deleting}
           onConfirm={handleConfirmDelete}
         />
       )}
