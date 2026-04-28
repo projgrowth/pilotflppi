@@ -36,6 +36,7 @@ import LetterReadinessGate from "@/components/plan-review/LetterReadinessGate";
 import LetterSnapshotViewer from "@/components/plan-review/LetterSnapshotViewer";
 import StatutoryCompliancePanel from "@/components/plan-review/StatutoryCompliancePanel";
 import { CRITICAL_DNA_FIELDS } from "@/lib/dna-fields";
+import { detectThresholdBuilding } from "@/lib/threshold-building";
 import { useLetterQualityCheck } from "@/hooks/useLetterQualityCheck";
 import {
   useDeficienciesV2,
