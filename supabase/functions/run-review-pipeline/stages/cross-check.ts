@@ -430,6 +430,23 @@ export async function stageCrossCheck(
     console.error("[cross_check] consistency pass failed:", err);
   }
 
+  // ---------- cross-discipline conflict detection (Tier 3.1) ----------
+  // Pairs findings from DIFFERENT disciplines that touch the SAME sheet and
+  // checks whether they make contradictory claims about the same element
+  // (e.g., structural says CMU wall, life-safety says rated GWB on the same
+  // partition). Cheap text-only AI pass; no images.
+  let cross_discipline_conflicts: CrossDisciplineConflict[] = [];
+  try {
+    cross_discipline_conflicts = await runCrossDisciplineConflicts(
+      admin,
+      planReviewId,
+      firmId,
+      rows,
+    );
+  } catch (err) {
+    console.error("[cross_check] cross-discipline pass failed:", err);
+  }
+
   return {
     duplicate_groups,
     duplicates_found: duplicate_groups.length,
@@ -437,5 +454,241 @@ export async function stageCrossCheck(
     contradictions_found: contradictions.length,
     consistency_mismatches,
     consistency_mismatches_found: consistency_mismatches.length,
+    cross_discipline_conflicts,
+    cross_discipline_conflicts_found: cross_discipline_conflicts.length,
   };
+}
+
+// ---------- Tier 3.1: Cross-discipline conflict detector ----------
+
+interface CrossDisciplineConflict {
+  sheet_ref: string;
+  element: string;
+  discipline_a: string;
+  finding_a_id: string;
+  finding_a_def: string;
+  claim_a: string;
+  discipline_b: string;
+  finding_b_id: string;
+  finding_b_def: string;
+  claim_b: string;
+  reason: string;
+  severity: "high" | "medium" | "low";
+  confidence_score: number;
+  deficiency_id?: string;
+  def_number?: string;
+}
+
+const CROSS_DISC_SCHEMA = {
+  name: "submit_cross_discipline_conflicts",
+  description:
+    "Identify pairs of findings (from DIFFERENT disciplines) that make contradictory claims about the SAME element on the SAME sheet. Examples: structural calls a wall CMU but life-safety calls the same partition rated GWB; mechanical specifies one CFM, energy compliance another; electrical shows a panel size that conflicts with what plumbing assumes for a water heater. Only return PAIRS where the contradiction is concrete and traceable to both findings' text. Do NOT include same-discipline duplicates.",
+  parameters: {
+    type: "object",
+    properties: {
+      conflicts: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            finding_a_id: { type: "string" },
+            finding_b_id: { type: "string" },
+            sheet_ref: { type: "string" },
+            element: { type: "string", description: "What real-world element they disagree about." },
+            claim_a: { type: "string" },
+            claim_b: { type: "string" },
+            reason: { type: "string", description: "Why these two claims contradict." },
+            severity: { type: "string", enum: ["high", "medium", "low"] },
+            confidence_score: { type: "number", minimum: 0, maximum: 1 },
+          },
+          required: [
+            "finding_a_id",
+            "finding_b_id",
+            "sheet_ref",
+            "element",
+            "claim_a",
+            "claim_b",
+            "reason",
+            "severity",
+            "confidence_score",
+          ],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["conflicts"],
+    additionalProperties: false,
+  },
+} as const;
+
+const CROSS_DISC_SYSTEM = `You are a senior plan reviewer auditing a list of deficiencies that came from MULTIPLE discipline reviewers (architectural, structural, MEP, life-safety, etc.). Your only job: spot pairs where two different disciplines make contradictory claims about the SAME element on the SAME sheet.
+
+Hard rules:
+1. Both findings must be on the same sheet AND from DIFFERENT disciplines.
+2. The contradiction must be concrete — quote both claims using the exact text given. No vague "they might disagree" pairs.
+3. Skip pairs that are merely *related* (e.g., both flag the same room) but don't contradict.
+4. Confidence ≥ 0.7 only when the contradiction is unambiguous.
+5. Empty array if nothing concrete. Do not invent.`;
+
+async function runCrossDisciplineConflicts(
+  admin: ReturnType<typeof createClient>,
+  planReviewId: string,
+  firmId: string | null,
+  rows: Array<{
+    id: string;
+    def_number: string;
+    finding: string;
+    sheet_refs: string[] | null;
+    code_reference: { section?: string } | null;
+    status: string;
+  }>,
+): Promise<CrossDisciplineConflict[]> {
+  // Need the discipline column too — refetch with it.
+  const { data: defsRaw } = await admin
+    .from("deficiencies_v2")
+    .select("id, def_number, discipline, finding, sheet_refs, status")
+    .eq("plan_review_id", planReviewId)
+    .neq("status", "resolved")
+    .neq("status", "waived");
+  const defs = (defsRaw ?? []) as Array<{
+    id: string;
+    def_number: string;
+    discipline: string;
+    finding: string;
+    sheet_refs: string[] | null;
+  }>;
+
+  // Group by sheet — only sheets where 2+ disciplines have findings are
+  // candidates.
+  const bySheet = new Map<string, typeof defs>();
+  for (const d of defs) {
+    for (const sRaw of d.sheet_refs ?? []) {
+      const s = sRaw.trim().toUpperCase();
+      if (!s) continue;
+      if (!bySheet.has(s)) bySheet.set(s, []);
+      bySheet.get(s)!.push(d);
+    }
+  }
+  const candidates: { sheet: string; items: typeof defs }[] = [];
+  for (const [sheet, items] of bySheet) {
+    const disciplines = new Set(items.map((i) => i.discipline));
+    if (disciplines.size >= 2) candidates.push({ sheet, items });
+  }
+  if (candidates.length === 0) return [];
+
+  // Cap to 6 sheets and 24 findings per call to keep cost bounded.
+  candidates.sort((a, b) => b.items.length - a.items.length);
+  const top = candidates.slice(0, 6);
+
+  const userText = top
+    .map(({ sheet, items }) => {
+      const lines = items
+        .slice(0, 24)
+        .map(
+          (i) =>
+            `  - ${i.id} [${i.discipline}] ${i.def_number}: ${i.finding.slice(0, 280)}`,
+        )
+        .join("\n");
+      return `Sheet ${sheet}:\n${lines}`;
+    })
+    .join("\n\n");
+
+  let result: { conflicts?: Array<Omit<CrossDisciplineConflict, "deficiency_id" | "def_number">> };
+  try {
+    result = (await callAI(
+      [
+        { role: "system", content: CROSS_DISC_SYSTEM },
+        {
+          role: "user",
+          content:
+            `For each sheet below, find cross-discipline contradictions among the listed findings. ` +
+            `Return JSON via submit_cross_discipline_conflicts.\n\n${userText}`,
+        },
+      ],
+      CROSS_DISC_SCHEMA as unknown as Record<string, unknown>,
+      "google/gemini-2.5-flash",
+    )) as typeof result;
+  } catch (err) {
+    console.error("[cross_discipline] AI call failed:", err);
+    return [];
+  }
+
+  const idIndex = new Map(defs.map((d) => [d.id, d] as const));
+  const conflicts: CrossDisciplineConflict[] = [];
+  for (const c of result?.conflicts ?? []) {
+    const a = idIndex.get(c.finding_a_id);
+    const b = idIndex.get(c.finding_b_id);
+    if (!a || !b) continue;
+    if (a.discipline === b.discipline) continue;
+    if ((c.confidence_score ?? 0) < 0.7) continue;
+    conflicts.push({
+      sheet_ref: c.sheet_ref.trim().toUpperCase(),
+      element: c.element.slice(0, 200),
+      discipline_a: a.discipline,
+      finding_a_id: a.id,
+      finding_a_def: a.def_number,
+      claim_a: c.claim_a.slice(0, 240),
+      discipline_b: b.discipline,
+      finding_b_id: b.id,
+      finding_b_def: b.def_number,
+      claim_b: c.claim_b.slice(0, 240),
+      reason: c.reason.slice(0, 400),
+      severity: c.severity,
+      confidence_score: Math.max(0, Math.min(1, c.confidence_score)),
+    });
+  }
+
+  if (conflicts.length === 0) return [];
+
+  // Persist as DEF-XD* rows so they show in the dashboard. Mark both source
+  // findings via evidence_crop_meta.cross_discipline_conflict_with so the UI
+  // can cross-link them later.
+  const { count: existingCount } = await admin
+    .from("deficiencies_v2")
+    .select("id", { count: "exact", head: true })
+    .eq("plan_review_id", planReviewId)
+    .like("def_number", "DEF-XD%");
+  const baseIdx = (existingCount ?? 0) + 1;
+
+  const persistRows = conflicts.map((c, i) => ({
+    plan_review_id: planReviewId,
+    firm_id: firmId,
+    def_number: `DEF-XD${String(baseIdx + i).padStart(3, "0")}`,
+    discipline: "cross_sheet",
+    sheet_refs: [c.sheet_ref],
+    code_reference: {},
+    finding: `Cross-discipline conflict on ${c.sheet_ref}: ${c.discipline_a} (${c.finding_a_def}) and ${c.discipline_b} (${c.finding_b_def}) disagree about ${c.element}. ${c.reason}`,
+    required_action: `Reconcile the two disciplines. ${c.discipline_a} states: "${c.claim_a}". ${c.discipline_b} states: "${c.claim_b}". Update the design so both disciplines agree, then resubmit affected sheets.`,
+    evidence: [c.claim_a, c.claim_b],
+    priority: c.severity,
+    life_safety_flag: c.discipline_a === "life_safety" || c.discipline_b === "life_safety",
+    permit_blocker: c.severity === "high",
+    liability_flag: false,
+    requires_human_review: true,
+    human_review_reason:
+      "Cross-discipline conflict — verify both disciplines' source findings before issuing.",
+    human_review_method: `Open ${c.sheet_ref}, review ${c.finding_a_def} and ${c.finding_b_def}, confirm the disagreement is real.`,
+    confidence_score: c.confidence_score,
+    confidence_basis: "Cross-discipline conflict pass",
+    model_version: "google/gemini-2.5-flash",
+    status: "open",
+    citation_status: "no_citation_required",
+    evidence_crop_meta: {
+      cross_discipline_conflict_with: [c.finding_a_id, c.finding_b_id],
+    },
+  }));
+
+  const { data: inserted, error: insErr } = await admin
+    .from("deficiencies_v2")
+    .insert(persistRows)
+    .select("id, def_number");
+  if (insErr) {
+    console.error("[cross_discipline] insert failed:", insErr);
+    return conflicts;
+  }
+  return conflicts.map((c, i) => ({
+    ...c,
+    deficiency_id: (inserted?.[i] as { id: string } | undefined)?.id,
+    def_number: (inserted?.[i] as { def_number: string } | undefined)?.def_number,
+  }));
 }
