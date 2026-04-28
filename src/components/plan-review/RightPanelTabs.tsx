@@ -11,7 +11,7 @@ import { ChevronDown } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
-export type RightPanelMode = "findings" | "checklist" | "completeness" | "letter" | "county";
+export type RightPanelMode = "findings" | "checklist" | "completeness" | "letter" | "county" | "activity";
 
 interface Props {
   active: RightPanelMode;
@@ -28,6 +28,7 @@ const SECONDARY: { id: RightPanelMode; label: string; description: string }[] = 
   { id: "checklist", label: "Checklist", description: "Discipline review checklist" },
   { id: "completeness", label: "Completeness", description: "Site plan completeness" },
   { id: "county", label: "County", description: "County requirements" },
+  { id: "activity", label: "Activity", description: "Audit timeline of every event" },
 ];
 
 const SECONDARY_LABEL: Record<RightPanelMode, string> = {
@@ -36,6 +37,7 @@ const SECONDARY_LABEL: Record<RightPanelMode, string> = {
   checklist: "Checklist",
   completeness: "Completeness",
   county: "County",
+  activity: "Activity",
 };
 
 export function RightPanelTabs({ active, onChange, findingsCount }: Props) {
