@@ -36,6 +36,7 @@ export function useProjects() {
       const { data, error } = await supabase
         .from("projects")
         .select("*, contractor:contractors(id, name)")
+        .is("deleted_at", null)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data as Project[];
@@ -51,6 +52,7 @@ export function useProject(id: string) {
         .from("projects")
         .select("*, contractor:contractors(id, name)")
         .eq("id", id)
+        .is("deleted_at", null)
         .single();
       if (error) throw error;
       return data as Project;
