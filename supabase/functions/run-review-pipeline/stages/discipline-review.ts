@@ -358,6 +358,68 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
     return stripped;
   };
 
+  // Evidence shape verifier. We can't OCR the PDFs cheaply at this stage,
+  // but we CAN catch the common fabrication patterns that have surfaced in
+  // production: empty quotes, quotes that are just the finding restated,
+  // generic notes with no plan-specific anchor, or quotes with no overlap
+  // to the cited sheet refs at all. Suspicious findings get auto-routed to
+  // human review with a clear reason.
+  const verifyEvidenceShape = (
+    evidence: string[],
+    finding: string,
+    sheetRefs: string[],
+  ): { suspicious: boolean; reason: string } => {
+    if (evidence.length === 0) {
+      return { suspicious: true, reason: "no quoted evidence on the plan" };
+    }
+    const findingTokens = new Set(
+      finding.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 4),
+    );
+    for (const e of evidence) {
+      const eLow = e.toLowerCase();
+      if (eLow.length < 8) {
+        return { suspicious: true, reason: `evidence quote too short: "${e}"` };
+      }
+      // Restating the finding back as "evidence" is a hallucination tell.
+      const eTokens = eLow.replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 4);
+      if (eTokens.length > 0) {
+        const overlap = eTokens.filter((t) => findingTokens.has(t)).length;
+        if (overlap / eTokens.length > 0.85 && eTokens.length >= 4) {
+          return {
+            suspicious: true,
+            reason: "evidence quote restates the finding instead of quoting the plan",
+          };
+        }
+      }
+    }
+    // If quotes never reference any cited sheet ref OR a recognizable plan
+    // artifact (sheet name, detail callout, dimension, code ref), they may be
+    // generic. We're permissive here — only flag when ALL quotes are vague.
+    const PLAN_ANCHORS = [
+      /\b[A-Z]-?\d{2,4}\b/, // sheet/detail callouts
+      /\b\d+(?:'|-|\.\d+)?\s*(?:in|inch|inches|ft|feet|psf|°|deg)\b/i,
+      /\bdetail\b/i,
+      /\bnote\s*\d+\b/i,
+      /\bsheet\b/i,
+      /\bsection\b/i,
+      /\bsymbol\b/i,
+      /\btable\b/i,
+    ];
+    const sheetUpper = sheetRefs.map((s) => s.toUpperCase());
+    const anyAnchor = evidence.some(
+      (e) =>
+        sheetUpper.some((s) => e.toUpperCase().includes(s)) ||
+        PLAN_ANCHORS.some((re) => re.test(e)),
+    );
+    if (!anyAnchor) {
+      return {
+        suspicious: true,
+        reason: "evidence quotes contain no plan-specific anchor (sheet ref, detail, dimension, or note number)",
+      };
+    }
+    return { suspicious: false, reason: "" };
+  };
+
   const rows = findings.map((f, i) => {
     const validSection = cleanSection(f.code_section);
     const cleanedEvidence = (f.evidence ?? [])
