@@ -257,6 +257,50 @@ function priorityCls(p: "high" | "medium" | "low") {
   return "bg-muted text-muted-foreground border-border";
 }
 
+function needsReground(status: DeficiencyV2Row["citation_status"]): boolean {
+  return (
+    status === "mismatch" ||
+    status === "not_found" ||
+    status === "hallucinated" ||
+    status === "unverified"
+  );
+}
+
+function RegroundButton({
+  planReviewId,
+  deficiencyId,
+}: {
+  planReviewId: string;
+  deficiencyId: string;
+}) {
+  const reground = useRegroundCitation();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-6 gap-1 px-1.5 text-2xs"
+          disabled={reground.isPending}
+          onClick={(e) => {
+            e.stopPropagation();
+            reground.mutate({ planReviewId, deficiencyId });
+          }}
+        >
+          <RefreshCw
+            className={cn("h-3 w-3", reground.isPending && "animate-spin")}
+          />
+          Re-ground
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-xs text-xs">
+        Re-runs FBC citation matching for just this finding. Use after editing
+        the code reference, or to retry a hallucinated/mismatched citation.
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function Tag({
   tone,
   children,
