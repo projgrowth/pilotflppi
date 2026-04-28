@@ -160,9 +160,34 @@ The data turned over: 503/504 rows in `fbc_code_sections` now carry real text, s
 
 `run-review-pipeline` and `embed-fbc-sections` deployed.
 
-## Tier 3 (queued)
+## Tier 3 Accuracy Upgrade (shipped)
 
-- Cross-discipline conflict detector (e.g. structural says CMU wall, life-safety says rated GWB).
-- Reviewer feedback loop into the critic prompt (use `correction_patterns` to bias the self-critique toward known firm-specific reject patterns).
-- Automatic re-verify of all open findings when canonical rows are upgraded from stub → real text.
-- Auto-trigger embedding refresh when canonical rows are edited (`embedded_at = NULL` on update + nightly batch).
+### 3.1 Cross-discipline conflict detector *(shipped)*
+
+New sub-pass inside `cross_check` (`runCrossDisciplineConflicts`). Groups open findings by sheet, keeps only sheets where 2+ disciplines have entries, and asks `gemini-2.5-flash` to identify pairs from DIFFERENT disciplines that make contradictory claims about the same element (classic case: structural says CMU wall, life-safety says rated GWB on the same partition). Confirmed conflicts (confidence ≥ 0.7) are persisted as `DEF-XD###` rows tagged `discipline=cross_sheet`, with both source finding IDs stored in `evidence_crop_meta.cross_discipline_conflict_with` so the UI can cross-link them later. Capped at 6 sheets/24 findings per call to bound cost. Falls back gracefully on AI failure.
+
+### 3.2 Critic learns from `correction_patterns` *(shipped)*
+
+`stageCritic` now loads up to 12 active `correction_patterns` for the current firm filtered to disciplines present in this run, ordered by `rejection_count desc`. Each pattern's summary + rejection reason is appended to the critic system prompt as a "this firm previously rejected findings shaped like X because Y" block, so the critic preferentially flags repeats as `weak`/`junk`. Result metadata reports `used_learned_patterns` so we can tell when the bias was active. Zero impact on firms without correction history.
+
+### 3.3 Re-verify findings on canonical upgrades *(shipped)*
+
+DB trigger `flag_findings_for_reground_on_canonical_change` fires AFTER UPDATE on `fbc_code_sections`. When `requirement_text` changes AND the new text is non-stub (≥60 chars, no placeholder marker), the trigger sets `citation_status = 'unverified'` and `citation_grounded_at = NULL` on every open `deficiencies_v2` row whose `code_reference->>section` matches the upgraded section. Reviewers can then click the existing **"Re-ground citations"** button to re-run grounding against the now-real canonical text — the previously-`mismatch` findings will flip to `verified`.
+
+### 3.4 Auto-clear embedding on canonical edit *(shipped)*
+
+DB trigger `clear_fbc_embedding_on_text_change` fires BEFORE UPDATE on `fbc_code_sections`. If `requirement_text`, `title`, or `keywords` change, both `embedding_vector` and `embedded_at` are nulled out so the next admin click of **"Embed N"** in the Code Library picks up the row. Prevents stale vectors from silently grounding findings against outdated canonical text.
+
+## Files added/changed (Tier 3)
+
+- **Edited:** `supabase/functions/run-review-pipeline/stages/cross-check.ts` (cross-discipline conflict detector)
+- **Edited:** `supabase/functions/run-review-pipeline/stages/critic.ts` (learned-pattern bias)
+- **Migration:** `clear_fbc_embedding_on_text_change` BEFORE UPDATE trigger + `flag_findings_for_reground_on_canonical_change` AFTER UPDATE trigger on `fbc_code_sections`
+
+`run-review-pipeline` redeployed.
+
+## Tier 4 (queued)
+
+- UI: surface cross-discipline conflict badges on linked findings (currently the conflict row exists; the source findings don't show a chip linking back).
+- Auto-trigger embedding refresh job (right now an admin still has to click "Embed N").
+- Pattern decay: down-weight `correction_patterns` that haven't been seen in 180+ days so the critic isn't dragged by stale firm preferences.
