@@ -159,6 +159,9 @@ export function FindingsListPanel(props: Props) {
         visibleCount={props.filteredFindings.length}
         allVisibleResolved={props.allVisibleResolved}
         onMarkVisibleResolved={props.onMarkVisibleResolved}
+        qualityCounts={props.qualityCounts}
+        qualityFilter={props.qualityFilter}
+        onQualityFilterChange={props.onQualityFilterChange}
       />
       {props.hasRoundDiff && (
         <div className="rounded-md border border-accent/30 bg-accent/5 px-2.5 py-1.5 flex items-center gap-3 text-2xs">
