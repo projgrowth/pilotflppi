@@ -77,6 +77,11 @@ export default function SettingsPage() {
  const [firmLicense, setFirmLicense] = useState("");
  const [firmLogoUrl, setFirmLogoUrl] = useState("");
  const [firmClosingLanguage, setFirmClosingLanguage] = useState("");
+ // E&O insurance — F.S. 553.791(20)
+ const [eoCarrier, setEoCarrier] = useState("");
+ const [eoPolicyNumber, setEoPolicyNumber] = useState("");
+ const [eoCoverageAmount, setEoCoverageAmount] = useState<string>("");
+ const [eoExpiresOn, setEoExpiresOn] = useState("");
 
  const [jurisdictions, setJurisdictions] = useState<string[]>(defaultJurisdictions);
  const [newJurisdiction, setNewJurisdiction] = useState("");
@@ -108,6 +113,12 @@ export default function SettingsPage() {
  setFirmLicense(firmSettings.license_number || "");
  setFirmLogoUrl(firmSettings.logo_url || "");
  setFirmClosingLanguage(firmSettings.closing_language || "");
+ setEoCarrier(firmSettings.eo_carrier ?? "");
+ setEoPolicyNumber(firmSettings.eo_policy_number ?? "");
+ setEoCoverageAmount(
+   firmSettings.eo_coverage_amount != null ? String(firmSettings.eo_coverage_amount) : ""
+ );
+ setEoExpiresOn(firmSettings.eo_expires_on ?? "");
  // Load jurisdictions from DB if they exist
  const dbJurisdictions = (firmSettings as unknown as Record<string, unknown>).jurisdictions;
  if (Array.isArray(dbJurisdictions) && dbJurisdictions.length > 0) {
@@ -161,6 +172,7 @@ export default function SettingsPage() {
   };
 
  const handleSaveFirm = () => {
+ const coverageNum = eoCoverageAmount.trim() ? Number(eoCoverageAmount) : null;
  saveFirmSettings({
  firm_name: firmName.trim(),
  license_number: firmLicense.trim(),
@@ -169,6 +181,10 @@ export default function SettingsPage() {
  address: firmAddress.trim(),
  logo_url: firmLogoUrl.trim(),
  closing_language: firmClosingLanguage.trim(),
+ eo_carrier: eoCarrier.trim() || null,
+ eo_policy_number: eoPolicyNumber.trim() || null,
+ eo_coverage_amount: coverageNum != null && !Number.isNaN(coverageNum) ? coverageNum : null,
+ eo_expires_on: eoExpiresOn.trim() || null,
  });
  };
 
@@ -338,6 +354,40 @@ export default function SettingsPage() {
  className="text-sm"
  />
  <p className="text-[10px] text-muted-foreground">Optional. Appears at the end of generated comment letters.</p>
+ </div>
+ <div className="mt-4 space-y-3 border-t pt-4">
+   <div>
+     <Label className="text-sm font-medium">Errors & Omissions Insurance (F.S. 553.791(20))</Label>
+     <p className="text-[11px] text-muted-foreground mt-0.5">
+       Florida private providers must carry minimum $1,000,000 E&amp;O coverage. The policy
+       number is printed on every comment letter and Certificate of Compliance for AHJ defensibility.
+     </p>
+   </div>
+   <div className="grid gap-4 sm:grid-cols-2">
+     <div className="space-y-2">
+       <Label>Carrier</Label>
+       <Input value={eoCarrier} onChange={(e) => setEoCarrier(e.target.value)} placeholder="e.g. Travelers, Hiscox" maxLength={200} />
+     </div>
+     <div className="space-y-2">
+       <Label>Policy Number</Label>
+       <Input value={eoPolicyNumber} onChange={(e) => setEoPolicyNumber(e.target.value)} placeholder="EO-1234567" maxLength={120} />
+     </div>
+     <div className="space-y-2">
+       <Label>Coverage Amount (USD)</Label>
+       <Input
+         type="number"
+         min={0}
+         step={50000}
+         value={eoCoverageAmount}
+         onChange={(e) => setEoCoverageAmount(e.target.value)}
+         placeholder="1000000"
+       />
+     </div>
+     <div className="space-y-2">
+       <Label>Expires On</Label>
+       <Input type="date" value={eoExpiresOn} onChange={(e) => setEoExpiresOn(e.target.value)} />
+     </div>
+   </div>
  </div>
  <Button onClick={handleSaveFirm} disabled={isSaving}>
  {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : "Save Changes"}

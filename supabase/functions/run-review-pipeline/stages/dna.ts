@@ -271,11 +271,69 @@ export async function stageDnaExtract(
   const { error } = await admin.from("project_dna").insert(row);
   if (error) throw error;
 
+  // HVHZ NOA gate (F.S. 553.842 / FBC 1626 / Miami-Dade NOA program).
+  // For Miami-Dade, Broward, or any project flagged HVHZ, every exterior
+  // product (windows, doors, roofing, cladding, garage doors, skylights,
+  // shutters) must carry a Miami-Dade NOA reference. We can't verify each
+  // product call-out from the PDF deterministically, so we raise ONE high-
+  // priority human-review deficiency that the licensed plan reviewer MUST
+  // check before signing the letter. Skipped for residential single-family
+  // unless the reviewer escalates manually.
+  const projectCounty = (project?.projects?.county ?? "").toLowerCase();
+  const isHvhzCounty =
+    projectCounty.includes("miami-dade") ||
+    projectCounty.includes("broward") ||
+    projectCounty.includes("monroe");
+  if (row.hvhz === true || isHvhzCounty) {
+    await admin.from("deficiencies_v2").upsert(
+      {
+        plan_review_id: planReviewId,
+        firm_id: firmId,
+        def_number: "DEF-HVHZ001",
+        discipline: "Structural",
+        sheet_refs: [],
+        code_reference: { code: "FBC", section: "1626", edition: row.fbc_edition ?? "8th" },
+        finding:
+          "Project is in the High Velocity Hurricane Zone (HVHZ). All exterior " +
+          "envelope products — windows, doors, garage doors, roofing assemblies, " +
+          "shutters, skylights, soffit, siding/cladding — must reference a current " +
+          "Miami-Dade Notice of Acceptance (NOA) on the drawings or in a product " +
+          "approval schedule. The submittal must be reviewed page-by-page to " +
+          "confirm every exterior product call-out cites a valid, unexpired NOA " +
+          "number (FL Product Approval FL# is NOT acceptable in HVHZ).",
+        required_action:
+          "Verify and document that an NOA is cited for: (a) all glazed openings " +
+          "(impact-rated, large + small missile), (b) roofing system + underlayment, " +
+          "(c) garage doors, (d) shutters/storm protection, (e) cladding/soffit. " +
+          "If any product lacks an NOA reference, request a Product Approval " +
+          "Schedule before signing the Plan Compliance Affidavit. Per FBC 1626, " +
+          "FL Product Approval is not valid in HVHZ — Miami-Dade NOA only.",
+        evidence: [`HVHZ jurisdiction: ${project?.projects?.county ?? "HVHZ flag set on DNA"}`],
+        priority: "high",
+        life_safety_flag: true,
+        permit_blocker: true,
+        liability_flag: true,
+        requires_human_review: true,
+        human_review_reason:
+          "HVHZ NOA verification cannot be reliably automated — every product call-out must be visually confirmed against the Miami-Dade NOA database.",
+        human_review_verify:
+          "Open the architectural and structural sheets; confirm each exterior product call-out includes 'NOA #' followed by a valid Miami-Dade NOA number (format NN-NNNN.NN). Cross-check at https://www.miamidade.gov/building/pc-search_app.asp.",
+        confidence_score: 1.0,
+        confidence_basis: "Deterministic — triggered by HVHZ jurisdiction.",
+        status: "open",
+        verification_status: "unverified",
+        citation_status: "unverified",
+      },
+      { onConflict: "plan_review_id,def_number" },
+    );
+  }
+
   const health = evaluateDnaHealth(row, project?.projects?.county ?? null);
   return {
     extracted: true,
     pages_read: imageUrls.length,
     missing: row.missing_fields.length,
+    hvhz_gate_raised: row.hvhz === true || isHvhzCounty,
     ...health,
   };
 }

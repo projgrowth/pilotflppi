@@ -211,6 +211,7 @@ export type Database = {
       }
       comment_letter_snapshots: {
         Row: {
+          chained_hash: string | null
           created_at: string
           delivered_at: string | null
           delivery_confirmation: string | null
@@ -226,6 +227,7 @@ export type Database = {
           pdf_sha256: string | null
           pdf_storage_path: string | null
           plan_review_id: string
+          previous_snapshot_hash: string | null
           readiness_snapshot: Json
           recipient: string
           round: number
@@ -233,6 +235,7 @@ export type Database = {
           sent_by: string
         }
         Insert: {
+          chained_hash?: string | null
           created_at?: string
           delivered_at?: string | null
           delivery_confirmation?: string | null
@@ -248,6 +251,7 @@ export type Database = {
           pdf_sha256?: string | null
           pdf_storage_path?: string | null
           plan_review_id: string
+          previous_snapshot_hash?: string | null
           readiness_snapshot?: Json
           recipient?: string
           round?: number
@@ -255,6 +259,7 @@ export type Database = {
           sent_by: string
         }
         Update: {
+          chained_hash?: string | null
           created_at?: string
           delivered_at?: string | null
           delivery_confirmation?: string | null
@@ -270,6 +275,7 @@ export type Database = {
           pdf_sha256?: string | null
           pdf_storage_path?: string | null
           plan_review_id?: string
+          previous_snapshot_hash?: string | null
           readiness_snapshot?: Json
           recipient?: string
           round?: number
@@ -926,6 +932,10 @@ export type Database = {
           closing_language: string | null
           created_at: string
           email: string | null
+          eo_carrier: string | null
+          eo_coverage_amount: number | null
+          eo_expires_on: string | null
+          eo_policy_number: string | null
           firm_id: string | null
           firm_name: string
           id: string
@@ -944,6 +954,10 @@ export type Database = {
           closing_language?: string | null
           created_at?: string
           email?: string | null
+          eo_carrier?: string | null
+          eo_coverage_amount?: number | null
+          eo_expires_on?: string | null
+          eo_policy_number?: string | null
           firm_id?: string | null
           firm_name?: string
           id?: string
@@ -962,6 +976,10 @@ export type Database = {
           closing_language?: string | null
           created_at?: string
           email?: string | null
+          eo_carrier?: string | null
+          eo_coverage_amount?: number | null
+          eo_expires_on?: string | null
+          eo_policy_number?: string | null
           firm_id?: string | null
           firm_name?: string
           id?: string
