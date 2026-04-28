@@ -31,6 +31,8 @@ import { InvoiceBillingTab } from "@/components/InvoiceBillingTab";
 import { ZoningAnalysisPanel } from "@/components/ZoningAnalysisPanel";
 import { ZoningData } from "@/lib/zoning-utils";
 import { StatutoryClockCard } from "@/components/StatutoryClockCard";
+import { RequiredInspectionsPanel } from "@/components/inspections/RequiredInspectionsPanel";
+import { CertificateOfComplianceCard } from "@/components/inspections/CertificateOfComplianceCard";
 import { EditProjectDialog } from "@/components/EditProjectDialog";
 import { ScheduleInspectionDialog } from "@/components/ScheduleInspectionDialog";
 import { NewPlanReviewWizard } from "@/components/NewPlanReviewWizard";
@@ -336,6 +338,18 @@ export default function ProjectDetail() {
  </Card>
 
  <StatutoryClockCard project={project} />
+
+ <RequiredInspectionsPanel projectId={project.id} tradeType={project.trade_type ?? null} />
+
+ <CertificateOfComplianceCard
+   projectId={project.id}
+   project={{
+     name: project.name,
+     address: project.address ?? "",
+     jurisdiction: project.jurisdiction ?? null,
+     county: project.county ?? null,
+   }}
+ />
 
  {/* Details */}
  <Card className="shadow-subtle">
