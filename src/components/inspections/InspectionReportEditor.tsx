@@ -178,7 +178,7 @@ export function InspectionReportEditor({ inspection }: Props) {
         isThresholdInspection: !!reqRow?.is_threshold_inspection,
         thresholdSignerLicense: reqRow?.is_threshold_inspection ? reportRow?.inspector_license ?? null : null,
         narrative,
-        result: inspection.result === "pending" ? "pass" : inspection.result,
+        result: ((inspection.result === "pending" ? "pass" : inspection.result) as "pass" | "fail" | "partial" | "na"),
         openCriticalDeficiencies: 0,
       }),
     [trade, photoCount, reqRow, reportRow, narrative, inspection.result],
