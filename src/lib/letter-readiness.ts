@@ -126,29 +126,39 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
     jumpFindingId: untriaged[0]?.id,
   });
 
-  // 2. Citations grounded — block on (a) hallucinated citations OR
-  //    (b) unverified+low-confidence combos. Hallucinated citations are
-  //    ALWAYS a hard block.
+  // 2. Citations grounded — block on:
+  //   (a) hallucinated citations (always — fabricated section numbers),
+  //   (b) mismatch / not_found citations that the reviewer hasn't dispositioned
+  //       (these are real risk: section exists but wording diverges, or section
+  //       isn't in the FBC index at all),
+  //   (c) verified_stub when the firm opts in,
+  //   (d) unverified + low-confidence combos.
+  // A finding with a non-null reviewer_disposition is treated as "the human
+  // has decided" — they accepted, waived, or rewrote. We trust that and don't
+  // block on the AI's grade anymore.
   const hallucinated = live.filter((f) => f.citation_status === "hallucinated");
-  const NON_BLOCKING = new Set([
-    "verified",
-    "no_citation_required",
-    "mismatch",
-    "not_found",
-  ]);
+  const undecided = (f: { reviewer_disposition: string | null }) =>
+    f.reviewer_disposition === null;
+  const undecidedMismatch = live.filter(
+    (f) => f.citation_status === "mismatch" && undecided(f),
+  );
+  const undecidedNotFound = live.filter(
+    (f) => f.citation_status === "not_found" && undecided(f),
+  );
   // verified_stub becomes blocking when the firm setting is on (default true).
   const blockStubs = input.blockLetterOnUngrounded !== false;
   const stubCitations = blockStubs
-    ? live.filter((f) => f.citation_status === "verified_stub")
+    ? live.filter((f) => f.citation_status === "verified_stub" && undecided(f))
     : [];
   const weakCitations = live.filter(
     (f) =>
-      !NON_BLOCKING.has(f.citation_status ?? "unverified") &&
-      f.citation_status !== "verified_stub" &&
       (f.citation_status ?? "unverified") === "unverified" &&
       typeof f.confidence_score === "number" &&
-      f.confidence_score < 0.7,
+      f.confidence_score < 0.7 &&
+      undecided(f),
   );
+  const undecidedTotal =
+    undecidedMismatch.length + undecidedNotFound.length;
   const unverified = live.filter(
     (f) => (f.verification_status ?? "unverified") === "unverified",
   );
