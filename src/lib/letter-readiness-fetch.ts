@@ -56,7 +56,7 @@ export async function fetchReadinessForSend(args: {
   );
 
   return computeLetterReadiness({
-    findings,
+    findings: findings as unknown as Parameters<typeof computeLetterReadiness>[0]["findings"],
     qcStatus: args.qcStatus,
     reviewerIsSoleSigner: true, // matches ReviewDashboard default
     projectDnaMissingFields: args.projectDnaMissingFields,
