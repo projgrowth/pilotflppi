@@ -355,6 +355,40 @@ export default function SettingsPage() {
  />
  <p className="text-[10px] text-muted-foreground">Optional. Appears at the end of generated comment letters.</p>
  </div>
+ <div className="mt-4 space-y-3 border-t pt-4">
+   <div>
+     <Label className="text-sm font-medium">Errors & Omissions Insurance (F.S. 553.791(20))</Label>
+     <p className="text-[11px] text-muted-foreground mt-0.5">
+       Florida private providers must carry minimum $1,000,000 E&amp;O coverage. The policy
+       number is printed on every comment letter and Certificate of Compliance for AHJ defensibility.
+     </p>
+   </div>
+   <div className="grid gap-4 sm:grid-cols-2">
+     <div className="space-y-2">
+       <Label>Carrier</Label>
+       <Input value={eoCarrier} onChange={(e) => setEoCarrier(e.target.value)} placeholder="e.g. Travelers, Hiscox" maxLength={200} />
+     </div>
+     <div className="space-y-2">
+       <Label>Policy Number</Label>
+       <Input value={eoPolicyNumber} onChange={(e) => setEoPolicyNumber(e.target.value)} placeholder="EO-1234567" maxLength={120} />
+     </div>
+     <div className="space-y-2">
+       <Label>Coverage Amount (USD)</Label>
+       <Input
+         type="number"
+         min={0}
+         step={50000}
+         value={eoCoverageAmount}
+         onChange={(e) => setEoCoverageAmount(e.target.value)}
+         placeholder="1000000"
+       />
+     </div>
+     <div className="space-y-2">
+       <Label>Expires On</Label>
+       <Input type="date" value={eoExpiresOn} onChange={(e) => setEoExpiresOn(e.target.value)} />
+     </div>
+   </div>
+ </div>
  <Button onClick={handleSaveFirm} disabled={isSaving}>
  {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : "Save Changes"}
  </Button>
