@@ -161,6 +161,19 @@ export async function stageComplete(
       updated_at: new Date().toISOString(),
     })
     .eq("id", planReviewId);
+
+  // Phase 5 telemetry: persist a quality event so we can chart trends and
+  // catch regressions across runs (independent of any per-review banner).
+  const hallucinatedCount = live.filter((d) => d.citation_status === "hallucinated").length;
+  await admin.from("pipeline_quality_events").insert({
+    plan_review_id: planReviewId,
+    ai_check_status: aiCheckStatus,
+    quality_score: qualityScore,
+    unverified_pct: Math.round(unverifiedPct * 100),
+    hallucinated_count: hallucinatedCount,
+    total_live_findings: live.length,
+    blocker_reason: blockerReason,
+  });
   return {
     ok: true,
     snapshot_size: snapshot.length,

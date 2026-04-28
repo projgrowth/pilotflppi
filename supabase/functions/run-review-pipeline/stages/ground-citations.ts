@@ -371,6 +371,16 @@ export async function stageGroundCitations(
           },
         };
         update.requires_human_review = true;
+        // Tier 2.4: when we have a strong vector suggestion, demote
+        // `hallucinated`/`not_found` to `mismatch`. The defensibility gate in
+        // stages/complete.ts treats `hallucinated` as a hard blocker, but a
+        // mismatch with a concrete suggested fix is reviewer-actionable in
+        // seconds — it should not block the whole review from completing.
+        if (status === "hallucinated" || status === "not_found") {
+          counts[status]--;
+          counts.mismatch++;
+          update.citation_status = "mismatch";
+        }
         update.human_review_reason =
           status === "mismatch"
             ? `Citation ${def.code_reference?.section ?? "?"} doesn't match the canonical FBC text — the AI suggests ${suggestion.section} (${suggestion.title}) is a better fit. Verify and update.`

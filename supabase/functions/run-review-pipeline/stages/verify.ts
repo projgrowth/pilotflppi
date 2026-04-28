@@ -165,6 +165,13 @@ export async function stageVerify(
   let cannotLocate = 0;
   let skipped = 0;
 
+  // Per-batch retry policy. The biggest cause of `needs_human_review` in
+  // production is a single transient AI gateway hiccup that leaves a whole
+  // batch stuck at verification_status='unverified'. Retry with bounded
+  // exponential backoff before giving up.
+  const RETRY_DELAYS_MS = [500, 1500, 4000];
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
   for (let start = 0; start < targets.length; start += BATCH) {
     const slice = targets.slice(start, start + BATCH);
 
@@ -223,25 +230,69 @@ export async function stageVerify(
         corrected_finding?: string;
         corrected_required_action?: string;
       }>;
-    };
-    try {
-      result = (await callAI(
-        [
-          { role: "system", content: VERIFY_SYSTEM },
-          { role: "user", content },
-        ],
-        VERIFY_SCHEMA as unknown as Record<string, unknown>,
-      )) as typeof result;
-    } catch (err) {
-      console.error(`[verify] batch ${start} failed:`, err);
+    } | null = null;
+    let lastError: string | null = null;
+    let attempts = 0;
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+      attempts = attempt + 1;
+      try {
+        result = (await callAI(
+          [
+            { role: "system", content: VERIFY_SYSTEM },
+            { role: "user", content },
+          ],
+          VERIFY_SCHEMA as unknown as Record<string, unknown>,
+        )) as typeof result;
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        // Hard fail on billing — no point retrying.
+        if (lastError === "payment_required") break;
+        const delay = RETRY_DELAYS_MS[attempt];
+        if (delay !== undefined) await sleep(delay);
+      }
+    }
+
+    if (!result) {
+      // All retries exhausted. Mark every finding in this slice as
+      // `needs_human` (instead of leaving `unverified`) so the
+      // defensibility gate in stages/complete.ts doesn't flip the whole
+      // review to needs_human_review just because one batch hiccupped.
+      console.error(`[verify] batch ${start} gave up after ${attempts} attempts:`, lastError);
+      const reasonText = `Verifier could not produce a verdict after ${attempts} attempts (last error: ${lastError ?? "unknown"}). Routed to human review.`;
+      for (const target of slice) {
+        await admin
+          .from("deficiencies_v2")
+          .update({
+            verification_status: "needs_human",
+            verification_notes: reasonText.slice(0, 1000),
+            requires_human_review: true,
+            human_review_reason:
+              "Verifier stage failed to return a verdict — please confirm this finding manually before sending.",
+            verification_meta: {
+              verifier_attempts: attempts,
+              verifier_last_error: (lastError ?? "unknown").slice(0, 240),
+              verifier_failed_at: new Date().toISOString(),
+            },
+          })
+          .eq("id", target.id);
+      }
       skipped += slice.length;
       continue;
     }
 
+    const successMeta = {
+      verifier_attempts: attempts,
+      verifier_last_error: null as string | null,
+      verifier_succeeded_at: new Date().toISOString(),
+    };
+    const handled = new Set<string>();
     const byId = new Map(slice.map((t) => [t.id, t] as const));
     for (const v of result.verifications ?? []) {
       const target = byId.get(v.deficiency_id);
       if (!target) continue;
+      handled.add(target.id);
       const reasoning = (v.reasoning ?? "").slice(0, 1000);
 
       if (v.verdict === "overturned") {
@@ -253,6 +304,7 @@ export async function stageVerify(
             status: "waived",
             reviewer_disposition: "reject",
             reviewer_notes: `Overturned in adversarial verification: ${reasoning}`,
+            verification_meta: successMeta,
           })
           .eq("id", target.id);
         overturned++;
@@ -265,6 +317,7 @@ export async function stageVerify(
             target.confidence_score !== null && target.confidence_score < 0.7
               ? "Modified during adversarial verification — please confirm before sending."
               : "Verification AI modified this finding — please confirm.",
+          verification_meta: successMeta,
         };
         if (v.corrected_finding) patch.finding = v.corrected_finding.slice(0, 1000);
         if (v.corrected_required_action) {
@@ -284,6 +337,7 @@ export async function stageVerify(
             human_review_method:
               "Open the cited sheet at full resolution and confirm presence/absence of the element described.",
             human_review_verify: reasoning.slice(0, 500),
+            verification_meta: successMeta,
           })
           .eq("id", target.id);
         cannotLocate++;
@@ -298,10 +352,34 @@ export async function stageVerify(
             verification_status: "verified",
             verification_notes: reasoning,
             confidence_score: newConf,
+            verification_meta: successMeta,
           })
           .eq("id", target.id);
         upheld++;
       }
+    }
+
+    // Findings the AI silently dropped from its response — route to human
+    // review instead of leaving them stuck at `unverified`.
+    for (const target of slice) {
+      if (handled.has(target.id)) continue;
+      await admin
+        .from("deficiencies_v2")
+        .update({
+          verification_status: "needs_human",
+          verification_notes:
+            "Verifier returned a response but omitted this finding from its verdicts.",
+          requires_human_review: true,
+          human_review_reason:
+            "Verifier did not return a verdict for this finding — please confirm manually before sending.",
+          verification_meta: {
+            verifier_attempts: attempts,
+            verifier_last_error: "omitted_from_response",
+            verifier_failed_at: new Date().toISOString(),
+          },
+        })
+        .eq("id", target.id);
+      skipped++;
     }
   }
 

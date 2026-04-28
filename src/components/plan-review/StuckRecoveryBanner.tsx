@@ -14,8 +14,17 @@
  * a page refresh.
  */
 import { useEffect, useState } from "react";
-import { CheckCircle2, X, AlertTriangle, AlertCircle, Wand2, Loader2 } from "lucide-react";
+import { CheckCircle2, X, AlertTriangle, AlertCircle, Wand2, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { startPipeline } from "@/lib/pipeline-run";
+import { toast } from "sonner";
+
+interface QualityBreakdown {
+  unverified_pct?: number;
+  has_hallucinated_citations?: boolean;
+  total_live_findings?: number;
+  blocker_reason?: string | null;
+}
 
 interface Props {
   planReviewId: string;
@@ -24,6 +33,9 @@ interface Props {
   recoveryCount: number | undefined;
   aiCheckStatus?: string | null;
   failureReason?: string | null;
+  /** Quality breakdown from ai_run_progress so the banner can summarise the
+   *  unverified / hallucinated counts and offer targeted re-runs. */
+  qualityBreakdown?: QualityBreakdown | null;
   /** True when file_urls.length > 0 but page_assets count === 0. */
   needsPreparation?: boolean;
   onPrepareNow?: () => void;
@@ -37,10 +49,20 @@ export function StuckRecoveryBanner({
   recoveryCount,
   aiCheckStatus,
   failureReason,
+  qualityBreakdown,
   needsPreparation,
   onPrepareNow,
   preparingNow,
 }: Props) {
+  const [rerunning, setRerunning] = useState(false);
+
+  const handleRerunVerify = async () => {
+    setRerunning(true);
+    const r = await startPipeline(planReviewId, "core", "verify");
+    setRerunning(false);
+    if (r.ok) toast.success("Verifier re-run started");
+    else toast.error(r.message ?? "Could not start verifier");
+  };
   const dismissKey = autoRecoveredAt
     ? `stuck-recovery-dismissed:${planReviewId}:${autoRecoveredAt}`
     : null;
@@ -106,18 +128,44 @@ export function StuckRecoveryBanner({
 
   // ---- needs_human_review variant (not dismissible — needs disposition) ----
   if (aiCheckStatus === "needs_human_review") {
+    const unverified = qualityBreakdown?.unverified_pct ?? 0;
+    const total = qualityBreakdown?.total_live_findings ?? 0;
+    const hasHallucinated = !!qualityBreakdown?.has_hallucinated_citations;
+    const showRerun = unverified > 0;
     return (
       <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs">
         <AlertCircle className="h-4 w-4 flex-shrink-0 text-destructive" />
         <div className="min-w-0 flex-1">
-          <div className="font-medium text-destructive">
-            Manual review required
-          </div>
+          <div className="font-medium text-destructive">Manual review required</div>
           <div className="mt-0.5 text-muted-foreground">
-            {failureReason ??
+            {qualityBreakdown?.blocker_reason ?? failureReason ??
               "The automated pipeline finished but produced unusually low results. Please review manually before sending."}
           </div>
+          {(unverified > 0 || hasHallucinated) && (
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-2xs text-muted-foreground">
+              {unverified > 0 && (
+                <span>{unverified}% unverified{total ? ` of ${total}` : ""}</span>
+              )}
+              {hasHallucinated && <span>· hallucinated citation present</span>}
+            </div>
+          )}
         </div>
+        {showRerun && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleRerunVerify}
+            disabled={rerunning}
+            className="h-7 shrink-0 text-2xs"
+          >
+            {rerunning ? (
+              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-1 h-3 w-3" />
+            )}
+            {rerunning ? "Starting…" : "Re-run verifier"}
+          </Button>
+        )}
       </div>
     );
   }
