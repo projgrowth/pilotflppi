@@ -167,5 +167,7 @@ export async function stageComplete(
     quality_score: qualityScore,
     ai_check_status: aiCheckStatus,
     blocker_reason: blockerReason,
+    crops_attached: cropStats.attached,
+    crops_skipped: cropStats.skipped,
   };
 }
