@@ -77,6 +77,15 @@ export interface ReadinessInput {
   thresholdTriggers: string[];
   /** Has the EOR designated a Special Inspector for this threshold building? */
   specialInspectorDesignated: boolean;
+  /** Sheet-coverage percentage (0-100): % of expected sheets that were
+   *  reviewed by every required discipline. Below 100 = some sheets weren't
+   *  examined. Used by the coverage gate when firm settings opt in. */
+  coveragePct?: number | null;
+  /** Firm setting: block the letter when coverage_pct < 100. */
+  blockLetterOnLowCoverage?: boolean;
+  /** Firm setting: block the letter when any live finding has a stub
+   *  citation (canonical text shorter than ~60 chars). */
+  blockLetterOnUngrounded?: boolean;
 }
 
 export interface ReadinessResult {
