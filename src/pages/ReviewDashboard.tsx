@@ -517,6 +517,9 @@ export default function ReviewDashboard() {
           isThresholdBuilding={detectThresholdBuilding(dna).isThresholdBuilding}
           thresholdTriggers={detectThresholdBuilding(dna).triggers}
           specialInspectorDesignated={!!review?.special_inspector_designated}
+          coveragePct={coveragePct}
+          blockLetterOnLowCoverage={firmSettings?.block_letter_on_low_coverage ?? true}
+          blockLetterOnUngrounded={firmSettings?.block_letter_on_ungrounded ?? true}
           onJumpToFinding={() => setActiveTab("triage")}
         />
       )}
