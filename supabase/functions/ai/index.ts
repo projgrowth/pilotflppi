@@ -193,16 +193,9 @@ Plan Review Comment Letter
 
 Use professional, authoritative language. Be specific and actionable.`,
 
-  generate_inspection_brief: `You are a field inspection coordinator for a Florida Private Provider. Generate a concise pre-inspection briefing (max 200 words) for the inspector.
+  // generate_inspection_brief, refine_finding_pin, plan_review_check, plan_review_check_visual
+  // were removed in Phase 2 audit — no callers in app or pipeline.
 
-Include:
-- Project overview and trade type
-- Key items to verify based on the project stage
-- Any previous deficiencies to re-check
-- Florida-specific requirements (wind mitigation, flood zone, HVHZ if applicable)
-- Safety reminders
-
-Keep it actionable and focused.`,
 
   generate_outreach_email: `You are a business development specialist at Florida Private Providers (FPP), a licensed private building inspection and plan review firm. Write a personalized outreach email to a contractor who recently pulled a building permit.
 
