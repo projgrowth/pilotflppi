@@ -7,7 +7,14 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { FileText, ExternalLink, Loader2, ShieldAlert } from "lucide-react";
+import {
+  FileText,
+  ExternalLink,
+  Loader2,
+  ShieldAlert,
+  CheckCircle2,
+  Send,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import DOMPurify from "dompurify";
+import RecordDeliveryDialog from "./RecordDeliveryDialog";
 
 interface SnapshotRow {
   id: string;
@@ -28,6 +36,9 @@ interface SnapshotRow {
   override_reasons: string | null;
   findings_json: unknown;
   readiness_snapshot: { blocking_count?: number } | null;
+  delivery_method: string | null;
+  delivered_at: string | null;
+  delivery_confirmation: string | null;
 }
 
 interface Props {
@@ -36,6 +47,7 @@ interface Props {
 
 export default function LetterSnapshotViewer({ planReviewId }: Props) {
   const [openId, setOpenId] = useState<string | null>(null);
+  const [deliverId, setDeliverId] = useState<string | null>(null);
 
   const { data: snapshots = [], isLoading } = useQuery({
     queryKey: ["letter_snapshots", planReviewId],
@@ -44,7 +56,7 @@ export default function LetterSnapshotViewer({ planReviewId }: Props) {
       const { data, error } = await supabase
         .from("comment_letter_snapshots")
         .select(
-          "id, sent_at, round, recipient, letter_html, override_reasons, findings_json, readiness_snapshot",
+          "id, sent_at, round, recipient, letter_html, override_reasons, findings_json, readiness_snapshot, delivery_method, delivered_at, delivery_confirmation",
         )
         .eq("plan_review_id", planReviewId)
         .order("sent_at", { ascending: false });
@@ -52,6 +64,8 @@ export default function LetterSnapshotViewer({ planReviewId }: Props) {
       return (data ?? []) as unknown as SnapshotRow[];
     },
   });
+
+  const deliverSnap = deliverId ? snapshots.find((s) => s.id === deliverId) : null;
 
   const open = openId ? snapshots.find((s) => s.id === openId) : null;
   const sanitizedHtml = open
@@ -120,6 +134,22 @@ export default function LetterSnapshotViewer({ planReviewId }: Props) {
                     Override
                   </Badge>
                 )}
+                {s.delivered_at ? (
+                  <Badge variant="outline" className="gap-1 text-2xs">
+                    <CheckCircle2 className="h-3 w-3 text-success" />
+                    {s.delivery_method ?? "delivered"}
+                  </Badge>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 gap-1 text-2xs"
+                    onClick={() => setDeliverId(s.id)}
+                  >
+                    <Send className="h-3 w-3" />
+                    Record delivery
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="outline"
@@ -162,6 +192,14 @@ export default function LetterSnapshotViewer({ planReviewId }: Props) {
           </div>
         </DialogContent>
       </Dialog>
+
+      <RecordDeliveryDialog
+        snapshotId={deliverId}
+        planReviewId={planReviewId}
+        defaultRecipient={deliverSnap?.recipient}
+        open={!!deliverId}
+        onOpenChange={(o) => !o && setDeliverId(null)}
+      />
     </div>
   );
 }
