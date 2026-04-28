@@ -268,7 +268,7 @@ export async function stageGroundCitations(
       // a legitimately citation-less finding (missing metadata, AHJ verify).
       status = looksProcedural(def) ? "no_citation_required" : "hallucinated";
     } else {
-      const found = lookup(key);
+      const found = lookup(key, preferredFamiliesFor(def.discipline));
       if (!found) {
         status = "not_found";
       } else {
