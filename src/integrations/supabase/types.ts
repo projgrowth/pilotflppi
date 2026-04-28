@@ -2308,41 +2308,6 @@ export type Database = {
           },
         ]
       }
-      statutory_alerts: {
-        Row: {
-          acknowledged: boolean
-          alert_type: string
-          firm_id: string | null
-          id: string
-          project_id: string
-          triggered_at: string
-        }
-        Insert: {
-          acknowledged?: boolean
-          alert_type: string
-          firm_id?: string | null
-          id?: string
-          project_id: string
-          triggered_at?: string
-        }
-        Update: {
-          acknowledged?: boolean
-          alert_type?: string
-          firm_id?: string | null
-          id?: string
-          project_id?: string
-          triggered_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "statutory_alerts_project_id_fkey"
-            columns: ["project_id"]
-            isOneToOne: false
-            referencedRelation: "projects"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       user_roles: {
         Row: {
           created_at: string

@@ -8,142 +8,6 @@ const corsHeaders = {
 };
 
 const SYSTEM_PROMPTS: Record<string, string> = {
-  plan_review_check: `You are an expert Florida Building Code (FBC 2023) plan reviewer for a licensed Private Provider firm operating under Florida Statute 553.791.
-
-You will receive project context including the county/jurisdiction, and possibly document context describing the actual plan sheets. If document context is provided, analyze THOSE SPECIFIC PLANS for code compliance — do not fabricate generic findings.
-
-Tailor your analysis to county-specific requirements:
-
-**HVHZ (High Velocity Hurricane Zone)**: Miami-Dade and Broward counties have enhanced requirements:
-- Miami-Dade County: Testing/approval per TAS 201, 202, 203 for impact-resistant products
-- ASCE 7 wind speeds ≥ 170 mph, missile impact criteria per FBC 1626
-- Product approvals must be Miami-Dade NOA (Notice of Acceptance)
-- Enhanced roofing requirements per FBC 1523 (HVHZ)
-
-**Non-HVHZ Counties** (Palm Beach, Sarasota, etc.): Standard FBC wind load per ASCE 7, Florida Product Approvals (FL #) accepted.
-
-**County Amendments**: Reference any known county-specific amendments to FBC 2023.
-
-**Code Edition Detection**: If the plans reference a different code edition (e.g., FBC 2020-R 7th Edition), flag this as an advisory finding noting the edition mismatch and which edition your analysis is based on.
-
-For each finding, provide ALL of the following fields:
-- severity: "critical" | "major" | "minor"
-- discipline: "structural" | "life_safety" | "fire" | "mechanical" | "electrical" | "plumbing" | "energy" | "ada" | "site"
-- code_ref: Specific FBC 2023 section, ASCE 7 section, NFPA reference, or Florida Statute
-- county_specific: true if this is driven by a county amendment or HVHZ-specific requirement
-- page: Sheet/page reference (use realistic sheet designations like S-101, A-201, E-100, M-100, or match sheet numbers from the actual documents if provided)
-- description: Clear, specific description of the deficiency
-- recommendation: Actionable fix with code reference
-- confidence: "verified" (definite code violation) | "likely" (probable based on common issues) | "advisory" (best practice recommendation)
-- county_amendment_ref: If county_specific is true, provide the specific local amendment reference (e.g., "Miami-Dade Sec. 8A-100.2", "Broward County Amendment to FBC Ch. 17.2.4")
-
-County-specific context will be provided in the payload. Use it to:
-- Reference the correct local code amendments in county_specific findings
-- Apply the correct product approval standard (NOA for HVHZ counties, FL# for others)
-- Flag county-specific wind speed and impact protection requirements
-
-Report ALL code violations and deficiencies found. Do not pad with advisory items to meet a count — if fewer than 3 real issues exist, report only those and note that the plans are substantially compliant. Cover all relevant disciplines (structural, life safety, fire, MEP, energy, ADA) but only report genuine code violations or deficiencies.
-
-**COMMERCIAL / LARGE-SCALE PROJECTS:**
-When the project is commercial (occupancy groups B, M, S-1, F-1, H, A, etc.) or exceeds 10,000 sqft:
-- Identify all applicable occupancy groups per FBC Chapter 3
-- Check mixed-occupancy fire separation requirements per FBC Table 508.4
-- Verify means of egress: travel distance (FBC 1017), exit capacity (FBC 1005), number of exits (FBC 1006)
-- Fire sprinkler thresholds per FBC 903.2 based on occupancy and area
-- Fire alarm requirements per FBC 907 based on occupancy
-- Parking & ADA: accessible spaces per lot size (FBC 1106, ADA Standards 208)
-- For auto repair (S-1 with repair bays): ventilation per IMC 502.16, flammable liquid storage per FPC Chapter 57
-- For high-piled storage: FPC Chapter 32 requirements
-- Energy code: commercial path per FBC Energy Conservation (IECC Commercial)
-
-**MISSING INFORMATION CHECK (Critical for Private Providers):**
-Beyond code violations, you MUST flag any of the following that are MISSING from the plans. Building officials will reject a submittal outright for missing required information — this is the #1 reason for plan review rejection.
-- No site plan sheet at all
-- Site plan missing property boundaries, setbacks, or parking layout
-- No code summary table (occupancy, construction type, allowable area)
-- No life safety / egress plan
-- No structural design criteria (wind speed, exposure, soil bearing)
-- No energy compliance documentation (COMcheck or Form 402)
-- Missing sealed drawings or engineer of record
-- No product approval references on specifications (NOA for HVHZ, FL# for others)
-- No flood zone or wind speed designation
-- No index of drawings
-- Missing fire department access or hydrant locations on site plan
-- No stormwater/drainage plan or reference
-
-For missing information findings, use severity "critical" for items that would cause immediate rejection by a building official, and "major" for items that need supplementation. Set the discipline to the most relevant one (e.g., "site" for site plan issues, "structural" for missing structural notes).
-
-Also detect the FBC edition referenced on the plans. If the plans cite an edition other than FBC 2023 (8th Edition), include an advisory finding noting the edition mismatch.
-
-Return ONLY a JSON array of findings with no additional text.`,
-
-  plan_review_check_visual: `You are an expert Florida Building Code (FBC 2023) plan reviewer for a licensed Private Provider firm operating under Florida Statute 553.791.
-
-You are receiving ACTUAL IMAGES of construction plan sheets. Each image is one page from one PDF file. The user message contains an "image_manifest" array describing each image: \`[{ index: 0, file: "Architectural.pdf", page_in_file: 1 }, ...]\`. The image_manifest index is the **same** as the position of that image in the multimodal content array. You MUST use this index for the markup.page_index field.
-
-## EVERY IMAGE HAS A 10×10 GRID OVERLAY
-
-Each image you receive has a faint red 10×10 grid drawn on top of it. Each grid cell is labelled in its top-left corner with a row letter (A-J, top to bottom) and a column digit (0-9, left to right):
-
-- Cell **A0** = the top-left 10% × 10% region (x=0-10%, y=0-10%)
-- Cell **H7** = x=70-80%, y=70-80% (lower-right area)
-- Cell **J9** = the bottom-right 10% × 10% region
-
-You MUST use these labels to anchor every finding. The grid is your coordinate system — read the visible cell label, do not estimate percentages by eye.
-
-## CRITICAL GROUNDING PROTOCOL — Follow for EVERY finding
-
-For each finding, you MUST internally reason through these steps **before** writing the finding:
-
-1. **Identify the image** you are looking at by its index in the image_manifest. Call this \`image_index\` (0-based).
-2. **Read the title block** of that image. The sheet designation (e.g., "S-101", "A-201", "E-100") is almost always in the lower-right corner of an architectural/engineering sheet. Capture this exact string. Call it \`sheet_designation\`.
-3. **Locate the specific element** the deficiency relates to. This MUST be a concrete visual landmark you can see — a callout bubble, a dimension line, a note block, a detail bubble, a schedule row, a column on a grid, a wall segment, etc. Do NOT pick a vague area of whitespace.
-4. **Read the grid cell label printed in the cell that contains the element's CENTER** (e.g. "H7"). This is the \`grid_cell\` you return.
-5. **Capture nearest readable text**: a short string (≤ 40 chars) you can literally read on the sheet within ~5% of the element — a callout number ("12"), a sheet note ref ("NOTE 4"), a dimension ("4'-0\""), a grid line ("B-2"), a schedule row label ("D-1"), a tag ("TYP"), a section letter, etc. This is the \`nearest_text\` you return. If nothing is readable in the immediate vicinity, return an empty string.
-6. **Set x, y, width, height** as a refinement WITHIN the grid cell:
-   - **PIN** (point issue: missing seal, missing dimension, single wrong note, single non-compliant detail): \`width\` and \`height\` ≤ **4** each. The (x, y) should place the pin's center on the exact element, but the pin must visually sit inside the grid cell named in \`grid_cell\`.
-   - **REGION** (spans an area: missing schedule, non-compliant egress path, problematic plan area): \`width\` ≤ **15**, \`height\` ≤ **10**. The region's geometric center should sit within the grid cell named in \`grid_cell\`.
-7. **Write the description with a visual anchor**. Every description must include a phrase like "in cell H7, near the door schedule row 4", "at the NW corner of the foundation plan (cell A0)", "near grid B-2 on the upper level plan" so a human reviewer can find the element even if the pin is slightly off.
-
-## Required output fields per finding
-
-- severity: "critical" | "major" | "minor"
-- discipline: "structural" | "life_safety" | "fire" | "mechanical" | "electrical" | "plumbing" | "energy" | "ada" | "site"
-- code_ref: Specific FBC 2023 section
-- county_specific: true if HVHZ-specific
-- page: The sheet designation EXACTLY as visible in the title block (e.g., "S-101"). This MUST come from step 2 above. If you cannot read a sheet designation, write "Unknown".
-- description: Clear, specific description WITH a visual anchor phrase (per step 7).
-- recommendation: Actionable fix with code reference.
-- confidence: "verified" | "likely" | "advisory"
-- reasoning: **REQUIRED**. 1–2 sentences (≤ 240 chars) explaining WHY you flagged this — cite the SPECIFIC visual element you observed (e.g. "Door schedule row 4 in cell D6 lists a 36\" door but FBC 1010.1.1 requires 32\" min clear; observed dimension callout reads 30\".") A building official will read this to validate or challenge the finding. Do NOT restate the description — explain the OBSERVATION.
-- markup: **REQUIRED** object \`{ page_index, grid_cell, nearest_text, x, y, width, height }\` where:
-  - **page_index**: the integer image_index from step 1. **NOT a sheet number** — do not write 101 here when the image is at index 3.
-  - **grid_cell**: REQUIRED. The cell label (e.g. "H7") that contains the element's center. Must match one of A0..J9. The viewer trusts this label more than (x, y) — if the two disagree, the pin is forced inside the named cell.
-  - **nearest_text**: REQUIRED. A short string (≤ 40 chars) visible on the sheet near the pin, or empty string "" if nothing readable is near.
-  - **x, y**: top-left of the box as percentages of the image (0-100). Should refine the position WITHIN the grid_cell.
-  - **width, height**: percentages. Pin = ≤4×4. Region = ≤15×10. NEVER exceed 15% width or 10% height.
-  - The page_index MUST be in range 0..N-1 where N is the number of images sent. If unsure which image, pick the one whose visible sheet designation matches your \`page\` field.
-
-## Tailor analysis to county
-
-**HVHZ (High Velocity Hurricane Zone)**: Miami-Dade and Broward counties:
-- Miami-Dade: TAS 201/202/203 for impact-resistant products
-- ASCE 7 wind speeds ≥ 170 mph, missile impact per FBC 1626
-- Product approvals must be Miami-Dade NOA
-- Enhanced roofing per FBC 1523 (HVHZ)
-
-**Non-HVHZ Counties**: Standard FBC wind load per ASCE 7, Florida Product Approvals (FL #).
-
-## Missing information check
-
-If REQUIRED elements are missing, flag them. Place the markup where the information SHOULD appear (title block area for missing code summary, etc.). Use grid_cell "I8" or "J8" for title-block area, "I9"/"J9" for the lower-right corner:
-- Site plan: property boundaries, setbacks, parking with ADA, drainage, utility connections, fire access/hydrants, easements
-- General: title block with seal, drawing index, code summary table, life safety plan, structural notes (wind speed, exposure), energy compliance, product approval numbers, FBC edition
-- County-specific: flood zone/BFE, CCCL, NOA numbers, threshold building
-
-For missing items, use "critical" severity if it would cause immediate rejection.
-
-Report only real violations. Do not pad the count. If the FBC edition referenced is not FBC 2023 (8th Edition), include an advisory finding.`,
 
   extract_project_info: `You are analyzing a construction plan title block. Extract the following information from the image:
 
@@ -193,16 +57,9 @@ Plan Review Comment Letter
 
 Use professional, authoritative language. Be specific and actionable.`,
 
-  generate_inspection_brief: `You are a field inspection coordinator for a Florida Private Provider. Generate a concise pre-inspection briefing (max 200 words) for the inspector.
+  // generate_inspection_brief, refine_finding_pin, plan_review_check, plan_review_check_visual
+  // were removed in Phase 2 audit — no callers in app or pipeline.
 
-Include:
-- Project overview and trade type
-- Key items to verify based on the project stage
-- Any previous deficiencies to re-check
-- Florida-specific requirements (wind mitigation, flood zone, HVHZ if applicable)
-- Safety reminders
-
-Keep it actionable and focused.`,
 
   generate_outreach_email: `You are a business development specialist at Florida Private Providers (FPP), a licensed private building inspection and plan review firm. Write a personalized outreach email to a contractor who recently pulled a building permit.
 
@@ -254,22 +111,6 @@ Always:
 - Mention relevant Florida Statutes if applicable
 - Provide practical guidance for compliance`,
 
-  refine_finding_pin: `You are refining the pin location for a SINGLE plan-review finding using a 2× zoomed crop of the original sheet.
-
-You will receive ONE image: a high-resolution crop of approximately 30% of the original page (a 3×3 grid-cell window centered on the cell where the finding was originally pinned).
-
-You will also receive context about the finding: its description, code_ref, the original grid_cell label, and the original nearest_text guess.
-
-YOUR JOB: Look at the zoomed crop and return the EXACT element the finding refers to.
-
-Return:
-- nearest_text: the literal short string (≤40 chars) on the sheet you can read AT or IMMEDIATELY ADJACENT to the actual element. Examples: a callout bubble number ("12"), a dimension ("4'-0\\""), a sheet-note reference ("NOTE 4"), a tag ("TYP"), a schedule row label ("D-1"). If you cannot identify the element with confidence, return "".
-- x, y: top-left of a small bounding box on THE CROP, as percentages of the CROP (0-100). NOT of the full page.
-- width, height: dimensions of the box on the crop, as percentages of the crop. Pin: ≤ 12% width AND ≤ 12% height (the crop is ~3× zoomed in, so a 4% pin on the full sheet equals ~12% of the crop).
-- found: boolean — true if you confidently located the element; false if the crop does not actually contain it.
-
-Return ONLY the JSON, no preface.`,
-
   fbc_county_chat: `You are an expert Florida Building Code (FBC 2023, 8th Edition) consultant specializing in county-specific requirements for Private Providers operating under F.S. 553.791.
 
 You will receive the selected county's requirements as context. Use this to tailor every answer to that county's specific:
@@ -293,53 +134,9 @@ Rules:
 };
 
 // Tool schemas for structured output
-const PLAN_REVIEW_TOOL = {
-  type: "function" as const,
-  function: {
-    name: "submit_findings",
-    description: "Submit plan review findings as structured data",
-    parameters: {
-      type: "object",
-      properties: {
-        findings: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              severity: { type: "string", enum: ["critical", "major", "minor"] },
-              discipline: { type: "string", enum: ["structural", "life_safety", "fire", "mechanical", "electrical", "plumbing", "energy", "ada", "site"] },
-              code_ref: { type: "string" },
-              county_specific: { type: "boolean" },
-              page: { type: "string" },
-              description: { type: "string" },
-              recommendation: { type: "string" },
-              confidence: { type: "string", enum: ["verified", "likely", "advisory"] },
-              county_amendment_ref: { type: "string", description: "Specific county amendment reference if county_specific is true (e.g., 'Miami-Dade Sec. 8A', 'Broward County Amendment to FBC Ch. 17')" },
-              markup: {
-                type: "object",
-                description: "Bounding box on the plan image. page_index is the 0-based position of the image in the multimodal content array (matches image_manifest.index). NOT a sheet number. grid_cell anchors the pin to one of 100 visible labelled cells (A0..J9) so the worst-case error is bounded.",
-                properties: {
-                  page_index: { type: "number", description: "0-based image array index from image_manifest. Must be in range 0..N-1." },
-                  grid_cell: { type: "string", description: "REQUIRED. Visible grid cell label containing the element's center, e.g. 'H7'. Row A-J (top→bottom) + column 0-9 (left→right). Must literally match one of the labels printed on the image." },
-                  nearest_text: { type: "string", description: "REQUIRED. Short string (≤40 chars) visible on the sheet within ~5% of the pin (callout number, dimension, note ref, schedule row label, grid line, 'TYP', etc.). Empty string '' if nothing readable is near." },
-                  x: { type: "number", description: "Left edge as percentage of image width (0-100). Refines location WITHIN the grid_cell." },
-                  y: { type: "number", description: "Top edge as percentage of image height (0-100). Refines location WITHIN the grid_cell." },
-                  width: { type: "number", description: "Box width as percentage. Pin (point issue) ≤ 4. Region ≤ 15. Never exceed 15." },
-                  height: { type: "number", description: "Box height as percentage. Pin ≤ 4. Region ≤ 10. Never exceed 10." },
-                },
-                required: ["page_index", "grid_cell", "nearest_text", "x", "y", "width", "height"],
-              },
-            },
-            required: ["severity", "discipline", "code_ref", "county_specific", "page", "description", "recommendation", "confidence", "markup"],
-            additionalProperties: false,
-          },
-        },
-      },
-      required: ["findings"],
-      additionalProperties: false,
-    },
-  },
-};
+// Note: PLAN_REVIEW_TOOL removed in Phase 2 audit. The active multi-stage
+// pipeline (run-review-pipeline/stages/*) declares its own tool schemas.
+
 
 const EXTRACT_PROJECT_TOOL = {
   type: "function" as const,
@@ -397,13 +194,11 @@ const EXTRACT_ZONING_TOOL = {
 };
 
 // Actions that use multimodal (vision) capabilities
-const MULTIMODAL_ACTIONS = new Set(["plan_review_check_visual", "extract_project_info", "extract_zoning_data"]);
+const MULTIMODAL_ACTIONS = new Set(["extract_project_info", "extract_zoning_data"]);
 
 // Actions that use tool calling for structured output
 // deno-lint-ignore no-explicit-any
 const TOOL_CALL_ACTIONS: Record<string, any> = {
-  plan_review_check: PLAN_REVIEW_TOOL,
-  plan_review_check_visual: PLAN_REVIEW_TOOL,
   extract_project_info: EXTRACT_PROJECT_TOOL,
   extract_zoning_data: EXTRACT_ZONING_TOOL,
 };

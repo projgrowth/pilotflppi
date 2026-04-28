@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS public.statutory_alerts CASCADE;
