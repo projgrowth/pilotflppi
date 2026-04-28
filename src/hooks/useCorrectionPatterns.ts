@@ -254,13 +254,6 @@ export async function recordPatternConfirmation(input: {
   return match.id;
 }
 
-export function useInvalidateCorrectionPatterns() {
-  const qc = useQueryClient();
-  return () => {
-    qc.invalidateQueries({ queryKey: ["correction_patterns"] });
-  };
-}
-
 function buildPatternSummary(input: {
   finding: string;
   codeSection: string | null;
