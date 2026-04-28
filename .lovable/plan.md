@@ -140,19 +140,29 @@ This is *in addition to* the global `critic` stage (Tier 1.2). Per-chunk runs im
 
 Together, 2.1 + 2.2 hit the same problem from two angles: 2.2 catches structural fabrications deterministically (free), 2.1 catches semantic fabrications with the model (one cheap call/chunk).
 
-### 2.3 Vector-similarity grounder *(deferred)*
+### 2.3 Vector-similarity grounder *(shipped)*
 
-Adding embeddings to `fbc_code_sections` is overkill while >70% of rows are still stubs. Tier 1.1 (canonical seeding admin UI) needs to run first; once the library is dense, embeddings become high-leverage. Schema change (add `embedding vector` column + ivfflat index + `match_fbc_section` RPC) is queued but not implemented.
+The data turned over: 503/504 rows in `fbc_code_sections` now carry real text, so embeddings are worth the spend.
+
+- **Schema:** added `embedding_vector vector(1536)` + `embedded_at timestamptz` to `fbc_code_sections` with an HNSW cosine index. New RPC `match_fbc_code_sections(query_vector, match_threshold, match_count)` returns top-N semantic neighbours.
+- **Backfill:** new `embed-fbc-sections` edge function (OpenAI `text-embedding-3-small`, 1536 dims to match the existing `flag_embeddings` index dim) processes up to 500 rows per call. Embeds `code + section + edition + title + requirement_text + keywords` so even short rows have multiple anchors. Triggered from the admin Code Library via a new "Embed N" button.
+- **Grounder integration:** `ground-citations.ts` now calls `vectorSuggestSection` whenever the keyword pass returns `mismatch`/`not_found`/`hallucinated`. If the top neighbour clears similarity ≥ 0.6, the suggestion (section + title + similarity + 240-char preview) is written to `evidence_crop_meta.vector_suggestion` and surfaced in `human_review_reason` so reviewers see "AI suggests 1006.3.2 (Egress from stories) is a better fit" instead of a dead-end "we don't know".
+- **Failure modes:** if `OPENAI_API_KEY` is missing or the embed call fails, grounder silently falls back to existing keyword behavior — pipeline never breaks.
 
 ## Files added/changed (Tier 2)
 
 - **Edited:** `supabase/functions/run-review-pipeline/stages/discipline-review.ts` (self-critique pass + sheet-anchor enforcement)
+- **Edited:** `supabase/functions/run-review-pipeline/stages/ground-citations.ts` (vector re-ranking)
+- **Added:** `supabase/functions/run-review-pipeline/_shared/embedding.ts`
+- **Added:** `supabase/functions/embed-fbc-sections/index.ts`
+- **Edited:** `src/components/CanonicalCodeLibrary.tsx` (Embed N button + unembedded counter)
+- **Migration:** `embedding_vector` + `embedded_at` columns + HNSW index + `match_fbc_code_sections` RPC
 
-`run-review-pipeline` redeployed.
+`run-review-pipeline` and `embed-fbc-sections` deployed.
 
 ## Tier 3 (queued)
 
-- Vector-similarity grounder once canonical library is dense (depends on 2.3 prerequisite + Tier 1.1 seeding velocity).
 - Cross-discipline conflict detector (e.g. structural says CMU wall, life-safety says rated GWB).
 - Reviewer feedback loop into the critic prompt (use `correction_patterns` to bias the self-critique toward known firm-specific reject patterns).
 - Automatic re-verify of all open findings when canonical rows are upgraded from stub → real text.
+- Auto-trigger embedding refresh when canonical rows are edited (`embedded_at = NULL` on update + nightly batch).

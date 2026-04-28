@@ -666,6 +666,8 @@ export type Database = {
           code: string
           created_at: string
           edition: string
+          embedded_at: string | null
+          embedding_vector: string | null
           id: string
           keywords: string[]
           requirement_text: string
@@ -678,6 +680,8 @@ export type Database = {
           code?: string
           created_at?: string
           edition?: string
+          embedded_at?: string | null
+          embedding_vector?: string | null
           id?: string
           keywords?: string[]
           requirement_text: string
@@ -690,6 +694,8 @@ export type Database = {
           code?: string
           created_at?: string
           edition?: string
+          embedded_at?: string | null
+          embedding_vector?: string | null
           id?: string
           keywords?: string[]
           requirement_text?: string
@@ -2016,6 +2022,22 @@ export type Database = {
         Returns: {
           correction_id: string
           similarity: number
+        }[]
+      }
+      match_fbc_code_sections: {
+        Args: {
+          match_count?: number
+          match_threshold?: number
+          query_vector: string
+        }
+        Returns: {
+          code: string
+          edition: string
+          id: string
+          requirement_text: string
+          section: string
+          similarity: number
+          title: string
         }[]
       }
       user_firm_id: { Args: { _user: string }; Returns: string }

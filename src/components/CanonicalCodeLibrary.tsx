@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Sparkles, Save, RefreshCw } from "lucide-react";
+import { Loader2, Sparkles, Save, RefreshCw, Brain } from "lucide-react";
 import { toast } from "sonner";
 
 interface CodeRow {
@@ -22,6 +22,7 @@ interface CodeRow {
   edition: string;
   title: string;
   requirement_text: string;
+  embedded_at: string | null;
 }
 
 const STUB_LIMIT = 60;
@@ -47,7 +48,7 @@ export function CanonicalCodeLibrary() {
     queryFn: async (): Promise<CodeRow[]> => {
       let q = supabase
         .from("fbc_code_sections")
-        .select("id, code, section, edition, title, requirement_text")
+        .select("id, code, section, edition, title, requirement_text, embedded_at")
         .order("section", { ascending: true })
         .limit(500);
       if (search.trim()) q = q.ilike("section", `%${search.trim()}%`);
@@ -59,6 +60,28 @@ export function CanonicalCodeLibrary() {
 
   const stubs = useMemo(() => (rows ?? []).filter((r) => isStub(r.requirement_text)), [rows]);
   const realRows = useMemo(() => (rows ?? []).filter((r) => !isStub(r.requirement_text)), [rows]);
+  const unembedded = useMemo(
+    () => (rows ?? []).filter((r) => !r.embedded_at && !isStub(r.requirement_text)).length,
+    [rows],
+  );
+  const [embedRunning, setEmbedRunning] = useState(false);
+
+  const runEmbedBatch = async () => {
+    setEmbedRunning(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("embed-fbc-sections", {
+        body: { limit: 200 },
+      });
+      if (error) throw error;
+      const r = data as { embedded?: number; failed?: number; requested?: number };
+      toast.success(`Embedded ${r.embedded ?? 0} sections (${r.failed ?? 0} failed, ${r.requested ?? 0} requested)`);
+      qc.invalidateQueries({ queryKey: ["canonical-sections"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Embed batch failed");
+    } finally {
+      setEmbedRunning(false);
+    }
+  };
 
   useEffect(() => {
     if (!selected) return;
@@ -124,7 +147,7 @@ export function CanonicalCodeLibrary() {
             <p className="text-xs text-muted-foreground mt-1">
               {isLoading
                 ? "Loading…"
-                : `${rows?.length ?? 0} sections shown · ${stubs.length} stubs · ${realRows.length} real`}
+                : `${rows?.length ?? 0} sections shown · ${stubs.length} stubs · ${realRows.length} real · ${unembedded} unembedded`}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -153,6 +176,20 @@ export function CanonicalCodeLibrary() {
                   AI-seed {Math.min(STUB_LIMIT, stubs.length)} stubs
                 </>
               )}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={runEmbedBatch}
+              disabled={embedRunning || unembedded === 0}
+              title="Generate vector embeddings for unembedded sections so the citation grounder can semantically re-rank findings."
+            >
+              {embedRunning ? (
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <Brain className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              Embed {Math.min(200, unembedded)}
             </Button>
           </div>
         </CardHeader>

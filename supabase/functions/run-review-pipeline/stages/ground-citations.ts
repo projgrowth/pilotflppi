@@ -17,6 +17,36 @@
 
 import { createClient } from "../_shared/supabase.ts";
 import { signedSheetUrls } from "../_shared/storage.ts";
+import { embedText } from "../_shared/embedding.ts";
+
+// Tier 2.3: When keyword grounding fails (mismatch / not_found / hallucinated),
+// embed the finding text and ask Postgres for the top semantically-similar
+// canonical section. This catches cases where the AI cited the wrong
+// sub-section but the *intent* matches a known requirement — e.g. cited
+// 1006.2.1 when 1006.3.2 is the right anchor for "two exits required".
+async function vectorSuggestSection(
+  admin: ReturnType<typeof createClient>,
+  finding: string,
+  requiredAction: string,
+): Promise<{ section: string; title: string; similarity: number; requirement_text: string } | null> {
+  const text = `${finding}\n${requiredAction}`.trim();
+  if (text.length < 20) return null;
+  const vec = await embedText(text);
+  if (!vec) return null;
+  const { data, error } = await admin.rpc("match_fbc_code_sections", {
+    query_vector: vec as unknown as string,
+    match_threshold: 0.55,
+    match_count: 1,
+  });
+  if (error) {
+    console.warn("[ground_citations] vector rpc failed", error.message);
+    return null;
+  }
+  const top = (data ?? [])[0] as
+    | { section: string; title: string; similarity: number; requirement_text: string }
+    | undefined;
+  return top ?? null;
+}
 
 /** Normalize a code-section identifier for canonical lookup. */
 function normalizeCitationSection(raw: string | null | undefined): string | null {
@@ -275,13 +305,42 @@ export async function stageGroundCitations(
       };
     }
     if (needsHumanReview) {
-      update.requires_human_review = true;
-      update.human_review_reason =
-        status === "mismatch"
-          ? `Citation ${def.code_reference?.section ?? "?"} doesn't match the canonical FBC text — verify the section is correct.`
-          : status === "not_found"
-            ? `Cited FBC section ${def.code_reference?.section ?? "?"} was not found in the code library — verify or correct.`
-            : `No FBC section parseable from this finding — add or correct the citation.`;
+      // Tier 2.3: try the vector grounder before flagging for human review.
+      // If we find a high-confidence semantic match, attach it as a suggestion
+      // and (for `not_found`/`hallucinated`) auto-promote to `mismatch` so the
+      // reviewer sees a concrete alternative rather than "we don't know".
+      const suggestion = await vectorSuggestSection(
+        admin,
+        def.finding,
+        def.required_action,
+      );
+      if (suggestion && suggestion.similarity >= 0.6) {
+        const prevMeta = (update.evidence_crop_meta as Record<string, unknown>) ?? {};
+        update.evidence_crop_meta = {
+          ...prevMeta,
+          vector_suggestion: {
+            section: suggestion.section,
+            title: suggestion.title,
+            similarity: Number(suggestion.similarity.toFixed(3)),
+            preview: suggestion.requirement_text.slice(0, 240),
+          },
+        };
+        update.requires_human_review = true;
+        update.human_review_reason =
+          status === "mismatch"
+            ? `Citation ${def.code_reference?.section ?? "?"} doesn't match the canonical FBC text — the AI suggests ${suggestion.section} (${suggestion.title}) is a better fit. Verify and update.`
+            : status === "not_found"
+              ? `Cited FBC section ${def.code_reference?.section ?? "?"} was not found — the AI suggests ${suggestion.section} (${suggestion.title}) instead. Verify and update.`
+              : `No FBC section parseable — the AI suggests ${suggestion.section} (${suggestion.title}). Verify and add the citation.`;
+      } else {
+        update.requires_human_review = true;
+        update.human_review_reason =
+          status === "mismatch"
+            ? `Citation ${def.code_reference?.section ?? "?"} doesn't match the canonical FBC text — verify the section is correct.`
+            : status === "not_found"
+              ? `Cited FBC section ${def.code_reference?.section ?? "?"} was not found in the code library — verify or correct.`
+              : `No FBC section parseable from this finding — add or correct the citation.`;
+      }
     }
     const { error: updErr } = await admin
       .from("deficiencies_v2")
