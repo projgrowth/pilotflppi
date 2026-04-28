@@ -27,6 +27,10 @@ export interface Project {
   inspection_clock_started_at: string | null;
   hold_reason: string | null;
   zoning_data: Record<string, unknown> | null;
+  /** Earliest plan_review_files.uploaded_at across all reviews. */
+  first_uploaded_at?: string | null;
+  /** Latest of plan_reviews.updated_at across all reviews. */
+  last_activity_at?: string | null;
 }
 
 export function useProjects() {
@@ -39,7 +43,62 @@ export function useProjects() {
         .is("deleted_at", null)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return data as Project[];
+      const projects = (data ?? []) as Project[];
+      if (projects.length === 0) return projects;
+
+      // Pull plan_reviews timestamps in one shot — we project the earliest
+      // upload time and the latest activity per project. Cheap query, runs
+      // once per Projects-page render.
+      const ids = projects.map((p) => p.id);
+      const { data: reviews } = await supabase
+        .from("plan_reviews")
+        .select("project_id, updated_at, created_at")
+        .in("project_id", ids)
+        .is("deleted_at", null);
+      const { data: files } = await supabase
+        .from("plan_review_files")
+        .select("plan_review_id, uploaded_at")
+        .is("deleted_at", null)
+        .order("uploaded_at", { ascending: true });
+
+      // Map plan_review_id → project_id via the reviews we just fetched.
+      const reviewToProject = new Map<string, string>();
+      const lastActivityByProject = new Map<string, string>();
+      for (const r of reviews ?? []) {
+        reviewToProject.set(r.project_id, r.project_id);
+        const prev = lastActivityByProject.get(r.project_id);
+        if (!prev || (r.updated_at && r.updated_at > prev)) {
+          lastActivityByProject.set(r.project_id, r.updated_at);
+        }
+      }
+      // We need plan_review_id → project_id specifically; redo above with
+      // both keys preserved.
+      const prToProject = new Map<string, string>();
+      for (const r of reviews ?? []) {
+        // r is { project_id, updated_at, created_at } but we also need its id.
+      }
+      // Re-fetch ids alongside project_id since we omitted them above.
+      const { data: reviewIds } = await supabase
+        .from("plan_reviews")
+        .select("id, project_id")
+        .in("project_id", ids)
+        .is("deleted_at", null);
+      for (const r of reviewIds ?? []) prToProject.set(r.id, r.project_id);
+
+      const firstUploadByProject = new Map<string, string>();
+      for (const f of files ?? []) {
+        const projectId = prToProject.get(f.plan_review_id);
+        if (!projectId) continue;
+        if (!firstUploadByProject.has(projectId)) {
+          firstUploadByProject.set(projectId, f.uploaded_at);
+        }
+      }
+
+      return projects.map((p) => ({
+        ...p,
+        first_uploaded_at: firstUploadByProject.get(p.id) ?? null,
+        last_activity_at: lastActivityByProject.get(p.id) ?? p.updated_at ?? null,
+      }));
     },
   });
 }
