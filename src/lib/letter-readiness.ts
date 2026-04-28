@@ -165,7 +165,8 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
   const unverifiedPct = live.length === 0 ? 0 : unverified.length / live.length;
   const verifierStalled = unverifiedPct > 0.25;
 
-  const citationProblems = hallucinated.length + weakCitations.length + stubCitations.length;
+  const citationProblems =
+    hallucinated.length + weakCitations.length + stubCitations.length + undecidedTotal;
   checks.push({
     id: "citations",
     required: true,
@@ -174,19 +175,32 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
       citationProblems === 0
         ? "Citations look defensible"
         : hallucinated.length > 0
-          ? `${hallucinated.length} hallucinated citation${hallucinated.length === 1 ? "" : "s"}${weakCitations.length || stubCitations.length ? ` + ${weakCitations.length + stubCitations.length} ungrounded` : ""}`
-          : stubCitations.length > 0
-            ? `${stubCitations.length} citation${stubCitations.length === 1 ? "" : "s"} reference an FBC stub (no canonical text)`
-            : `${weakCitations.length} ungrounded low-confidence citation${weakCitations.length === 1 ? "" : "s"}`,
+          ? `${hallucinated.length} hallucinated citation${hallucinated.length === 1 ? "" : "s"}${
+              undecidedTotal + weakCitations.length + stubCitations.length > 0
+                ? ` + ${undecidedTotal + weakCitations.length + stubCitations.length} ungrounded`
+                : ""
+            }`
+          : undecidedTotal > 0
+            ? `${undecidedTotal} citation${undecidedTotal === 1 ? "" : "s"} need a reviewer decision (mismatch / not in DB)`
+            : stubCitations.length > 0
+              ? `${stubCitations.length} citation${stubCitations.length === 1 ? "" : "s"} reference an FBC stub (no canonical text)`
+              : `${weakCitations.length} ungrounded low-confidence citation${weakCitations.length === 1 ? "" : "s"}`,
     detail:
       citationProblems === 0
         ? "No findings combine an unverified FBC citation with low AI confidence, no hallucinated citations remain, and every grounded section has full canonical text."
         : hallucinated.length > 0
           ? "These cite an FBC section the system could not parse. Fix or remove them before sending."
-          : stubCitations.length > 0
-            ? "These cite real FBC sections, but the canonical requirement text isn't seeded yet — so the AI can't prove the citation actually supports the finding. Verify by hand or remove."
-            : "These cite an FBC section the system couldn't ground AND scored under 0.7. Verify by hand or remove.",
-    jumpFindingId: hallucinated[0]?.id ?? stubCitations[0]?.id ?? weakCitations[0]?.id,
+          : undecidedTotal > 0
+            ? "Mismatch / not-in-DB citations need a reviewer decision (confirm, modify, or reject) before sending. Use 'Re-ground' on the finding card to retry, or accept it manually."
+            : stubCitations.length > 0
+              ? "These cite real FBC sections, but the canonical requirement text isn't seeded yet — so the AI can't prove the citation actually supports the finding. Verify by hand or remove."
+              : "These cite an FBC section the system couldn't ground AND scored under 0.7. Verify by hand or remove.",
+    jumpFindingId:
+      hallucinated[0]?.id ??
+      undecidedMismatch[0]?.id ??
+      undecidedNotFound[0]?.id ??
+      stubCitations[0]?.id ??
+      weakCitations[0]?.id,
   });
 
   // 2b. Verifier completion — required check (two-pair-of-eyes promise).
