@@ -713,7 +713,7 @@ export async function stageDisciplineReview(
   // Pull the missing-disciplines list written by the submittal-check stage
   // so each discipline expert can avoid fabricating findings against trades
   // that aren't in the submittal.
-  const _runProgress = ((progressRow?.data as { ai_run_progress?: Record<string, unknown> | null } | null)?.ai_run_progress ?? {}) as Record<string, unknown>;
+  const _runProgress = ((progressRow.data as { ai_run_progress?: Record<string, unknown> | null } | null)?.ai_run_progress ?? {}) as Record<string, unknown>;
   const missingDisciplines: string[] = Array.isArray(_runProgress.submittal_missing_disciplines)
     ? (_runProgress.submittal_missing_disciplines as unknown[]).filter((x): x is string => typeof x === "string")
     : [];
