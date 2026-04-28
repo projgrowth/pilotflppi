@@ -1,95 +1,145 @@
+# Plan Review: Precision, Trust, and Lifecycle Hygiene
 
-## Audit: what's wrong today
+A blocked-down list of what's standing between the current pipeline and a private-provider-grade review experience, plus the timestamp/delete features you called out. Items are tagged **P0** (blocks pilot trust), **P1** (lifts precision/UX meaningfully), **P2** (polish).
 
-A user who wants to "upload plans and review them" currently passes through up to **6 distinct UI surfaces**:
+---
 
-```text
-Projects (list)  ─►  NewPlanReviewWizard Step 1 (upload)
-                 ─►  NewPlanReviewWizard Step 2 (confirm AI fields)
-                 ─►  NewPlanReviewWizard Step 3 (wait / "Open workspace")
-                 ─►  /plan-review/:id (workspace)
-                 ─►  /plan-review/:id/dashboard (triage)
+## Part A — What's preventing a "properly reviewed" plan
 
-Plus a parallel funnel:
-/review (list) ─► /review/:id (redirect shim) ─► /plan-review/:id
-```
+### 1. Code grounding still has gaps (P0 — precision)
+Today `ground_citations` matches AI findings to `fbc_code_sections` via vector similarity, but:
+- Many sections in the canonical library are stub text ("see FBC for full requirement text") — graders mark grounded, but the comment letter cites filler. We already flag these in `flag_findings_for_reground_on_canonical_change`, but findings citing stub sections still ship.
+- No required-edition matching. A 7th-edition citation can ground to an 8th-edition section silently.
+- **Fix:** (a) hard-block any finding from "grounded" status if `requirement_text` is shorter than 60 chars or contains "see FBC"; (b) require `edition` agreement with the project's `fbc_edition` (already on `jurisdictions_fl`); (c) surface ungrounded findings in a "Citations need a human" tray inside the workspace, separate from low-confidence.
 
-Findings from reading the code:
+### 2. Sheet → discipline routing is the single biggest accuracy lever (P0)
+`discipline-review.ts` runs per discipline against `disciplineSheets` resolved by `sheet_map` + `disciplineForSheetFallback`. If `sheet_map` mis-tags an A-sheet as M, the structural reviewer never sees it and the mechanical reviewer hallucinates.
+- **Fix:** add a quick "sheet routing audit" step after `sheet_map` that asks the model to confirm the discipline of each routed sheet using only the title block crop (cheap, ~$0.001/sheet). Disagreements show as a banner with one-click reassignment in the workspace.
+- **Fix:** show the user the discipline-by-sheet matrix before the heavy `discipline_review` stage runs — a 10-second sanity check now prevents 5 minutes of wasted findings.
 
-1. **`NewPlanReviewWizard.tsx` is 1,007 lines** and re-implements an upload widget, AI title-block extraction, geocoding, project-match dedupe, *and* a pipeline-progress waiting room — none of which the workspace can't already show.
-2. **Step 3 is dead time.** The Dialog just renders `PipelineProgressStepper` + `PagePrepProgress` then offers two buttons that both navigate to `/plan-review/:id`. The workspace already shows that exact pipeline state via `usePipelineStatus` and the `StuckRecoveryBanner`.
-3. **`/review` and `/review/:id` are duplicate funnels.** `Review.tsx` is a project list filtered to "reviews", and `ReviewDetail.tsx` is a 3-line redirect-or-create-row shim. Both end at `/plan-review/:id`.
-4. **Two "New Review" entry points** (`Projects` button → wizard, `Review` button → `/projects?action=new` → wizard) confuse the mental model.
-5. **AI extraction blocks Step 2.** The user can't proceed until 20s of title-block OCR finishes, even though every field is already manually editable.
-6. **`PlanReviewDetail` already has an in-page drop zone** (`PlanViewerPanel`, `handleFileUpload` at line 230) — the wizard re-implements the same upload pipeline a second time.
+### 3. "Did the AI actually look at every sheet?" is invisible (P0)
+We have `SheetCoverageMap` and `AuditCoveragePanel` components but the workspace doesn't gate the comment letter on coverage. A private provider needs a single chip: **"42/42 sheets reviewed by all required disciplines."**
+- **Fix:** add a `coverage_pct` to the readiness gate; block "Send letter" if any required discipline missed a sheet that was routed to it. Reviewer can override with a typed reason (already a pattern via `comment_letter_snapshots.override_reasons`).
 
-Net effect: more screens, more redirects, more state to keep in sync, more places where the legitimacy work in P0/P1 (snapshots, readiness gates, holiday math) can be bypassed by a stale wizard branch.
+### 4. No second-pass on high-stakes findings (P1 — precision)
+`critic` exists but runs once. For findings with `life_safety_flag` or `permit_blocker`, a single critic pass is too thin for a private provider's signature.
+- **Fix:** when a finding is life-safety OR permit-blocker AND grounded confidence < 0.7, queue it through a stricter "challenge" prompt (different model, different framing — "argue this finding is wrong"). If the challenger agrees it stands, mark it `verified_by_challenger=true` and badge it in the UI.
 
-## Proposed flow (3 surfaces total)
+### 5. Submittal completeness is advisory, not enforced (P1)
+`submittal-check` runs but the pipeline continues even when submittal is incomplete. Reviewing an incomplete set wastes AI spend AND produces findings the contractor will (rightfully) dispute.
+- **Fix:** add a firm setting `block_review_on_incomplete_submittal` (default off so existing flows aren't broken). When on, incomplete submittal halts at `submittal_check` with a clear list of missing items the contractor can re-upload against.
 
-```text
-Projects (list + inline "New Review" button)
-   │
-   │  click "New Review"  →  small modal: 1 form, no steps
-   │     • drop PDFs (multi)
-   │     • address (auto-geocodes county+jurisdiction on blur)
-   │     • use type toggle (commercial / residential)
-   │     • trade + services (defaults: building + plan_review)
-   │     • [optional] AI auto-fill button  ← non-blocking, runs in background
-   │     [Create & Open]
-   ▼
-/plan-review/:id   ← single workspace
-   • upload more files via the existing in-page drop zone
-   • pipeline progress shown inline in the existing top strip / StuckRecoveryBanner
-   • findings, letter, QC, snapshots — unchanged
-```
+### 6. No "why this finding?" provenance for the contractor (P1 — trust)
+`FindingProvenancePopover` exists internally. The exported comment letter PDF doesn't include the evidence crop or the routed sheet thumbnail. Private providers live or die by defensibility.
+- **Fix:** add an optional "Evidence appendix" to the letter PDF — one page per finding with the cropped evidence, sheet ref, and the canonical code text. Toggle in the export dialog; default on for Florida private-provider firms.
 
-Two screens in the happy path. Three if you count the project list.
+### 7. Re-review (round 2+) doesn't diff against round 1 (P1)
+Resubmitted plans currently run a fresh pipeline. The contractor expects "Items 3, 7, and 12 from round 1 are now resolved; items 5 and 9 are not."
+- **Fix:** after `dedupe`, run a `round_diff` stage that links new-round findings back to prior-round `lineage_id`s already on `deficiencies_v2`. Mark each prior finding as `resolved | unresolved | partially_resolved | new`. Surface in `RoundCarryoverPanel` (already exists) and prepend it to round-2 letters.
 
-## Concrete changes
+### 8. AI-extracted DNA is never re-confirmed by the human (P2)
+`dna_extract` pulls building height, occupancy, construction type, etc. — these drive every downstream check. If occupancy is wrong, every life-safety finding is suspect.
+- **Fix:** when a review hits `dna_extract` complete, surface a 30-second "Confirm project DNA" card in the workspace before opening up `discipline_review` results. One click confirms; any edit cascades a `re-ground` of affected findings.
 
-### 1. Replace the 3-step wizard with a single-form modal
-- New `NewReviewDialog.tsx` (~250 lines, replaces `NewPlanReviewWizard.tsx`).
-- One scrollable Dialog body, no `step` state, no `STEPS` indicator, no Step 3.
-- AI extraction becomes an optional **"Auto-fill from title block"** button next to the file list. It populates fields when it returns; user can submit before it finishes.
-- Geocode runs on `address` blur (already implemented), with a manual `MapPin` fallback. No separate "Confirm" step.
-- `[Create & Open]` does the existing `handleLaunch` work (insert project + plan_review row + kick pipeline) and immediately `navigate('/plan-review/:id')`. The pipeline runs while the workspace mounts — the workspace already polls `usePipelineStatus` and renders the same stepper.
+### 9. Cost & timing per review is opaque to the firm owner (P2)
+`CostTimingPanel` shows aggregate. No per-review "this review cost $0.42 and took 3m 12s." Pilots want to model unit economics.
+- **Fix:** add a small cost/time chip to the workspace header and to each row on Projects.
 
-### 2. Delete the `/review` and `/review/:id` detour
-- Remove `src/pages/Review.tsx` and `src/pages/ReviewDetail.tsx`.
-- Remove their routes from `src/App.tsx`.
-- Update the sidebar entry "Plan Review" to point at `/projects?filter=plan_review` (uses the existing filter pill in `Projects.tsx`).
-- Update `useActivePipelineCount` banner placement: move it into the `Projects` page header so the "N pipelines running" affordance is preserved.
-- Add a redirect: `/review/:id  →  /projects/:id` (so external links from email/snapshots don't 404).
+---
 
-### 3. Single "New Review" entry point
-- Keep the Projects page button.
-- Remove the duplicate button on the (now-deleted) Review page.
-- `ProjectDetail` keeps its "Start new round" button — it opens the same `NewReviewDialog` with `preselectedProjectId`, so existing-project re-submittals stay one click.
+## Part B — Pipeline & Projects pages: timestamps, deletes, lifecycle
 
-### 4. Fold the wizard's Step-3 waiting room into the workspace
-- Add a small `<PipelineKickoffToast />` (or reuse `UploadProgressBar`) on `/plan-review/:id` that is visible only when no `page_assets` exist yet, then auto-dismisses. The `StuckRecoveryBanner` and `PipelineProgressStepper` already handle the rest.
-- Removes ~150 lines from the wizard and one full screen of "waiting" UX.
+### 10. Timestamps everyone needs (P0 — your ask)
+Currently:
+- Projects list shows "Xd left" but not "uploaded 3h ago" or "last activity 12m ago."
+- Pipeline Activity shows "elapsed" only on the running stage.
 
-### 5. Tighten the in-page upload
-- `PlanViewerPanel`'s drop zone stays (additive uploads for resubmittals).
-- The new modal and the in-page drop zone share **one** helper (`uploadPlanReviewFiles` — already exists in the codebase as the back end of `handleFileUpload`); the wizard's parallel implementation is deleted.
+Add to **Projects list rows**:
+- `Uploaded` (= earliest `plan_review_files.uploaded_at` for that project) — shown as "3h ago" with full timestamp on hover.
+- `Last action` (= latest of: `plan_reviews.updated_at`, latest pipeline row `updated_at`, latest `finding_status_history.changed_at`) — same format.
+- New sortable column "Last activity" (default desc).
 
-## What stays unchanged
+Add to **Pipeline Activity rows**:
+- `Started` and `Last update` timestamps next to the stepper.
+- Total wall-clock duration when complete.
 
-- All P0/P1 legitimacy work: holiday-aware deadlines, immutable letter snapshots, readiness gate, QC notes, evidence cropping, override-reason enforcement.
-- `PlanReviewDetail` workspace layout (PDF + findings + letter + right-panel tabs).
-- `ReviewDashboard` (`/plan-review/:id/dashboard`) — kept as the QC/health view; it's a different job, not part of the upload→review path.
+### 11. Delete plans / files with confirmation (P0 — your ask)
+The codebase already has `useConfirm` (with "Don't ask again this session" option) and a `cleanup-orphan-uploads` edge function — we just need to wire it.
 
-## Files touched
+**Per-file delete** in `PlanViewerPanel`:
+- Hover-action trash icon on each `plan_review_files` row.
+- Confirms via `useConfirm` (destructive variant, not remembered — files are unrecoverable).
+- Removes from storage `documents` bucket AND from `plan_review_files`. Logs to `activity_log`.
 
-- **New:** `src/components/NewReviewDialog.tsx`
-- **Delete:** `src/components/NewPlanReviewWizard.tsx`, `src/pages/Review.tsx`, `src/pages/ReviewDetail.tsx`
-- **Edit:** `src/App.tsx` (routes + redirect), `src/pages/Projects.tsx`, `src/pages/ProjectDetail.tsx`, `src/pages/PlanReviewDetail.tsx` (kickoff toast), sidebar nav component
-- **Refactor:** extract shared `uploadPlanReviewFiles` helper if not already standalone
+**Per-plan-review delete** in workspace top bar (`ReviewTopBar`) + Projects row hover:
+- Cascade: delete `plan_review_files` (storage + table), `deficiencies_v2`, `review_pipeline_status`, `comment_letter_snapshots` for that review, then the `plan_reviews` row.
+- Block deletion if `comment_letter_snapshots` has a `sent_at` (legal record). Owner-only override with typed reason → soft-deletes (`deleted_at`) instead of hard delete.
+- Confirm dialog requires typing the project name (the "Don't ask again" option is hidden — too destructive to ever skip).
 
-## Open questions before I implement
+**Per-project delete** in Projects row hover + ProjectDetail:
+- Same pattern but cascades all reviews, inspections, invoices line items, etc.
+- Hard-block if any `certificates_of_compliance` exist. Soft-delete only.
 
-1. The `Review.tsx` page also surfaces a per-project **`ReviewStagePipeline`** + **`ConfidenceBar`** card grid — useful at-a-glance triage. OK to drop these (they're available per-project on `ProjectDetail`), or should I add a "Reviews" filter view on `Projects` that keeps that card layout?
-2. Should the AI title-block auto-fill run **automatically on upload** (current behavior, blocking) or only when the user clicks **"Auto-fill"** (faster, less magical)? My recommendation: auto-run in background, non-blocking — show a small "AI filled X fields" toast when it returns.
-3. Keep `/plan-review/:id/dashboard` as a separate route, or merge it as a tab inside `/plan-review/:id`? (Out of scope for "upload + review" simplification, but related.)
+**DB changes:**
+- Add `deleted_at timestamptz` to `plan_reviews`, `projects`, `plan_review_files`. Filter all list queries by `deleted_at IS NULL`.
+- Add admin-only "Trash" view on Settings > Data so owners can restore within 30 days.
+- New edge function `delete-plan-review` that handles the cascade with service role + verifies the user is firm member with admin role.
+
+### 12. "Cancel a stuck review" already exists but is hidden (P1)
+`cancelPipelineForReview` works on the Pipeline Activity page but not from the workspace. Add a Cancel button to the workspace header when any stage is `running` or `pending`. Same `useConfirm` dialog.
+
+### 13. Auto-purge orphans on a schedule (P1)
+`cleanup-orphan-uploads` exists but runs ad-hoc. Add a daily cron (Supabase scheduled function) that cleans:
+- Storage objects under `plan-review-files/` with no matching `plan_review_files` row > 24h old.
+- `review_pipeline_status` rows in `pending` > 24h with no `started_at`.
+
+### 14. Lifecycle audit log surfaced to the user (P2)
+`activity_log` already records most things. Add an "Activity" tab to ProjectDetail and PlanReviewDetail that renders the project's events as a timeline. Private providers will be asked to produce one in audits.
+
+---
+
+## Recommended sequencing
+
+**Pilot-blocker batch (do first, ~1 day):**
+- 10 Timestamps on Projects + Pipeline Activity
+- 11 Delete (file → review → project) with confirmations + soft-delete column
+- 1 Citation grounding hard-blocks (stub text + edition mismatch)
+- 3 Coverage gate on letter send
+
+**Precision batch (next, ~1 day):**
+- 2 Sheet routing audit + reassignment UI
+- 4 Challenger pass on life-safety findings
+- 6 Evidence appendix in letter PDF
+- 7 Round-diff stage
+
+**Polish batch:**
+- 5 Submittal-block firm setting · 8 DNA confirm card · 9 Per-review cost chip · 12 Workspace cancel · 13 Daily cleanup cron · 14 Activity timeline
+
+---
+
+## Technical notes
+
+**New DB:**
+- `ALTER TABLE plan_reviews/projects/plan_review_files ADD COLUMN deleted_at timestamptz`
+- `ALTER TABLE deficiencies_v2 ADD COLUMN verified_by_challenger boolean DEFAULT false, round_diff_status text` — values: `new | resolved | unresolved | partially_resolved`
+- Update RLS: list policies filter `deleted_at IS NULL`; delete policy on `plan_reviews` allows authenticated firm member (soft) or admin (hard).
+- Scheduled function `cron-cleanup-orphans` (daily 3am ET).
+
+**New edge functions:**
+- `delete-plan-review` (cascade, service-role, idempotent)
+- `delete-project` (cascade, requires no issued CoC)
+
+**New / modified components:**
+- `src/components/DeleteConfirmDialog.tsx` (typed-name confirm)
+- `src/lib/delete-plan-review.ts`, `src/lib/delete-project.ts`
+- `src/pages/Projects.tsx` — add Uploaded/Last activity columns, row-hover trash
+- `src/pages/PipelineActivity.tsx` — Started/Last update timestamps, wall-clock duration
+- `src/components/plan-review/PlanViewerPanel.tsx` — per-file trash with confirm
+- `src/components/plan-review/ReviewTopBar.tsx` — Cancel + Delete review actions
+- `src/pages/ProjectDetail.tsx` — Activity tab, Delete project (soft)
+- New `stages/sheet-routing-audit.ts`, `stages/round-diff.ts`, `stages/challenger.ts`
+- `src/components/plan-review/SheetRoutingAuditBanner.tsx`
+- `src/components/plan-review/DnaConfirmCard.tsx`
+- `src/lib/letter-readiness.ts` — add `coverage_pct` and `ungrounded_count` gates
+
+Confirm and I'll execute the pilot-blocker batch first; precision/polish in follow-ups so each batch is reviewable.
