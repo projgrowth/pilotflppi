@@ -55,7 +55,7 @@ export default function BulkActionBar({ planReviewId, selected, onClear }: Props
   if (selected.length === 0) return null;
 
   async function bulkUpdate(
-    patch: Record<string, unknown>,
+    patch: { priority?: "high" | "medium" | "low"; discipline?: string },
     busyTag: "priority" | "discipline",
     successMsg: string,
   ) {
