@@ -165,6 +165,13 @@ export async function stageVerify(
   let cannotLocate = 0;
   let skipped = 0;
 
+  // Per-batch retry policy. The biggest cause of `needs_human_review` in
+  // production is a single transient AI gateway hiccup that leaves a whole
+  // batch stuck at verification_status='unverified'. Retry with bounded
+  // exponential backoff before giving up.
+  const RETRY_DELAYS_MS = [500, 1500, 4000];
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
   for (let start = 0; start < targets.length; start += BATCH) {
     const slice = targets.slice(start, start + BATCH);
 
