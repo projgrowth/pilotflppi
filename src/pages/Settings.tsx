@@ -49,8 +49,25 @@ export default function SettingsPage() {
  const { firmSettings, isLoading: firmLoading, saveFirmSettings, isSaving } = useFirmSettings();
  const isAdmin = useIsAdmin();
 
- const [fullName, setFullName] = useState("");
- const [saving, setSaving] = useState(false);
+  const [fullName, setFullName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // F.S. 553.791(2): per-discipline professional licenses for the reviewer.
+  // Map discipline (lowercase) → license number string. Saved on profiles.discipline_licenses.
+  const DISCIPLINE_KEYS = [
+    { key: "architectural", label: "Architectural (AR)" },
+    { key: "structural", label: "Structural (PE/SE)" },
+    { key: "mechanical", label: "Mechanical (PE)" },
+    { key: "electrical", label: "Electrical (PE)" },
+    { key: "plumbing", label: "Plumbing (PE)" },
+    { key: "fire", label: "Fire Protection (PE)" },
+    { key: "life_safety", label: "Life Safety" },
+    { key: "energy", label: "Energy" },
+    { key: "ada", label: "Accessibility / ADA" },
+    { key: "civil", label: "Civil (PE)" },
+  ] as const;
+  const [licenseMap, setLicenseMap] = useState<Record<string, string>>({});
+  const [savingLicenses, setSavingLicenses] = useState(false);
 
  // Firm info
  const [firmName, setFirmName] = useState("");
@@ -66,12 +83,20 @@ export default function SettingsPage() {
  const [jurisdictionsDirty, setJurisdictionsDirty] = useState(false);
  const [savingJurisdictions, setSavingJurisdictions] = useState(false);
 
- // Sync profile data
- useEffect(() => {
- if (profile) {
- setFullName(profile.full_name || "");
- }
- }, [profile]);
+  // Sync profile data
+  useEffect(() => {
+    if (profile) {
+      setFullName(profile.full_name || "");
+      const raw = (profile as unknown as { discipline_licenses?: unknown }).discipline_licenses;
+      if (raw && typeof raw === "object") {
+        const next: Record<string, string> = {};
+        for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+          if (typeof v === "string") next[k.toLowerCase()] = v;
+        }
+        setLicenseMap(next);
+      }
+    }
+  }, [profile]);
 
  // Sync firm settings from DB, including jurisdictions
  useEffect(() => {
