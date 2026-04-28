@@ -601,6 +601,7 @@ export default function PlanReviewDetail() {
     round: review.round,
     aiCheckStatus: review.ai_check_status,
     qcStatus: review.qc_status || "pending_qc",
+    qcNotes: review.qc_notes || "",
     hasFindings,
     findings,
     findingStatuses,
