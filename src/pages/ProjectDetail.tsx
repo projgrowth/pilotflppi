@@ -85,8 +85,9 @@ function useProjectReviews(projectId: string) {
  queryFn: async () => {
  const { data, error } = await supabase
  .from("plan_reviews")
- .select("id, round, ai_check_status, created_at")
+ .select("id, round, ai_check_status, created_at, updated_at")
  .eq("project_id", projectId)
+ .is("deleted_at", null)
  .order("round", { ascending: false });
  if (error) throw error;
  const reviewIds = (data || []).map((r) => r.id);

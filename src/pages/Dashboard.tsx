@@ -45,6 +45,7 @@ export default function Dashboard() {
       const { data, error } = await supabase
         .from("plan_reviews")
         .select("id, project_id, round")
+        .is("deleted_at", null)
         .order("round", { ascending: false });
       if (error) throw error;
       const map: Record<string, string> = {};
