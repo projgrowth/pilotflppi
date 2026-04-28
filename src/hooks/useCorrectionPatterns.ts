@@ -129,6 +129,8 @@ export async function recordCorrectionPattern(input: RecordPatternInput) {
       })
       .eq("id", existing.id);
     if (error) throw error;
+    // Re-embed so the updated reason_notes are reflected in semantic recall.
+    void triggerPatternEmbedding(existing.id);
     return existing.id;
   }
 
@@ -159,7 +161,24 @@ export async function recordCorrectionPattern(input: RecordPatternInput) {
     .select("id")
     .maybeSingle();
   if (error) throw error;
-  return (inserted as { id: string } | null)?.id ?? null;
+  const newId = (inserted as { id: string } | null)?.id ?? null;
+  if (newId) void triggerPatternEmbedding(newId);
+  return newId;
+}
+
+/**
+ * Fire-and-forget call to the embed-correction-pattern edge function. Never
+ * throws — failures are logged so the rejection UX stays snappy and the
+ * embedding can be backfilled later.
+ */
+async function triggerPatternEmbedding(patternId: string) {
+  try {
+    await supabase.functions.invoke("embed-correction-pattern", {
+      body: { pattern_id: patternId },
+    });
+  } catch (e) {
+    console.warn("[embed-correction-pattern] non-fatal", e);
+  }
 }
 
 export async function setPatternActive(patternId: string, active: boolean) {
