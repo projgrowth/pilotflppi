@@ -138,7 +138,21 @@ export default function DeficiencyHeader({ planReviewId, def }: Props) {
       {/* Body */}
       <div className="mt-3 space-y-2">
         {codeRefStr && (
-          <div className="text-2xs font-mono text-muted-foreground">{codeRefStr}</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-2xs font-mono text-muted-foreground">{codeRefStr}</span>
+            <CitationBadge
+              status={def.citation_status}
+              matchScore={def.citation_match_score}
+              canonicalText={def.citation_canonical_text}
+              compact
+            />
+            {needsReground(def.citation_status) && (
+              <RegroundButton
+                planReviewId={planReviewId}
+                deficiencyId={def.id}
+              />
+            )}
+          </div>
         )}
         <div>
           <div className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">
