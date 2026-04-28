@@ -358,8 +358,91 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
     return stripped;
   };
 
+  // Evidence shape verifier. We can't OCR the PDFs cheaply at this stage,
+  // but we CAN catch the common fabrication patterns that have surfaced in
+  // production: empty quotes, quotes that are just the finding restated,
+  // generic notes with no plan-specific anchor, or quotes with no overlap
+  // to the cited sheet refs at all. Suspicious findings get auto-routed to
+  // human review with a clear reason.
+  const verifyEvidenceShape = (
+    evidence: string[],
+    finding: string,
+    sheetRefs: string[],
+  ): { suspicious: boolean; reason: string } => {
+    if (evidence.length === 0) {
+      return { suspicious: true, reason: "no quoted evidence on the plan" };
+    }
+    const findingTokens = new Set(
+      finding.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 4),
+    );
+    for (const e of evidence) {
+      const eLow = e.toLowerCase();
+      if (eLow.length < 8) {
+        return { suspicious: true, reason: `evidence quote too short: "${e}"` };
+      }
+      // Restating the finding back as "evidence" is a hallucination tell.
+      const eTokens = eLow.replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 4);
+      if (eTokens.length > 0) {
+        const overlap = eTokens.filter((t) => findingTokens.has(t)).length;
+        if (overlap / eTokens.length > 0.85 && eTokens.length >= 4) {
+          return {
+            suspicious: true,
+            reason: "evidence quote restates the finding instead of quoting the plan",
+          };
+        }
+      }
+    }
+    // If quotes never reference any cited sheet ref OR a recognizable plan
+    // artifact (sheet name, detail callout, dimension, code ref), they may be
+    // generic. We're permissive here — only flag when ALL quotes are vague.
+    const PLAN_ANCHORS = [
+      /\b[A-Z]-?\d{2,4}\b/, // sheet/detail callouts
+      /\b\d+(?:'|-|\.\d+)?\s*(?:in|inch|inches|ft|feet|psf|°|deg)\b/i,
+      /\bdetail\b/i,
+      /\bnote\s*\d+\b/i,
+      /\bsheet\b/i,
+      /\bsection\b/i,
+      /\bsymbol\b/i,
+      /\btable\b/i,
+    ];
+    const sheetUpper = sheetRefs.map((s) => s.toUpperCase());
+    const anyAnchor = evidence.some(
+      (e) =>
+        sheetUpper.some((s) => e.toUpperCase().includes(s)) ||
+        PLAN_ANCHORS.some((re) => re.test(e)),
+    );
+    if (!anyAnchor) {
+      return {
+        suspicious: true,
+        reason: "evidence quotes contain no plan-specific anchor (sheet ref, detail, dimension, or note number)",
+      };
+    }
+    return { suspicious: false, reason: "" };
+  };
+
   const rows = findings.map((f, i) => {
     const validSection = cleanSection(f.code_section);
+    const cleanedEvidence = (f.evidence ?? [])
+      .slice(0, 3)
+      .map((s) => (typeof s === "string" ? s.slice(0, 200) : ""))
+      .filter((s) => s.length > 0);
+    const evidenceCheck = verifyEvidenceShape(
+      cleanedEvidence,
+      f.finding,
+      f.sheet_refs ?? [],
+    );
+    // Findings whose evidence quotes look fabricated get auto-routed to
+    // human review. We don't delete them — a real defect can have weak
+    // quoting — but we don't let them silently flow to letter generation.
+    const baseConf = Math.max(0, Math.min(1, f.confidence_score ?? 0.5));
+    const adjustedConf = evidenceCheck.suspicious
+      ? Math.max(0.1, baseConf * 0.6)
+      : baseConf;
+    const requiresHumanReview =
+      !!f.requires_human_review || evidenceCheck.suspicious;
+    const humanReviewReason = evidenceCheck.suspicious
+      ? `Evidence verification: ${evidenceCheck.reason}. Confirm finding on the plan.`
+      : f.human_review_reason ?? null;
     return {
       plan_review_id: planReviewId,
       firm_id: firmId,
@@ -371,15 +454,22 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
         : {},
       finding: f.finding,
       required_action: f.required_action,
-      evidence: (f.evidence ?? []).slice(0, 3).map((s) => s.slice(0, 200)),
+      evidence: cleanedEvidence,
+      evidence_crop_meta: {
+        evidence_check: {
+          suspicious: evidenceCheck.suspicious,
+          reason: evidenceCheck.reason,
+          checked_at: new Date().toISOString(),
+        },
+      },
       priority: f.priority ?? "medium",
       life_safety_flag: !!f.life_safety_flag,
       permit_blocker: !!f.permit_blocker,
       liability_flag: !!f.liability_flag,
-      requires_human_review: !!f.requires_human_review,
-      human_review_reason: f.human_review_reason ?? null,
+      requires_human_review: requiresHumanReview,
+      human_review_reason: humanReviewReason,
       human_review_verify: f.human_review_verify ?? null,
-      confidence_score: Math.max(0, Math.min(1, f.confidence_score ?? 0.5)),
+      confidence_score: adjustedConf,
       confidence_basis: f.confidence_basis ?? "Vision-extracted",
       model_version: "google/gemini-2.5-flash",
       prompt_version_id: promptVersionId,

@@ -13,6 +13,7 @@ export type PipelineStage =
   | "submittal_check"
   | "dna_extract"
   | "discipline_review"
+  | "critic"
   | "cross_check"
   | "verify"
   | "ground_citations"
@@ -28,6 +29,7 @@ export const CORE_STAGES: PipelineStage[] = [
   "submittal_check",
   "dna_extract",
   "discipline_review",
+  "critic",
   "dedupe",
   "ground_citations",
   "complete",
@@ -47,6 +49,7 @@ export const PIPELINE_STAGES: { key: PipelineStage; label: string }[] = [
   { key: "submittal_check", label: "Submittal Check" },
   { key: "dna_extract", label: "DNA Extract" },
   { key: "discipline_review", label: "Discipline Review" },
+  { key: "critic", label: "Critic Pass" },
   { key: "cross_check", label: "Cross-Check" },
   { key: "verify", label: "Verify" },
   { key: "ground_citations", label: "Ground Citations" },

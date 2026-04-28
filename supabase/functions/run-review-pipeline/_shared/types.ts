@@ -8,6 +8,7 @@ export type Stage =
   | "submittal_check"
   | "dna_extract"
   | "discipline_review"
+  | "critic"
   | "verify"
   | "dedupe"
   | "ground_citations"
@@ -26,6 +27,7 @@ export const STAGES: Stage[] = [
   "submittal_check",
   "dna_extract",
   "discipline_review",
+  "critic",
   "verify",
   "dedupe",
   "ground_citations",
@@ -57,6 +59,7 @@ export const CORE_STAGES: Stage[] = [
   "submittal_check",
   "dna_extract",
   "discipline_review",
+  "critic",
   "dedupe",
   "ground_citations",
   "complete",
