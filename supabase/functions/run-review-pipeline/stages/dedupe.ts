@@ -91,6 +91,139 @@ interface DedupeRow {
   confidence_score: number | null;
   verification_status: string;
   status: string;
+  lineage_id: string;
+}
+
+/**
+ * Cross-round defect lineage (Sprint 3, P2).
+ *
+ * When this plan_review is Round 2+, find the immediately prior round for the
+ * same project and try to match each current finding to one from the prior
+ * round on (a) same normalized FBC section, (b) overlapping sheet refs, and
+ * (c) finding-text Jaccard >= 0.55. Confident matches inherit the prior
+ * round's lineage_id so the UI can render a carryover trail.
+ *
+ * Logged via activity_log with event_type='lineage_carryover' so reviewers
+ * can audit which defects were auto-linked.
+ */
+async function applyCrossRoundLineage(
+  admin: ReturnType<typeof createClient>,
+  planReviewId: string,
+  currentRows: DedupeRow[],
+): Promise<void> {
+  if (currentRows.length === 0) return;
+
+  const { data: prRow } = await admin
+    .from("plan_reviews")
+    .select("id, project_id, round, firm_id")
+    .eq("id", planReviewId)
+    .maybeSingle();
+  const pr = prRow as
+    | { id: string; project_id: string; round: number; firm_id: string | null }
+    | null;
+  if (!pr || !pr.project_id || (pr.round ?? 1) < 2) return;
+
+  // Find immediately prior round (highest round < current).
+  const { data: priorReviews } = await admin
+    .from("plan_reviews")
+    .select("id, round")
+    .eq("project_id", pr.project_id)
+    .lt("round", pr.round)
+    .order("round", { ascending: false })
+    .limit(1);
+  const prior = (priorReviews ?? [])[0] as { id: string; round: number } | undefined;
+  if (!prior) return;
+
+  const { data: priorDefs } = await admin
+    .from("deficiencies_v2")
+    .select("id, def_number, discipline, finding, sheet_refs, code_reference, lineage_id, status, verification_status")
+    .eq("plan_review_id", prior.id);
+  const priorRows = (priorDefs ?? []) as Array<{
+    id: string;
+    def_number: string;
+    discipline: string;
+    finding: string;
+    sheet_refs: string[] | null;
+    code_reference: { section?: string } | null;
+    lineage_id: string;
+    status: string;
+    verification_status: string;
+  }>;
+  if (priorRows.length === 0) return;
+
+  const priorEnriched = priorRows.map((r) => ({
+    row: r,
+    section: normSection(r.code_reference?.section),
+    sheets: new Set((r.sheet_refs ?? []).map((s) => s.trim().toUpperCase()).filter(Boolean)),
+    tokens: tokenSet(r.finding),
+  }));
+
+  const carryovers: Array<{ currentId: string; priorDefNumber: string; lineageId: string }> = [];
+  const usedPrior = new Set<string>();
+
+  for (const cur of currentRows) {
+    const curSection = normSection(cur.code_reference?.section);
+    const curSheets = new Set(
+      (cur.sheet_refs ?? []).map((s) => s.trim().toUpperCase()).filter(Boolean),
+    );
+    const curTokens = tokenSet(cur.finding);
+
+    let best: { score: number; prior: typeof priorEnriched[number] } | null = null;
+    for (const p of priorEnriched) {
+      if (usedPrior.has(p.row.id)) continue;
+      // Same discipline OR same FBC section (one has to match — different
+      // disciplines flagging the same code section is still the same defect).
+      const sameDiscipline = p.row.discipline === cur.discipline;
+      const sameSection = curSection && p.section && curSection === p.section;
+      if (!sameDiscipline && !sameSection) continue;
+
+      // Sheet overlap is required when both sides have sheets — distinct
+      // sheets means distinct defects even if the prose looks similar.
+      if (curSheets.size > 0 && p.sheets.size > 0) {
+        const overlap = [...curSheets].some((s) => p.sheets.has(s));
+        if (!overlap) continue;
+      }
+
+      const sim = jaccard(curTokens, p.tokens);
+      if (sim < 0.55) continue;
+      if (!best || sim > best.score) best = { score: sim, prior: p };
+    }
+
+    if (best && best.prior.row.lineage_id && best.prior.row.lineage_id !== cur.lineage_id) {
+      carryovers.push({
+        currentId: cur.id,
+        priorDefNumber: best.prior.row.def_number,
+        lineageId: best.prior.row.lineage_id,
+      });
+      usedPrior.add(best.prior.row.id);
+      // Mutate in-place so downstream dedupe steps see the inherited lineage.
+      cur.lineage_id = best.prior.row.lineage_id;
+    }
+  }
+
+  if (carryovers.length === 0) return;
+
+  for (const c of carryovers) {
+    await admin
+      .from("deficiencies_v2")
+      .update({ lineage_id: c.lineageId })
+      .eq("id", c.currentId);
+  }
+
+  await admin.from("activity_log").insert({
+    event_type: "lineage_carryover",
+    description: `Linked ${carryovers.length} Round ${pr.round} finding${carryovers.length === 1 ? "" : "s"} to Round ${prior.round} lineage`,
+    project_id: pr.project_id,
+    firm_id: pr.firm_id,
+    actor_type: "system",
+    metadata: {
+      plan_review_id: planReviewId,
+      prior_plan_review_id: prior.id,
+      prior_round: prior.round,
+      current_round: pr.round,
+      carryovers: carryovers.slice(0, 200),
+    },
+  });
 }
 
 export async function stageDedupe(
@@ -100,7 +233,7 @@ export async function stageDedupe(
   const { data: defsRaw, error } = await admin
     .from("deficiencies_v2")
     .select(
-      "id, def_number, discipline, finding, sheet_refs, code_reference, evidence, confidence_score, verification_status, status",
+      "id, def_number, discipline, finding, sheet_refs, code_reference, evidence, confidence_score, verification_status, status, lineage_id",
     )
     .eq("plan_review_id", planReviewId)
     .neq("status", "resolved")
@@ -110,6 +243,15 @@ export async function stageDedupe(
   if (error) throw error;
 
   const rows = (defsRaw ?? []) as DedupeRow[];
+
+  // -------- Sprint 3: cross-round lineage matcher --------
+  // For Round 2+ reviews, link each new finding to the matching finding from
+  // the prior round (same project, prior plan_review_ids) so the reviewer
+  // sees "this defect was open in Round 1 — still not fixed". We rewrite
+  // lineage_id in place to inherit from the prior round when a confident
+  // match is found; otherwise the auto-generated UUID stays.
+  await applyCrossRoundLineage(admin, planReviewId, rows);
+
   if (rows.length < 2) {
     return { examined: rows.length, groups_merged: 0, findings_superseded: 0 };
   }
