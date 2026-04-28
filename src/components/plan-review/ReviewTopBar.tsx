@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ArrowLeft, Sparkles, Loader2, Check, Wind, Plus, ChevronDown, ExternalLink, MoreVertical, Trash2 } from "lucide-react";
+import { ArrowLeft, Sparkles, Loader2, Check, Wind, Plus, ChevronDown, ExternalLink, MoreVertical, Trash2, XCircle } from "lucide-react";
 import { DeadlineRing } from "@/components/DeadlineRing";
 import { ContractorHoverCard } from "@/components/ContractorHoverCard";
 import { PipelineProgressStepper } from "@/components/plan-review/PipelineProgressStepper";
@@ -30,13 +30,14 @@ interface ReviewTopBarProps {
   onPipelineComplete?: () => void;
   onOpenDashboard?: () => void;
   onDeleteReview?: () => void;
+  onCancelPipeline?: () => void;
 }
 
 export function ReviewTopBar({
   projectName, tradeType, address, county, hvhz, contractor,
   round, reviewId, daysLeft, aiRunning, aiCompleteFlash, hasFindings,
   rounds, onBack, onRunAICheck, onNavigateRound, onNewRound,
-  onPipelineComplete, onOpenDashboard, onDeleteReview,
+  onPipelineComplete, onOpenDashboard, onDeleteReview, onCancelPipeline,
 }: ReviewTopBarProps) {
   const button = (
     <Button
@@ -140,6 +141,18 @@ export function ReviewTopBar({
           </Popover>
         ) : (
           button
+        )}
+
+        {aiRunning && onCancelPipeline && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs shrink-0 border-destructive/30 text-destructive hover:bg-destructive/5 hover:text-destructive"
+            onClick={onCancelPipeline}
+            title="Cancel pipeline"
+          >
+            <XCircle className="h-3.5 w-3.5 mr-1.5" /> Cancel
+          </Button>
         )}
 
         {onDeleteReview && (
