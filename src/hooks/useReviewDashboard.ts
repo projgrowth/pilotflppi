@@ -111,9 +111,11 @@ export const DEEP_STAGE_KEYS: PipelineStage[] = [
 
 export type PipelineMode = "core" | "deep";
 
-export function stagesForPipelineMode(mode: PipelineMode): PipelineStage[] {
+function stagesForPipelineMode(mode: PipelineMode): PipelineStage[] {
   return mode === "deep" ? DEEP_STAGE_KEYS : CORE_STAGE_KEYS;
 }
+void stagesForPipelineMode;
+
 
 export interface PipelineRow {
   id: string;
