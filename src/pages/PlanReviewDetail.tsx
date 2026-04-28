@@ -68,6 +68,7 @@ import { useFirmId } from "@/hooks/useFirmId";
 import type { ReadinessResult } from "@/lib/letter-readiness";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { deletePlanReview } from "@/lib/delete-plan-review";
+import { cancelPipelineForReview } from "@/lib/pipeline-cancel";
 
 import { Wand2, AlertTriangle, Loader2 } from "lucide-react";
 
@@ -752,6 +753,24 @@ export default function PlanReviewDetail() {
         onPipelineComplete={handlePipelineComplete}
         onOpenDashboard={openDashboard}
         onDeleteReview={() => setDeleteOpen(true)}
+        onCancelPipeline={async () => {
+          if (!review) return;
+          const ok = await confirm({
+            title: "Cancel pipeline?",
+            description: "Stop the AI analysis. Already-saved findings remain. You can re-run later.",
+            confirmText: "Cancel pipeline",
+            destructive: true,
+          });
+          if (!ok) return;
+          try {
+            await cancelPipelineForReview(review.id);
+            setAiRunning(false);
+            queryClient.invalidateQueries({ queryKey: ["pipeline_status", review.id] });
+            toast.success("Pipeline cancelled");
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : "Cancel failed");
+          }
+        }}
       />
 
       <DeleteConfirmDialog
