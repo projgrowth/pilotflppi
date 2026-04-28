@@ -226,6 +226,117 @@ async function applyCrossRoundLineage(
   });
 }
 
+/**
+ * Sprint 3: F.S. 553.79(5) Threshold Building — Statement of Special
+ * Inspections auto-finding. Conditional emission:
+ *   - skip if reviewer has already recorded a Special Inspector
+ *   - skip if a finding already cites 553.79 / Special Inspections
+ *   - skip if DNA does not classify this as a threshold building
+ */
+async function emitThresholdAutoFinding(
+  admin: ReturnType<typeof createClient>,
+  planReviewId: string,
+  currentRows: DedupeRow[],
+): Promise<void> {
+  const { data: prRow } = await admin
+    .from("plan_reviews")
+    .select("firm_id, special_inspector_designated, project_id")
+    .eq("id", planReviewId)
+    .maybeSingle();
+  const pr = prRow as
+    | { firm_id: string | null; special_inspector_designated: boolean | null; project_id: string }
+    | null;
+  if (!pr) return;
+  if (pr.special_inspector_designated === true) return;
+
+  const { data: dnaRow } = await admin
+    .from("project_dna")
+    .select("stories, total_sq_ft, occupancy_classification, is_high_rise")
+    .eq("plan_review_id", planReviewId)
+    .maybeSingle();
+  const dna = dnaRow as
+    | { stories: number | null; total_sq_ft: number | null; occupancy_classification: string | null; is_high_rise: boolean | null }
+    | null;
+  if (!dna) return;
+
+  const triggers: string[] = [];
+  if (typeof dna.stories === "number" && dna.stories > 3) triggers.push(`${dna.stories} stories (>3)`);
+  if (dna.is_high_rise === true) triggers.push("High-rise (>75 ft per FBC)");
+  const occ = (dna.occupancy_classification ?? "").toString();
+  const isAssembly = /\bA[-\s]?[1-5]\b/i.test(occ);
+  if (isAssembly && typeof dna.total_sq_ft === "number" && dna.total_sq_ft > 5000) {
+    triggers.push(`Assembly occupancy (${occ}) at ${dna.total_sq_ft.toLocaleString()} sf`);
+  }
+  if (triggers.length === 0) return;
+
+  // Skip if any existing finding already covers Special Inspections / 553.79.
+  const alreadyFlagged = currentRows.some((r) => {
+    const text = `${r.finding ?? ""} ${r.code_reference?.section ?? ""}`.toLowerCase();
+    return (
+      text.includes("553.79") ||
+      text.includes("special inspect") ||
+      text.includes("statement of special")
+    );
+  });
+  if (alreadyFlagged) return;
+
+  // Compute next def number for Structural.
+  const { data: existingRows } = await admin
+    .from("deficiencies_v2")
+    .select("def_number")
+    .eq("plan_review_id", planReviewId)
+    .eq("discipline", "structural")
+    .like("def_number", "DEF-S%");
+  let maxIdx = 0;
+  for (const r of (existingRows ?? []) as Array<{ def_number: string }>) {
+    const m = r.def_number?.match(/(\d+)$/);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (!isNaN(n) && n > maxIdx) maxIdx = n;
+    }
+  }
+  const defNumber = `DEF-S${String(maxIdx + 1).padStart(3, "0")}`;
+
+  await admin.from("deficiencies_v2").insert({
+    plan_review_id: planReviewId,
+    firm_id: pr.firm_id,
+    def_number: defNumber,
+    discipline: "structural",
+    sheet_refs: [],
+    code_reference: {
+      code: "FS",
+      section: "553.79(5)",
+      title: "Threshold Building — Statement of Special Inspections required",
+    },
+    finding:
+      `Project meets the F.S. 553.79(5) Threshold Building definition (${triggers.join("; ")}) ` +
+      `but the submittal does not include a Statement of Special Inspections signed by the Engineer of Record, ` +
+      `nor has a Special Inspector been designated for this review.`,
+    required_action:
+      "Provide a Statement of Special Inspections per FBC-B 1704.6 / 1705 listing the Special Inspector " +
+      "(name, FL license #) designated by the EOR. Record the designation under the Statutory Compliance panel before letter generation.",
+    evidence: [],
+    priority: "high",
+    life_safety_flag: true,
+    permit_blocker: true,
+    liability_flag: true,
+    requires_human_review: true,
+    human_review_reason: "Auto-generated from DNA threshold detection — verify against structural drawings.",
+    confidence_score: 0.95,
+    confidence_basis: "Deterministic check of project DNA against F.S. 553.79(5) thresholds.",
+    status: "open",
+  });
+
+  await admin.from("activity_log").insert({
+    event_type: "threshold_finding_emitted",
+    description: `Auto-emitted ${defNumber}: Threshold Building Statement of Special Inspections`,
+    project_id: pr.project_id,
+    firm_id: pr.firm_id,
+    actor_type: "system",
+    metadata: { plan_review_id: planReviewId, triggers, def_number: defNumber },
+  });
+}
+
 export async function stageDedupe(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
