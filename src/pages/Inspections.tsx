@@ -16,6 +16,7 @@ import { format, startOfWeek, addDays, isSameDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { Inspection } from "@/hooks/useInspections";
+import { InspectionReportEditor } from "@/components/inspections/InspectionReportEditor";
 
 const tradeChecklists: Record<string, { item: string; code: string }[]> = {
  building: [
@@ -322,7 +323,9 @@ export default function Inspections() {
  rows={4}
  readOnly={selectedInspection.result !== "pending"}
  />
- </div>
+  </div>
+
+  <InspectionReportEditor inspection={selectedInspection} />
 
  {selectedInspection.result === "pending" && (
  <div className="flex gap-2">
