@@ -65,6 +65,8 @@ import { sendCommentLetter } from "@/lib/send-comment-letter";
 import { fetchReadinessForSend } from "@/lib/letter-readiness-fetch";
 import { useFirmId } from "@/hooks/useFirmId";
 import type { ReadinessResult } from "@/lib/letter-readiness";
+import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
+import { deletePlanReview } from "@/lib/delete-plan-review";
 
 import { Wand2, AlertTriangle, Loader2 } from "lucide-react";
 
