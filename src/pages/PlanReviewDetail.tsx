@@ -951,6 +951,11 @@ export default function PlanReviewDetail() {
                 fileInputRef={fileInputRef}
                 onFileUpload={handleFileUpload}
                 showFileTabs
+                planReviewId={review.id}
+                onFileDeleted={() => {
+                  queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+                  queryClient.invalidateQueries({ queryKey: ["plan-review-page-asset-count", id] });
+                }}
               />
             </div>
           </ResizablePanel>
