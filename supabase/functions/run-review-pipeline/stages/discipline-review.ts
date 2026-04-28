@@ -264,9 +264,9 @@ async function runDisciplineChecks(
         .join("\n")
     : null;
 
-  if (relevantPatterns.length) {
+  if (allPatterns.length) {
     await admin.from("applied_corrections").insert(
-      relevantPatterns.map((p) => ({
+      allPatterns.map((p) => ({
         plan_review_id: planReviewId,
         firm_id: firmId,
         pattern_id: p.id,
