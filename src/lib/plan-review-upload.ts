@@ -6,6 +6,7 @@ import {
   type PreparedPageAsset,
 } from "@/lib/pdf-utils";
 import { startPipeline } from "@/lib/pipeline-run";
+import { sha256OfFile } from "@/lib/file-hash";
 
 /**
  * Upload plan-review files end-to-end:
@@ -75,11 +76,23 @@ export async function uploadPlanReviewFiles(
     throw new Error(warnings.join("; ") || "No valid PDF files to upload.");
   }
 
-  // 1. Upload PDFs.
+  // 1. Upload PDFs and capture SHA-256 fingerprints (Sprint 3 chain-of-custody).
+  // We hash BEFORE upload so a corrupted bucket-side write would surface as a
+  // hash-mismatch on the next download — the auditable contract is "this is
+  // the byte sequence the contractor's browser produced".
   onProgress?.({ phase: "Uploading PDFs…", prepared: 0, expected: 0 });
   const newFilePaths: string[] = [];
+  const fileHashes = new Map<string, { sha256: string; size: number }>();
   for (const file of acceptedFiles) {
     const path = `plan-reviews/${reviewId}/round-${round}/${file.name}`;
+    let sha256: string | null = null;
+    try {
+      sha256 = await sha256OfFile(file);
+    } catch (err) {
+      warnings.push(
+        `${file.name}: could not fingerprint (${err instanceof Error ? err.message : String(err)}); upload will continue without hash.`,
+      );
+    }
     const { error } = await supabase.storage
       .from("documents")
       .upload(path, file, { upsert: true, contentType: "application/pdf" });
@@ -88,6 +101,7 @@ export async function uploadPlanReviewFiles(
       continue;
     }
     newFilePaths.push(path);
+    if (sha256) fileHashes.set(path, { sha256, size: file.size });
   }
   if (newFilePaths.length === 0) {
     throw new Error(warnings.join("; ") || "All uploads failed.");
@@ -183,16 +197,22 @@ export async function uploadPlanReviewFiles(
     })
     .eq("id", reviewId);
 
-  // 4. plan_review_files audit rows.
+  // 4. plan_review_files audit rows — now stamped with SHA-256 + byte size
+  // so a downstream verifier can confirm the bucket bytes still match.
   const { error: filesErr } = await supabase
     .from("plan_review_files")
     .insert(
-      newFilePaths.map((fp) => ({
-        plan_review_id: reviewId,
-        file_path: fp,
-        round,
-        uploaded_by: userId,
-      })),
+      newFilePaths.map((fp) => {
+        const h = fileHashes.get(fp);
+        return {
+          plan_review_id: reviewId,
+          file_path: fp,
+          round,
+          uploaded_by: userId,
+          pdf_sha256: h?.sha256 ?? null,
+          file_size_bytes: h?.size ?? null,
+        };
+      }),
     );
   if (filesErr) warnings.push(`plan_review_files: ${filesErr.message}`);
 
