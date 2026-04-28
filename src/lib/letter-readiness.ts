@@ -327,6 +327,26 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
     });
   }
 
+  // 10. Sheet coverage — block when not every sheet was reviewed by every
+  // required discipline (firm setting, default on). Coverage < 100% means
+  // we'd be sending a letter with blind spots.
+  const coverageGateOn = input.blockLetterOnLowCoverage !== false;
+  if (coverageGateOn && typeof input.coveragePct === "number") {
+    const pct = input.coveragePct;
+    const covOk = pct >= 100;
+    checks.push({
+      id: "coverage",
+      required: true,
+      severity: covOk ? "ok" : "block",
+      title: covOk
+        ? "Every sheet reviewed by every required discipline"
+        : `Sheet coverage incomplete — ${Math.round(pct)}%`,
+      detail: covOk
+        ? "All expected sheets were examined by each discipline assigned to this review."
+        : `Some sheets were skipped by one or more disciplines. Re-run the AI check or attach the missing sheets before sending.`,
+    });
+  }
+
   const required = checks.filter((c) => c.required);
   const blockingCount = required.filter((c) => c.severity === "block").length;
   return {
