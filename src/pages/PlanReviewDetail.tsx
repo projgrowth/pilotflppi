@@ -154,6 +154,8 @@ export default function PlanReviewDetail() {
   const [aiRunning, setAiRunning] = useState(false);
   const [aiCompleteFlash, setAiCompleteFlash] = useState<number | null>(null);
   const [reprepping, setReprepping] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{
     phase: string;
     prepared: number;
