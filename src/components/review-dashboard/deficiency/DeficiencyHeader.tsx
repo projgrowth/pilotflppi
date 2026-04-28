@@ -95,6 +95,41 @@ export default function DeficiencyHeader({ planReviewId, def }: Props) {
           {def.permit_blocker && <Tag tone="warn">PERMIT BLOCKER</Tag>}
           {def.liability_flag && <Tag tone="caution">LIABILITY</Tag>}
           {def.requires_human_review && <Tag tone="accent">NEEDS HUMAN EYES</Tag>}
+          {conflictLink && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className="inline-flex cursor-help items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-400"
+                  aria-label={`Cross-discipline conflict with ${conflictLink.otherDef?.def_number ?? "another finding"}`}
+                >
+                  <GitMerge className="h-3 w-3" />
+                  XD CONFLICT
+                  {conflictLink.otherDef?.def_number && (
+                    <span className="font-mono opacity-80">
+                      ↔ {conflictLink.otherDef.def_number}
+                    </span>
+                  )}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs space-y-1 text-xs">
+                <div className="font-semibold">Cross-discipline conflict</div>
+                <div className="opacity-90">
+                  This finding is contradicted by{" "}
+                  <span className="font-mono">
+                    {conflictLink.otherDef?.def_number ?? "another finding"}
+                  </span>
+                  {conflictLink.otherDef?.discipline && (
+                    <> ({conflictLink.otherDef.discipline})</>
+                  )}
+                  . See{" "}
+                  <span className="font-mono">
+                    {conflictLink.conflictRow.def_number}
+                  </span>{" "}
+                  to reconcile.
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </div>
 
