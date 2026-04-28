@@ -21,8 +21,6 @@ import SettingsPage from "./pages/Settings";
 import ProjectDetail from "./pages/ProjectDetail";
 import NotFound from "./pages/NotFound";
 import Invoices from "./pages/Invoices";
-import Review from "./pages/Review";
-import ReviewDetail from "./pages/ReviewDetail";
 import DocumentsGen from "./pages/DocumentsGen";
 import Deficiencies from "./pages/Deficiencies";
 import Analytics from "./pages/Analytics";
@@ -66,14 +64,14 @@ const App = () => (
               <Route path="/projects/:id" element={<ProjectDetail />} />
               <Route path="/invoices" element={<Invoices />} />
               {/*
-                Review URL map:
-                  /review            → project list (Reviews tab)
-                  /review/:id        → redirect shim: finds-or-creates the latest plan_review row, forwards to /plan-review/:id
-                  /plan-review/:id   → main reviewer workspace (PDF + findings + letter)
-                  /plan-review/:id/dashboard → triage / health dashboard for that review
+                Review URL map (simplified):
+                  /projects                  → unified project list (was /review)
+                  /plan-review/:id           → main reviewer workspace
+                  /plan-review/:id/dashboard → triage / health dashboard
+                Legacy /review and /review/:id redirect to projects.
               */}
-              <Route path="/review" element={<Review />} />
-              <Route path="/review/:id" element={<ReviewDetail />} />
+              <Route path="/review" element={<Navigate to="/projects" replace />} />
+              <Route path="/review/:id" element={<Navigate to="/projects/:id" replace />} />
               <Route path="/pipelines" element={<PipelineActivity />} />
               <Route path="/plan-review/:id" element={<PlanReviewDetail />} />
               <Route path="/plan-review/:id/dashboard" element={<ReviewDashboard />} />
@@ -90,7 +88,7 @@ const App = () => (
 
             {/* Redirects for removed routes */}
             <Route path="/deadlines" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/plan-review" element={<Navigate to="/review" replace />} />
+            <Route path="/plan-review" element={<Navigate to="/projects" replace />} />
             <Route path="/ai-briefing" element={<Navigate to="/dashboard" replace />} />
 
             <Route path="*" element={<NotFound />} />

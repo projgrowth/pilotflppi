@@ -43,7 +43,6 @@ interface NavItem {
 const coreNav: NavItem[] = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
   { label: "Projects", path: "/projects", icon: FolderKanban },
-  { label: "Plan Review", path: "/review", icon: Search },
   { label: "Pipeline Activity", path: "/pipelines", icon: Activity },
   { label: "Settings", path: "/settings", icon: Settings },
 ];
@@ -65,7 +64,7 @@ const mainNav: NavItem[] = EXTRAS_ENABLED
 // Bottom tab bar items for mobile — focused trio.
 const bottomTabs: NavItem[] = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
-  { label: "Review", path: "/review", icon: Search },
+  { label: "Projects", path: "/projects", icon: FolderKanban },
   { label: "Pipelines", path: "/pipelines", icon: Activity },
 ];
 
