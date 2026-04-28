@@ -11,6 +11,7 @@ import { useState } from "react";
 import { Progress } from "@/components/ui/progress";
 import { PlanMarkupViewer } from "@/components/PlanMarkupViewer";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
+import { ProcessingOverlay } from "@/components/plan-review/ProcessingOverlay";
 import { deletePlanReviewFile } from "@/lib/delete-plan-review-file";
 import { toast } from "sonner";
 import type { PDFPageImage } from "@/lib/pdf-utils";
@@ -24,6 +25,14 @@ interface Props {
   renderProgress: number;
   uploading: boolean;
   uploadSuccess: boolean;
+  /**
+   * When true and the document set has been uploaded but the AI pipeline hasn't
+   * finished yet, render the full-canvas ProcessingOverlay instead of a tiny
+   * "Loading document…" spinner. Drives the "I can see what's happening" UX.
+   */
+  pipelineProcessing?: boolean;
+  onPipelineComplete?: () => void;
+  onOpenDashboard?: () => void;
 
   findings: Finding[];
   activeFindingIndex: number | null;
