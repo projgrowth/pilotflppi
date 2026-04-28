@@ -201,18 +201,44 @@ async function applyCrossRoundLineage(
     }
   }
 
-  if (carryovers.length === 0) return;
-
+  // Stamp round_diff_status on every current finding.
+  const carriedCurrentIds = new Set(carryovers.map((c) => c.currentId));
+  const newIds = currentRows.filter((r) => !carriedCurrentIds.has(r.id)).map((r) => r.id);
+  if (newIds.length > 0) {
+    await admin
+      .from("deficiencies_v2")
+      .update({ round_diff_status: "new" })
+      .in("id", newIds);
+  }
   for (const c of carryovers) {
     await admin
       .from("deficiencies_v2")
-      .update({ lineage_id: c.lineageId })
+      .update({ round_diff_status: "unresolved", lineage_id: c.lineageId })
       .eq("id", c.currentId);
   }
 
+  // Mark prior-round findings as resolved when no carryover matched them
+  // (and they aren't already terminal).
+  const resolvedPriorIds = priorEnriched
+    .filter(
+      (p) =>
+        !usedPrior.has(p.row.id) &&
+        p.row.status !== "resolved" &&
+        p.row.status !== "waived",
+    )
+    .map((p) => p.row.id);
+  if (resolvedPriorIds.length > 0) {
+    await admin
+      .from("deficiencies_v2")
+      .update({ round_diff_status: "resolved" })
+      .in("id", resolvedPriorIds);
+  }
+
+  if (carryovers.length === 0 && resolvedPriorIds.length === 0) return;
+
   await admin.from("activity_log").insert({
     event_type: "lineage_carryover",
-    description: `Linked ${carryovers.length} Round ${pr.round} finding${carryovers.length === 1 ? "" : "s"} to Round ${prior.round} lineage`,
+    description: `Round ${pr.round} diff vs Round ${prior.round}: ${carryovers.length} carried over, ${resolvedPriorIds.length} resolved, ${newIds.length} new`,
     project_id: pr.project_id,
     firm_id: pr.firm_id,
     actor_type: "system",
@@ -222,6 +248,8 @@ async function applyCrossRoundLineage(
       prior_round: prior.round,
       current_round: pr.round,
       carryovers: carryovers.slice(0, 200),
+      resolved_prior_count: resolvedPriorIds.length,
+      new_count: newIds.length,
     },
   });
 }
