@@ -285,7 +285,9 @@ Do NOT re-flag these unless you have strong new evidence on the plans:
 ${learnedText}\n`
     : "";
 
-  const systemPrompt = composeDisciplineSystemPrompt(ctx.discipline);
+  const systemPrompt = composeDisciplineSystemPrompt(ctx.discipline, {
+    missingDisciplines: ctx.missingDisciplines,
+  });
 
   const useTypeLine = ctx.useType === "residential"
     ? `## Project Use Type
