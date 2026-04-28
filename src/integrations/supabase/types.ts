@@ -664,6 +664,7 @@ export type Database = {
       fbc_code_sections: {
         Row: {
           code: string
+          code_family: string
           created_at: string
           edition: string
           embedded_at: string | null
@@ -678,6 +679,7 @@ export type Database = {
         }
         Insert: {
           code?: string
+          code_family?: string
           created_at?: string
           edition?: string
           embedded_at?: string | null
@@ -692,6 +694,7 @@ export type Database = {
         }
         Update: {
           code?: string
+          code_family?: string
           created_at?: string
           edition?: string
           embedded_at?: string | null
@@ -1403,6 +1406,9 @@ export type Database = {
           qc_status: string
           reviewer_id: string | null
           round: number
+          special_inspector_designated: boolean
+          special_inspector_license: string | null
+          special_inspector_name: string | null
           stage_checkpoints: Json
           updated_at: string
         }
@@ -1427,6 +1433,9 @@ export type Database = {
           qc_status?: string
           reviewer_id?: string | null
           round?: number
+          special_inspector_designated?: boolean
+          special_inspector_license?: string | null
+          special_inspector_name?: string | null
           stage_checkpoints?: Json
           updated_at?: string
         }
@@ -1451,6 +1460,9 @@ export type Database = {
           qc_status?: string
           reviewer_id?: string | null
           round?: number
+          special_inspector_designated?: boolean
+          special_inspector_license?: string | null
+          special_inspector_name?: string | null
           stage_checkpoints?: Json
           updated_at?: string
         }

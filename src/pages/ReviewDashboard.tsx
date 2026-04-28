@@ -36,6 +36,7 @@ import LetterReadinessGate from "@/components/plan-review/LetterReadinessGate";
 import LetterSnapshotViewer from "@/components/plan-review/LetterSnapshotViewer";
 import StatutoryCompliancePanel from "@/components/plan-review/StatutoryCompliancePanel";
 import { CRITICAL_DNA_FIELDS } from "@/lib/dna-fields";
+import { detectThresholdBuilding } from "@/lib/threshold-building";
 import { useLetterQualityCheck } from "@/hooks/useLetterQualityCheck";
 import {
   useDeficienciesV2,
@@ -60,6 +61,9 @@ interface ReviewWithProject {
   comment_letter_draft: string | null;
   notice_to_building_official_filed_at: string | null;
   compliance_affidavit_signed_at: string | null;
+  special_inspector_designated: boolean | null;
+  special_inspector_name: string | null;
+  special_inspector_license: string | null;
   project: {
     name: string;
     address: string;
@@ -86,7 +90,7 @@ export default function ReviewDashboard() {
       const { data, error } = await supabase
         .from("plan_reviews")
         .select(
-          "id, project_id, round, qc_status, comment_letter_draft, notice_to_building_official_filed_at, compliance_affidavit_signed_at, project:projects(name, address, jurisdiction, county)",
+          "id, project_id, round, qc_status, comment_letter_draft, notice_to_building_official_filed_at, compliance_affidavit_signed_at, special_inspector_designated, special_inspector_name, special_inspector_license, project:projects(name, address, jurisdiction, county)",
         )
         .eq("id", id!)
         .maybeSingle();
@@ -482,6 +486,11 @@ export default function ReviewDashboard() {
           round={review.round}
           noticeFiledAt={review.notice_to_building_official_filed_at}
           affidavitSignedAt={review.compliance_affidavit_signed_at}
+          isThresholdBuilding={detectThresholdBuilding(dna).isThresholdBuilding}
+          thresholdTriggers={detectThresholdBuilding(dna).triggers}
+          specialInspectorDesignated={!!review.special_inspector_designated}
+          specialInspectorName={review.special_inspector_name}
+          specialInspectorLicense={review.special_inspector_license}
         />
       )}
 
@@ -503,6 +512,9 @@ export default function ReviewDashboard() {
             ),
           )}
           reviewerLicensedDisciplines={reviewerLicensedDisciplines}
+          isThresholdBuilding={detectThresholdBuilding(dna).isThresholdBuilding}
+          thresholdTriggers={detectThresholdBuilding(dna).triggers}
+          specialInspectorDesignated={!!review?.special_inspector_designated}
           onJumpToFinding={() => setActiveTab("triage")}
         />
       )}

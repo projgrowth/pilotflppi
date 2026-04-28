@@ -30,7 +30,8 @@ export interface ReadinessCheck {
     | "project_dna"
     | "notice_filed"
     | "affidavit_signed"
-    | "reviewer_licensed";
+    | "reviewer_licensed"
+    | "threshold_special_inspector";
   severity: ReadinessSeverity;
   /** Required vs advisory — only required checks gate the export button. */
   required: boolean;
@@ -68,6 +69,13 @@ export interface ReadinessInput {
   /** Disciplines the signing reviewer is licensed for (lowercase keys
    *  from profiles.discipline_licenses). Empty array = no licenses on file. */
   reviewerLicensedDisciplines: string[];
+  /** F.S. 553.79(5): true when DNA detected the project meets the threshold-
+   *  building definition (>3 stories, >50 ft, or >5,000 sf assembly w/ >500 occ). */
+  isThresholdBuilding: boolean;
+  /** Triggers that classified the project as a threshold building, for the UI detail. */
+  thresholdTriggers: string[];
+  /** Has the EOR designated a Special Inspector for this threshold building? */
+  specialInspectorDesignated: boolean;
 }
 
 export interface ReadinessResult {
@@ -257,6 +265,28 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
         ? "F.S. 553.791(2) requires the signing reviewer to hold the appropriate Florida professional license for each discipline reviewed."
         : `Add a license number under your profile for: ${uniqueUncovered.join(", ")}. Until then this letter cannot be sent under your signature.`,
   });
+
+  // 9. Threshold building Special Inspector (F.S. 553.79(5)) — required when
+  // DNA classified the project as a threshold building. Florida law requires
+  // the EOR to designate a Special Inspector for these projects; without it,
+  // the private provider cannot recommend permit issuance.
+  if (input.isThresholdBuilding) {
+    const ok = input.specialInspectorDesignated;
+    const triggers = input.thresholdTriggers.length > 0
+      ? input.thresholdTriggers.join("; ")
+      : "DNA threshold thresholds met";
+    checks.push({
+      id: "threshold_special_inspector",
+      required: true,
+      severity: ok ? "ok" : "block",
+      title: ok
+        ? "Threshold building — Special Inspector on record"
+        : "Threshold building — Special Inspector not designated",
+      detail: ok
+        ? `F.S. 553.79(5) Special Inspector designation recorded. Triggers: ${triggers}.`
+        : `F.S. 553.79(5) requires the Engineer of Record to designate a Special Inspector for threshold buildings. Triggers: ${triggers}. Record the designation under the Statutory Compliance panel.`,
+    });
+  }
 
   const required = checks.filter((c) => c.required);
   const blockingCount = required.filter((c) => c.severity === "block").length;
