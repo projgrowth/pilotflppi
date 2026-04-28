@@ -335,6 +335,54 @@ ${buildSupplementalSections(config)}
   </div>
 </div>
 
+${(() => {
+  // Evidence Appendix (Exhibit A): a consolidated, page-broken section listing
+  // every finding's visual evidence crop with finding number, sheet ref, code
+  // citation, and severity. AHJ reviewers can scan all evidence in one place
+  // without flipping through the body of the letter. Findings without an
+  // evidence crop URL are still listed (with a "no crop available" note) so
+  // the appendix is a complete index of the letter's findings.
+  if (findings.length === 0) return "";
+  let n = 0;
+  const rows = DISCIPLINE_ORDER.filter((d) => grouped[d])
+    .map((discipline) => {
+      const items = grouped[discipline];
+      return items
+        .map(({ finding }) => {
+          n++;
+          const status = (finding.finding_id && findingStatuses[finding.finding_id]) || "open";
+          const sevClass = `sev-${finding.severity}`;
+          return `
+<div class="appendix-item">
+  <div class="appendix-meta">
+    <span class="appendix-num">Exhibit ${n}</span>
+    <span class="finding-severity ${sevClass}">${finding.severity.toUpperCase()}</span>
+    ${status !== "open" ? `<span class="status-tag status-${status}">${status.toUpperCase()}</span>` : ""}
+    <span class="appendix-disc">${getDisciplineLabel(discipline)}</span>
+  </div>
+  <div class="appendix-refs">
+    <span class="code-ref">${finding.code_ref}</span>
+    <span class="appendix-sheet">Sheet: ${finding.page}</span>
+  </div>
+  ${finding.evidence_crop_url
+    ? `<img src="${finding.evidence_crop_url}" alt="Evidence for finding ${n} (${finding.code_ref}) on sheet ${finding.page}" class="appendix-img" />`
+    : `<div class="appendix-no-crop">No visual crop available — refer to ${finding.page} in the full plan set.</div>`}
+  <div class="appendix-caption">${finding.description}</div>
+</div>`;
+        })
+        .join("");
+    })
+    .join("");
+  return `
+<div class="appendix-divider"></div>
+<div class="appendix-cover">
+  <h2>Exhibit A — Evidence Appendix</h2>
+  <p>The following pages reproduce visual evidence for each numbered finding in this letter. Each exhibit corresponds to the finding number in the body. This appendix is provided so the Authority Having Jurisdiction can verify each citation against the actual plan markup without flipping back to the source set.</p>
+  <p class="appendix-cover-meta">${findings.length} finding${findings.length === 1 ? "" : "s"} · ${findings.filter((f) => f.evidence_crop_url).length} visual crop${findings.filter((f) => f.evidence_crop_url).length === 1 ? "" : "s"}</p>
+</div>
+<div class="appendix-list">${rows}</div>`;
+})()}
+
 <div class="footer">
   ${firm.firm_name || "[Firm Name]"} | Licensed Private Provider under F.S. 553.791 | This document is confidential and intended for the addressee only.
 </div>
