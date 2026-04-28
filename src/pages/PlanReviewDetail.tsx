@@ -517,8 +517,6 @@ export default function PlanReviewDetail() {
   const hasFindings = findings.length > 0;
   const openDashboard = () => navigate(`/plan-review/${review.id}/dashboard`);
 
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const projectName = review.project?.name || "this review";
   const handleDeleteReview = async () => {
     if (!user || !review) return;
