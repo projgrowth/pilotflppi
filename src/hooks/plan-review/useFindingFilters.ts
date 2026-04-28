@@ -11,13 +11,15 @@ import { useMemo } from "react";
 import { DISCIPLINE_ORDER } from "@/lib/county-utils";
 import type { Finding } from "@/components/FindingCard";
 import type { FindingStatus } from "@/components/FindingStatusFilter";
-import type { ConfidenceFilter } from "@/components/BulkTriageFilters";
+import type { ConfidenceFilter, QualityFilter } from "@/components/BulkTriageFilters";
 
 export interface FindingFilterState {
   status: FindingStatus | "all";
   confidence: ConfidenceFilter;
   discipline: string | "all";
   sheet: string | "all";
+  /** Optional Quality filter — surfaces AI verifier / citation issues. */
+  quality?: QualityFilter;
 }
 
 function groupFindingsByDiscipline(findings: Finding[]): Record<string, Finding[]> {
@@ -41,14 +43,26 @@ export function useFindingFilters(
     // treated as "open" — they can't have a stored status anyway.
     const statusOf = (f: Finding) => (f.finding_id ? findingStatuses[f.finding_id] || "open" : "open");
 
+    const isUnverified = (f: Finding) =>
+      !f.verification_status || f.verification_status === "unverified";
+    const isHallucinated = (f: Finding) => f.citation_status === "hallucinated";
+
     const filtered = findings.filter((f) => {
       if (filters.status !== "all" && statusOf(f) !== filters.status) return false;
       if (filters.confidence !== "all" && (f.confidence || "low") !== filters.confidence) return false;
       if (filters.discipline !== "all" && (f.discipline || "structural") !== filters.discipline) return false;
       if (filters.sheet !== "all" && (f.page || "Unknown").trim() !== filters.sheet) return false;
+      if (filters.quality === "unverified" && !isUnverified(f)) return false;
+      if (filters.quality === "hallucinated" && !isHallucinated(f)) return false;
       return true;
     });
     const filteredGrouped = groupFindingsByDiscipline(filtered);
+
+    const qualityCounts: Record<QualityFilter, number> = {
+      all: findings.length,
+      unverified: findings.filter(isUnverified).length,
+      hallucinated: findings.filter(isHallucinated).length,
+    };
 
     const confidenceCounts: Record<ConfidenceFilter, number> = {
       all: findings.length,
@@ -94,6 +108,7 @@ export function useFindingFilters(
       filtered,
       filteredGrouped,
       confidenceCounts,
+      qualityCounts,
       disciplinesPresent,
       sheetsPresent,
       visibleIndices,
@@ -106,7 +121,7 @@ export function useFindingFilters(
       deferredCount,
       globalIndexMap,
     };
-  }, [findings, findingStatuses, filters.status, filters.confidence, filters.discipline, filters.sheet]);
+  }, [findings, findingStatuses, filters.status, filters.confidence, filters.discipline, filters.sheet, filters.quality]);
 }
 
 /**

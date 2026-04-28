@@ -16,6 +16,7 @@ import { CheckCheck, Clock, ArrowRightLeft, SlidersHorizontal, X } from "lucide-
 import type { FindingStatus } from "@/types";
 
 export type ConfidenceFilter = "high" | "medium" | "low" | "all";
+export type QualityFilter = "all" | "unverified" | "hallucinated";
 
 interface Props {
   statusCounts: Record<FindingStatus | "all", number>;
@@ -37,6 +38,13 @@ interface Props {
   visibleCount: number;
   allVisibleResolved: boolean;
   onMarkVisibleResolved: () => void;
+
+  /** Optional Quality filter (Phase 4 hardening). When provided, exposes
+   *  Unverified / Hallucinated chips so reviewers can triage AI quality
+   *  issues directly. Counts of 0 hide the corresponding chip. */
+  qualityCounts?: Record<QualityFilter, number>;
+  qualityFilter?: QualityFilter;
+  onQualityFilterChange?: (q: QualityFilter) => void;
 }
 
 const statusMeta: Record<FindingStatus | "all", { label: string; icon?: typeof CheckCheck; cls: string }> = {
@@ -66,7 +74,12 @@ export function BulkTriageFilters({
   disciplines, disciplineFilter, onDisciplineFilterChange,
   sheets, sheetFilter, onSheetFilterChange,
   visibleCount, allVisibleResolved, onMarkVisibleResolved,
+  qualityCounts, qualityFilter = "all", onQualityFilterChange,
 }: Props) {
+  const showQuality =
+    !!onQualityFilterChange &&
+    !!qualityCounts &&
+    ((qualityCounts.unverified ?? 0) > 0 || (qualityCounts.hallucinated ?? 0) > 0 || qualityFilter !== "all");
   const secondaryActiveCount =
     (confidenceFilter !== "all" ? 1 : 0) +
     (disciplineFilter !== "all" ? 1 : 0) +
@@ -102,6 +115,40 @@ export function BulkTriageFilters({
           </button>
         );
       })}
+
+      {/* Quality chips — only visible when AI flagged unverified or
+          hallucinated findings (Phase 4 hardening). */}
+      {showQuality && qualityCounts && onQualityFilterChange && (
+        <>
+          <span className="mx-0.5 h-3 w-px bg-border/60" aria-hidden />
+          {(["unverified", "hallucinated"] as const).map((key) => {
+            const count = qualityCounts[key] ?? 0;
+            if (count === 0 && qualityFilter !== key) return null;
+            const active = qualityFilter === key;
+            const label = key === "unverified" ? "Unverified" : "Hallucinated";
+            return (
+              <button
+                key={key}
+                onClick={() => onQualityFilterChange(active ? "all" : key)}
+                title={
+                  key === "unverified"
+                    ? "AI verifier didn't reach a verdict — needs human eyes"
+                    : "Cited FBC section couldn't be matched to the canonical library"
+                }
+                className={cn(
+                  "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition-all border",
+                  active
+                    ? "bg-destructive/10 text-destructive border-destructive/25"
+                    : "bg-transparent text-muted-foreground/60 border-transparent hover:bg-muted/50",
+                )}
+              >
+                {label}
+                <span className="opacity-70">{count}</span>
+              </button>
+            );
+          })}
+        </>
+      )}
 
       {/* Secondary filters tucked into popover */}
       {hasSecondary && (

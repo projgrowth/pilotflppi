@@ -37,6 +37,9 @@ export interface DeficiencyV2Lite {
   requires_human_review: boolean;
   human_review_reason: string | null;
   verification_status: string;
+  /** Citation grounding result from the ground-citations stage:
+   *  verified | verified_stub | mismatch | hallucinated | no_citation_required | unverified. */
+  citation_status?: string | null;
   status: string;
   model_version: string | null;
   /** Signed URL of the cited sheet image, attached by the ground_citations stage. */
@@ -207,6 +210,8 @@ export function adaptV2ToFindings(
       resolved: resolvedFromV2(d),
       model_version: d.model_version ?? undefined,
       evidence_crop_url: d.evidence_crop_url ?? null,
+      verification_status: d.verification_status ?? null,
+      citation_status: d.citation_status ?? null,
       markup,
     };
   });

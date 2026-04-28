@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sparkles, Upload } from "lucide-react";
 import { FindingCard, type Finding } from "@/components/FindingCard";
-import { BulkTriageFilters, type ConfidenceFilter } from "@/components/BulkTriageFilters";
+import { BulkTriageFilters, type ConfidenceFilter, type QualityFilter } from "@/components/BulkTriageFilters";
 import { ConfidenceMeter } from "@/components/shared/ConfidenceMeter";
 import type { FindingStatus } from "@/components/FindingStatusFilter";
 import {
@@ -75,12 +75,15 @@ interface Props {
   onDisciplineFilterChange: (d: string | "all") => void;
   sheetFilter: string | "all";
   onSheetFilterChange: (s: string | "all") => void;
+  qualityFilter?: QualityFilter;
+  onQualityFilterChange?: (q: QualityFilter) => void;
 
   // Roll-ups
   openCount: number;
   resolvedCount: number;
   deferredCount: number;
   confidenceCounts: Record<ConfidenceFilter, number>;
+  qualityCounts?: Record<QualityFilter, number>;
   disciplinesPresent: string[];
   sheetsPresent: string[];
   allVisibleResolved: boolean;
@@ -156,6 +159,9 @@ export function FindingsListPanel(props: Props) {
         visibleCount={props.filteredFindings.length}
         allVisibleResolved={props.allVisibleResolved}
         onMarkVisibleResolved={props.onMarkVisibleResolved}
+        qualityCounts={props.qualityCounts}
+        qualityFilter={props.qualityFilter}
+        onQualityFilterChange={props.onQualityFilterChange}
       />
       {props.hasRoundDiff && (
         <div className="rounded-md border border-accent/30 bg-accent/5 px-2.5 py-1.5 flex items-center gap-3 text-2xs">

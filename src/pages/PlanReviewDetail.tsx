@@ -45,7 +45,7 @@ import { isTypingTarget } from "@/lib/review-shortcuts";
 import { type Finding } from "@/components/FindingCard";
 import { SeverityDonut } from "@/components/SeverityDonut";
 import { FindingStatusFilter, type FindingStatus } from "@/components/FindingStatusFilter";
-import { type ConfidenceFilter } from "@/components/BulkTriageFilters";
+import { type ConfidenceFilter, type QualityFilter } from "@/components/BulkTriageFilters";
 import { DisciplineChecklist } from "@/components/DisciplineChecklist";
 import { SitePlanChecklist } from "@/components/SitePlanChecklist";
 import { isHVHZ } from "@/lib/county-utils";
@@ -142,6 +142,7 @@ export default function PlanReviewDetail() {
   const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilter>("all");
   const [disciplineFilter, setDisciplineFilter] = useState<string | "all">("all");
   const [sheetFilter, setSheetFilter] = useState<string | "all">("all");
+  const [qualityFilter, setQualityFilter] = useState<QualityFilter>("all");
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [repositioningIndex, setRepositioningIndex] = useState<number | null>(null);
@@ -434,6 +435,7 @@ export default function PlanReviewDetail() {
     confidence: confidenceFilter,
     discipline: disciplineFilter,
     sheet: sheetFilter,
+    quality: qualityFilter,
   };
   const f = useFindingFilters(findings, findingStatuses, filterState);
   const previousFindings = (review?.previous_findings as Finding[] | undefined) || [];
@@ -612,10 +614,13 @@ export default function PlanReviewDetail() {
     onDisciplineFilterChange: setDisciplineFilter,
     sheetFilter,
     onSheetFilterChange: setSheetFilter,
+    qualityFilter,
+    onQualityFilterChange: setQualityFilter,
     openCount: f.openCount,
     resolvedCount: f.resolvedCount,
     deferredCount: f.deferredCount,
     confidenceCounts: f.confidenceCounts,
+    qualityCounts: f.qualityCounts,
     disciplinesPresent: f.disciplinesPresent,
     sheetsPresent: f.sheetsPresent,
     allVisibleResolved: f.allVisibleResolved,
