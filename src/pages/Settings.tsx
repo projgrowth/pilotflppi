@@ -195,9 +195,10 @@ export default function SettingsPage() {
  const { error } = await supabase
  .from("firm_settings")
  .update({ jurisdictions: jurisdictions as unknown as Json })
- .eq("user_id", user.id);
+ .eq("id", firmSettings.id);
  if (error) throw error;
  } else {
+ // firm_id is auto-populated by trigger; user_id retained for audit
  const { error } = await supabase
  .from("firm_settings")
  .insert({ user_id: user.id, firm_name: "", jurisdictions: jurisdictions as unknown as Json });
