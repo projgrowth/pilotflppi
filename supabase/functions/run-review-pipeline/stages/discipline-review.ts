@@ -10,6 +10,7 @@ import { composeDisciplineSystemPrompt } from "../discipline-experts.ts";
 
 import { createClient } from "../_shared/supabase.ts";
 import { callAI } from "../_shared/ai.ts";
+import { embedText } from "../_shared/embedding.ts";
 import { signedSheetUrls } from "../_shared/storage.ts";
 import { recordPipelineError } from "../_shared/pipeline-status.ts";
 import {
@@ -204,8 +205,58 @@ async function runDisciplineChecks(
     (!p.construction_type || p.construction_type === constructionType)
   ).slice(0, 12);
 
-  const learnedText = relevantPatterns.length
-    ? relevantPatterns
+  // ---- Semantic recall: pull patterns by meaning, not just by section. ----
+  // Builds a discipline + checklist signature, embeds it once per chunk, and
+  // queries match_correction_patterns. De-duped against the section-keyed
+  // results above so we don't double-list the same row in the prompt.
+  const seenPatternIds = new Set(relevantPatterns.map((p) => p.id));
+  const semanticPatterns: typeof relevantPatterns = [];
+  try {
+    const semanticSignature = `${ctx.discipline} review for ${occupancy ?? "unknown occupancy"} ${constructionType ?? ""} project. Common deficiencies: ${checklist.slice(0, 8).map((c) => c.description).join("; ")}`.slice(0, 1000);
+    const queryVec = await embedText(semanticSignature);
+    if (queryVec) {
+      const { data: semData } = await admin.rpc("match_correction_patterns", {
+        query_vector: queryVec as unknown as string,
+        match_threshold: 0.72,
+        match_count: 8,
+        p_firm_id: firmId,
+        p_discipline: ctx.discipline,
+      });
+      const semRows = (semData ?? []) as Array<{
+        id: string;
+        pattern_summary: string;
+        original_finding: string;
+        reason_notes: string;
+        rejection_count: number;
+        confirm_count: number;
+        similarity: number;
+      }>;
+      for (const r of semRows) {
+        if (seenPatternIds.has(r.id)) continue;
+        // Reliability gate matches the section-keyed branch.
+        if ((r.rejection_count ?? 0) - (r.confirm_count ?? 0) <= 0) continue;
+        seenPatternIds.add(r.id);
+        semanticPatterns.push({
+          id: r.id,
+          pattern_summary: r.pattern_summary,
+          original_finding: r.original_finding,
+          code_reference: null,
+          reason_notes: r.reason_notes,
+          rejection_count: r.rejection_count,
+          confirm_count: r.confirm_count,
+          occupancy_classification: null,
+          construction_type: null,
+          score: (r.rejection_count ?? 0) - (r.confirm_count ?? 0),
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("[discipline_review] semantic pattern recall failed (non-fatal):", err);
+  }
+  const allPatterns = [...relevantPatterns, ...semanticPatterns].slice(0, 16);
+
+  const learnedText = allPatterns.length
+    ? allPatterns
         .map(
           (p, i) =>
             `${i + 1}. ${p.pattern_summary}${p.reason_notes ? ` — Note: ${p.reason_notes}` : ""} (rejected ${p.rejection_count}× by senior reviewers)`,
