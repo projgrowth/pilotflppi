@@ -914,6 +914,7 @@ export type Database = {
           closing_language: string | null
           created_at: string
           email: string | null
+          firm_id: string | null
           firm_name: string
           id: string
           jurisdictions: Json | null
@@ -931,6 +932,7 @@ export type Database = {
           closing_language?: string | null
           created_at?: string
           email?: string | null
+          firm_id?: string | null
           firm_name?: string
           id?: string
           jurisdictions?: Json | null
@@ -948,6 +950,7 @@ export type Database = {
           closing_language?: string | null
           created_at?: string
           email?: string | null
+          firm_id?: string | null
           firm_name?: string
           id?: string
           jurisdictions?: Json | null
@@ -957,7 +960,15 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "firm_settings_firm_id_fkey"
+            columns: ["firm_id"]
+            isOneToOne: false
+            referencedRelation: "firms"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       firms: {
         Row: {

@@ -39,10 +39,10 @@ export function useFirmSettings() {
     queryKey: ["firm-settings", user?.id],
     queryFn: async () => {
       if (!user) return null;
+      // RLS scopes row to caller's firm; one row per firm enforced by unique index
       const { data, error } = await supabase
         .from("firm_settings")
         .select("*")
-        .eq("user_id", user.id)
         .maybeSingle();
       if (error) throw error;
       return data as FirmSettings | null;
@@ -58,9 +58,10 @@ export function useFirmSettings() {
         const { error } = await supabase
           .from("firm_settings")
           .update(updates)
-          .eq("user_id", user.id);
+          .eq("id", query.data.id);
         if (error) throw error;
       } else {
+        // firm_id is auto-populated by trigger; user_id retained for audit
         const { error } = await supabase
           .from("firm_settings")
           .insert({ user_id: user.id, ...DEFAULT_FIRM, ...updates });
