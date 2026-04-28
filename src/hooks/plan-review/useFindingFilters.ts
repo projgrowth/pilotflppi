@@ -11,13 +11,15 @@ import { useMemo } from "react";
 import { DISCIPLINE_ORDER } from "@/lib/county-utils";
 import type { Finding } from "@/components/FindingCard";
 import type { FindingStatus } from "@/components/FindingStatusFilter";
-import type { ConfidenceFilter } from "@/components/BulkTriageFilters";
+import type { ConfidenceFilter, QualityFilter } from "@/components/BulkTriageFilters";
 
 export interface FindingFilterState {
   status: FindingStatus | "all";
   confidence: ConfidenceFilter;
   discipline: string | "all";
   sheet: string | "all";
+  /** Optional Quality filter — surfaces AI verifier / citation issues. */
+  quality?: QualityFilter;
 }
 
 function groupFindingsByDiscipline(findings: Finding[]): Record<string, Finding[]> {
