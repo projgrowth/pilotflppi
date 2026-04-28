@@ -295,7 +295,12 @@ export function PipelineProgressStepper({
                     );
                   })()
                 ) : status === "running" && hint ? (
-                  <span className="ml-2 text-xs text-muted-foreground">{hint}…</span>
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {hint}…
+                    {row?.updated_at ? (
+                      <LastActivity updatedAt={row.updated_at} />
+                    ) : null}
+                  </span>
                 ) : status === "complete" && hint ? (
                   <span className="ml-2 text-xs text-muted-foreground">{hint}</span>
                 ) : null}
