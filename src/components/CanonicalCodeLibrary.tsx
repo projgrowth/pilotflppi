@@ -60,6 +60,28 @@ export function CanonicalCodeLibrary() {
 
   const stubs = useMemo(() => (rows ?? []).filter((r) => isStub(r.requirement_text)), [rows]);
   const realRows = useMemo(() => (rows ?? []).filter((r) => !isStub(r.requirement_text)), [rows]);
+  const unembedded = useMemo(
+    () => (rows ?? []).filter((r) => !r.embedded_at && !isStub(r.requirement_text)).length,
+    [rows],
+  );
+  const [embedRunning, setEmbedRunning] = useState(false);
+
+  const runEmbedBatch = async () => {
+    setEmbedRunning(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("embed-fbc-sections", {
+        body: { limit: 200 },
+      });
+      if (error) throw error;
+      const r = data as { embedded?: number; failed?: number; requested?: number };
+      toast.success(`Embedded ${r.embedded ?? 0} sections (${r.failed ?? 0} failed, ${r.requested ?? 0} requested)`);
+      qc.invalidateQueries({ queryKey: ["canonical-sections"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Embed batch failed");
+    } finally {
+      setEmbedRunning(false);
+    }
+  };
 
   useEffect(() => {
     if (!selected) return;
