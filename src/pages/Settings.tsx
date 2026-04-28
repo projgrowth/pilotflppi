@@ -132,9 +132,33 @@ export default function SettingsPage() {
  } catch (err) {
  toast.error(err instanceof Error ? err.message : "Failed to save");
  } finally {
- setSaving(false);
- }
- };
+  setSaving(false);
+  }
+  };
+
+  const saveLicenses = async () => {
+    if (!user) return;
+    setSavingLicenses(true);
+    try {
+      const cleaned: Record<string, string> = {};
+      for (const [k, v] of Object.entries(licenseMap)) {
+        const trimmed = (v ?? "").trim();
+        if (trimmed) cleaned[k] = trimmed;
+      }
+      const { error } = await supabase
+        .from("profiles")
+        .update({ discipline_licenses: cleaned })
+        .eq("id", user.id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ["profile"] });
+      queryClient.invalidateQueries({ queryKey: ["reviewer_discipline_licenses_self"] });
+      toast.success("Licenses updated");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSavingLicenses(false);
+    }
+  };
 
  const handleSaveFirm = () => {
  saveFirmSettings({
