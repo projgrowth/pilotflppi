@@ -1,74 +1,94 @@
-## Sprint 2 — P1: Code coverage gaps + threshold automation ✅ shipped (auto-finding deferred to Sprint 3)
 
-Sprint 1 closed the statutory filing/license gates. Sprint 2 closes the **code authority** gaps a Florida private provider can be cited for: incomplete fire code coverage (NFPA 1 / NFPA 101 / FFPC), missing threshold-building detection (F.S. 553.79(5)), and reviewer guidance that still treats accessibility as ADA-first instead of FBC Ch. 11 + FAC 61G20-first.
+## Sprint 4 — Private Provider Inspections Compliance (F.S. 553.791(5)(8)(10))
 
-### What goes in this sprint
+### Why this is the next best improvement
 
-**1. Fire code coverage — add NFPA 1, NFPA 101, FFPC to the canonical library**
+A Florida Private Provider under F.S. 553.791 is licensed to perform **two** services: plan review (which Sprints 1–3 have now hardened) **and** building inspections. Today the platform is excellent at the plan-review half but the inspections half (`Inspections.tsx`) is a plain checklist with **none** of the statutory plumbing — no Notice to AHJ for inspections, no Inspection Report submitted to the building official, no Certificate of Compliance at completion, no required-inspections matrix per F.S. 553.79(5), and no chain-of-custody on inspection photos. That's the single biggest "would get our license suspended" gap left in the product.
 
-Today the canonical sections table (`fbc_code_sections`) only carries FBC families. Florida adopts NFPA 1 (Fire Code) and NFPA 101 (Life Safety Code) by reference through the Florida Fire Prevention Code (FFPC, 7th Ed., F.A.C. 69A-60). A Life Safety finding that cites only FBC-B Ch. 10 will get rejected by AHJ fire reviewers.
+This sprint mirrors the Sprint 1–3 statutory rigor on the inspections side so a private provider can defensibly issue a **Certificate of Compliance** — the document the AHJ actually needs to issue the CO.
 
-- Migration: extend the `code` enum / check on `fbc_code_sections` to accept `NFPA1`, `NFPA101`, `FFPC`. Add a `code_family` column (`building` | `fire` | `accessibility` | `energy` | `mechanical` | `plumbing` | `electrical`) so the grounder can prioritize the right family per discipline.
-- Seed ~80 of the most-cited NFPA 101 / NFPA 1 sections (egress capacity, common path, dead-ends, occupant load by occupancy, fire alarm thresholds, sprinkler thresholds, hazardous-area protection). These are the sections AHJ fire reviewers cite back at private providers most often.
-- Update `stages/ground-citations.ts` so when a finding's discipline is `LifeSafety` or `FireProtection`, the matcher considers fire-family canonicals first, falls back to FBC.
-- Update Life Safety + Fire Protection expert prompts in `discipline-experts.ts` to require **dual-citation** when applicable (e.g., "FBC-B 1006.2.1 / NFPA 101 7.6") and explicitly say "If FFPC is more stringent, FFPC controls."
+### Scope
 
-**2. Accessibility expert — promote FBC Ch. 11 + FAC 61G20 over 2010 ADA**
+**1. Required-inspections matrix per project (F.S. 553.79 + FBC 110)**
 
-The current Accessibility persona already mentions FAC, but its `checkDomains` and example citations still default to ADA section numbering. Florida private providers must cite **FBC Chapter 11** (which adopts FAC) as the primary authority; ADA is federal civil-rights law, not the permit code.
+Today inspections are ad-hoc. Statute requires specific inspections per occupancy/scope (footing, slab, framing, rough-in MEP, insulation, final, plus threshold-building structural inspections by the Special Inspector). We'll generate the required list automatically from the same DNA the plan-review pipeline already extracts.
 
-- Reorder Accessibility `checkDomains` so every bullet leads with `FBC 11-` or `FAC 61G20-` and only references `2010 ADA` parenthetically.
-- Add failure-mode: "Cited 2010 ADA section without the corresponding FBC 11/FAC reference — AHJ will reject as non-jurisdictional."
-- Update wordingGuidance to mandate `FBC 11-X / FAC 61G20-X (cf. 2010 ADA Y)` format.
+- New table `required_inspections` (project_id, inspection_type, code_basis, is_threshold_inspection, status, scheduled_for, completed_at, inspector_id, result enum 'pass'|'fail'|'partial'|'na', report_id).
+- New `src/lib/required-inspections.ts` derives the list from `plan_reviews.dna_extracted` (occupancy class, stories, scope of work, threshold flag from Sprint 2). Threshold buildings get the F.S. 553.79(5) Special Inspector inspections automatically appended.
+- Surface as a "Required Inspections" panel on `ProjectDetail.tsx` (gated, color-coded: not started / scheduled / passed / failed).
 
-**3. Automated threshold-building detection**
+**2. Notice of Inspection + Inspection Report (F.S. 553.791(8))**
 
-F.S. 553.79(5) requires a Special Inspector designated by the Engineer of Record for "threshold buildings" (>3 stories OR >50 ft OR >5,000 sf assembly occupancy with >500 occupants). Today `thresholdBuildingAmount` exists per-county but nothing reads DNA to flag it.
+The private provider must submit each inspection report to the AHJ within the statutory window. Mirror the comment-letter snapshot pattern.
 
-- Extend `stages/dna.ts` to compute `is_threshold_building: boolean` + `threshold_triggers: string[]` from extracted DNA (stories, height_ft, occupancy_classification, total_sq_ft, occupant_load). Persist into `plan_reviews.dna_extracted` JSON (no schema change needed — it's already JSONB).
-- Migration: add `plan_reviews.special_inspector_designated` (boolean) + `plan_reviews.special_inspector_name` (text) + `plan_reviews.special_inspector_license` (text). Mirrors the Sprint 1 statutory fields.
-- Extend `letter-readiness.ts` with a new `threshold_special_inspector` check that **blocks** letter generation when `is_threshold_building === true` and special inspector fields are empty.
-- Surface in `StatutoryCompliancePanel.tsx`: add a "Threshold Building" section that shows the triggers DNA detected and a small form to record the Special Inspector designation. If not a threshold building, render a single "Not a threshold building" green chip.
-- Auto-create a high-severity finding via `stages/discipline-review.ts` Structural pass when threshold is detected but no Statement of Special Inspections is present in submittal.
+- New table `inspection_reports` (project_id, required_inspection_id, inspector_id, inspector_license, performed_at, result, narrative, photo_refs jsonb, deficiencies jsonb, html_snapshot, html_sha256, sent_to_ahj_at, ahj_recipient).
+- New edge function `generate-inspection-report` — takes an inspection + checklist results + photos, renders a county-styled HTML report using the same template family as `county-report.ts`, returns it. Reuses Lovable AI `google/gemini-2.5-flash` for narrative generation from checklist notes.
+- New `src/lib/send-inspection-report.ts` — analog of `send-letter-snapshot.ts`. Hashes HTML (SHA-256 via existing `file-hash.ts`), writes snapshot, logs `activity_log` event `inspection_report_sent`.
 
-**4. Florida holiday + AHJ resubmission window in the statutory clock**
+**3. Inspection-side readiness gate**
 
-`compute_statutory_deadline` already skips weekends, but F.S. 553.791 review days are calendar days for the AHJ but business days for many counties' resubmission windows. Today every county uses 14 calendar days regardless.
+Mirror the letter-readiness pattern so an inspection report can't be sent without statutory prerequisites.
 
-- Add `business_days_resubmission: boolean` to `CountyRequirements` (default true) and a Florida holiday list (New Year, MLK, Memorial, Juneteenth, July 4, Labor, Veterans, Thanksgiving + day after, Christmas Eve + Christmas) consumed by `statutory-deadlines.ts`.
-- Update `statutory-deadlines.ts` to compute resubmission deadlines that skip Florida holidays; add a small "next business day after holiday" indicator on `StatutoryClockCard.tsx` when applicable.
+- New `src/lib/inspection-readiness.ts` with checks: inspector_licensed_for_trade, photos_present (≥3 per inspection), threshold_special_inspector_signed (only if `is_threshold_inspection`), narrative_present, no_open_critical_deficiencies_blocking_pass.
+- New `src/components/inspections/InspectionReadinessGate.tsx` — same UX as `LetterReadinessGate.tsx`.
+
+**4. Photo chain-of-custody**
+
+Today photos (where they exist) aren't hashed or geo/timestamped. AHJs increasingly require EXIF retention.
+
+- Extend `file-hash.ts` with `computeFileHashWithExif()` that preserves capture timestamp + GPS if present.
+- New table `inspection_photos` (id, inspection_report_id, storage_path, sha256, captured_at, gps_lat, gps_lng, uploaded_by, deficiency_ref).
+- `Inspections.tsx` upload flow writes hash + EXIF on insert.
+
+**5. Certificate of Compliance generator (F.S. 553.791(10))**
+
+Once **all** required inspections are passed, the private provider issues the Certificate of Compliance — this is what unlocks the AHJ's CO. This is currently impossible to produce in the app.
+
+- New `src/lib/certificate-of-compliance.ts` — verifies every required inspection is `result='pass'` and signed by a licensed inspector for that trade; computes a single SHA-256 over the chained inspection-report hashes (Merkle-style) so the certificate is a tamper-evident attestation.
+- New edge function `generate-coc` — renders the certificate (county-styled, references the chained hash, lists every inspection + report id + sha + date + inspector license).
+- New `src/components/CertificateOfComplianceCard.tsx` on `ProjectDetail.tsx` — disabled with explainer until all required inspections pass; on click, opens a final attestation dialog (typed "I attest" + license# confirmation), then generates and snapshots the CoC.
+
+**6. Inspection auto-scheduling against the statutory clock**
+
+Reuse `statutory-deadlines.ts` so an overdue **inspection** raises the same kind of deadline alert the plan-review side gets.
+
+- Extend `statutory-deadlines.ts` with `computeInspectionWindow(scheduledFor, jurisdiction)` — F.S. 553.791 requires the inspection within a defined window after the contractor's request, skipping FL holidays (already added in Sprint 2).
+- New `InspectionDeadlineBar` reusing `DeadlineBar.tsx` styling (no animations per project memory).
 
 ### Files touched
 
-**New / migrations**
-- `supabase/migrations/<ts>_p1_fire_code_threshold.sql` — extend `fbc_code_sections.code`, add `code_family`, seed NFPA/FFPC rows; add `special_inspector_*` columns on `plan_reviews`.
+**New**
+- `supabase/migrations/<ts>_inspections_compliance.sql` — `required_inspections`, `inspection_reports`, `inspection_photos`, RLS policies mirroring plan-review tables.
+- `supabase/functions/generate-inspection-report/index.ts`
+- `supabase/functions/generate-coc/index.ts`
+- `src/lib/required-inspections.ts`
+- `src/lib/inspection-readiness.ts`
+- `src/lib/send-inspection-report.ts`
+- `src/lib/certificate-of-compliance.ts`
+- `src/components/inspections/InspectionReadinessGate.tsx`
+- `src/components/inspections/InspectionReportPanel.tsx`
+- `src/components/inspections/InspectionPhotoUploader.tsx`
+- `src/components/CertificateOfComplianceCard.tsx`
 
 **Edited**
-- `supabase/functions/run-review-pipeline/stages/dna.ts` — threshold detection.
-- `supabase/functions/run-review-pipeline/stages/ground-citations.ts` — family-aware matching.
-- `supabase/functions/run-review-pipeline/stages/discipline-review.ts` — auto-finding for missing Special Inspections statement.
-- `supabase/functions/run-review-pipeline/discipline-experts.ts` — Accessibility, LifeSafety, FireProtection prompt rewrites.
-- `src/lib/letter-readiness.ts` — `threshold_special_inspector` blocking check.
-- `src/lib/statutory-deadlines.ts` — Florida holidays + business-day resubmission.
-- `src/lib/county-requirements/types.ts` + `data.ts` — `business_days_resubmission` flag.
-- `src/components/plan-review/StatutoryCompliancePanel.tsx` — Threshold Building section + Special Inspector form.
-- `src/components/StatutoryClockCard.tsx` — holiday-shifted indicator.
-
-## Sprint 3 — P2: Chain-of-custody + cross-round tracking ✅ shipped
-
-**Migration**: `pdf_sha256` + `file_size_bytes` on `plan_review_files`; `pdf_sha256` + `letter_html_sha256` on `comment_letter_snapshots`; `lineage_id` (uuid, default gen_random_uuid()) on `deficiencies_v2` with indexes.
-
-**Hashing**: `src/lib/file-hash.ts` (Web Crypto SHA-256 helpers). `plan-review-upload.ts` fingerprints every PDF before bucket upload; `send-letter-snapshot.ts` hashes the letter HTML at send time.
-
-**Cross-round lineage**: `dedupe.ts` runs `applyCrossRoundLineage()` for Round 2+ — matches each new finding to the prior-round finding on (same FBC section OR same discipline) + sheet overlap + Jaccard ≥ 0.55, then inherits the prior `lineage_id`. Logged via `activity_log` event_type `lineage_carryover`.
-
-**Threshold auto-finding (conditional)**: `emitThresholdAutoFinding()` in `dedupe.ts` emits a high-severity Structural `DEF-S###` citing F.S. 553.79(5) when DNA classifies the project as threshold AND no Special Inspector has been recorded AND no existing finding already covers Special Inspections.
-
-**Statutory clock history UI**: `StatutoryClockCard.tsx` now fetches `activity_log` events of type `statutory_clock_*` / `deadline_overdue` for the project and renders a collapsible audit trail. Removed the prior `animate-pulse` urgency styling per project memory rule.
+- `src/pages/Inspections.tsx` — wire required-inspections matrix, gate, photo flow.
+- `src/pages/ProjectDetail.tsx` — Required Inspections panel + CoC card.
+- `src/lib/file-hash.ts` — EXIF-preserving variant.
+- `src/lib/statutory-deadlines.ts` — `computeInspectionWindow`.
+- `.lovable/plan.md` — Sprint 4 entry.
 
 ### Acceptance
-- An uploaded PDF round-trips with its SHA-256 stored on `plan_review_files`.
-- A sent letter writes `letter_html_sha256` for tamper detection.
-- A Round 2 finding matching a Round 1 defect inherits the same `lineage_id`.
-- A 4-story office without a Statement of Special Inspections gets an auto-emitted `DEF-S###`; a reviewer recording the Special Inspector before re-running suppresses re-emission.
-- The clock card shows pause/resume/reset history without animations.
+
+- Opening any project auto-renders the right Required Inspections list from DNA (e.g., a 2-story SFR shows footing/slab/framing/rough-in MEP/insulation/final; a 5-story office adds threshold structural inspections).
+- An inspector cannot send an inspection report without ≥3 hashed photos, a license matching the trade, and (for threshold inspections) the Special Inspector's signature.
+- Each sent inspection report writes an immutable snapshot with `html_sha256`.
+- The Certificate of Compliance card stays disabled until every required inspection is `pass`; once enabled, it generates a county-styled CoC whose hash chains all underlying report hashes, and writes an `activity_log` event.
+- Overdue inspections surface in the same deadline UI as overdue plan reviews.
+
+### Notes on what we are NOT doing
+
+- Not building a mobile inspector app — desktop/tablet web is sufficient and matches current product surface.
+- Not generating fake inspection data; the matrix derives from real DNA and waits for real inspector input.
+- Not touching the comment-letter or plan-review pipeline; Sprints 1–3 stand.
+
+Ready to ship Sprint 4 on approval.
