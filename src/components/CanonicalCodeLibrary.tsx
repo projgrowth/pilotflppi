@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Sparkles, Save, RefreshCw } from "lucide-react";
+import { Loader2, Sparkles, Save, RefreshCw, Brain } from "lucide-react";
 import { toast } from "sonner";
 
 interface CodeRow {
@@ -22,6 +22,7 @@ interface CodeRow {
   edition: string;
   title: string;
   requirement_text: string;
+  embedded_at: string | null;
 }
 
 const STUB_LIMIT = 60;
