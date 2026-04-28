@@ -30,7 +30,8 @@ export interface ReadinessCheck {
     | "project_dna"
     | "notice_filed"
     | "affidavit_signed"
-    | "reviewer_licensed";
+    | "reviewer_licensed"
+    | "threshold_special_inspector";
   severity: ReadinessSeverity;
   /** Required vs advisory — only required checks gate the export button. */
   required: boolean;
