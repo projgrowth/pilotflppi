@@ -292,7 +292,8 @@ export default function ProjectDetail() {
     )}
     Archive
   </Button>
- <Button
+  {reviews && reviews.length > 0 ? (
+  <Button
  size="sm"
  className="text-xs"
  onClick={() => navigate(`/plan-review/${reviews[0].id}`)}
