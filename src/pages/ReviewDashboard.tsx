@@ -34,6 +34,7 @@ import FilterChips from "@/components/review-dashboard/FilterChips";
 import AuditCoveragePanel from "@/components/review-dashboard/AuditCoveragePanel";
 import LetterReadinessGate from "@/components/plan-review/LetterReadinessGate";
 import LetterSnapshotViewer from "@/components/plan-review/LetterSnapshotViewer";
+import StatutoryCompliancePanel from "@/components/plan-review/StatutoryCompliancePanel";
 import { CRITICAL_DNA_FIELDS } from "@/lib/dna-fields";
 import { useLetterQualityCheck } from "@/hooks/useLetterQualityCheck";
 import {
@@ -472,6 +473,16 @@ export default function ReviewDashboard() {
             jurisdiction={review.project.jurisdiction || review.project.county}
           />
         </div>
+      )}
+
+      {/* F.S. 553.791 statutory prerequisites — Notice + Affidavit per round */}
+      {review && id && (
+        <StatutoryCompliancePanel
+          planReviewId={id}
+          round={review.round}
+          noticeFiledAt={review.notice_to_building_official_filed_at}
+          affidavitSignedAt={review.compliance_affidavit_signed_at}
+        />
       )}
 
       {/* Letter readiness checklist — shown when there are findings to send */}
