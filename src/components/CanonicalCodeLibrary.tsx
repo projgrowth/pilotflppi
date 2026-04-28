@@ -48,7 +48,7 @@ export function CanonicalCodeLibrary() {
     queryFn: async (): Promise<CodeRow[]> => {
       let q = supabase
         .from("fbc_code_sections")
-        .select("id, code, section, edition, title, requirement_text")
+        .select("id, code, section, edition, title, requirement_text, embedded_at")
         .order("section", { ascending: true })
         .limit(500);
       if (search.trim()) q = q.ilike("section", `%${search.trim()}%`);
