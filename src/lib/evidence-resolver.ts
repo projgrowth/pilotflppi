@@ -113,19 +113,3 @@ export async function ensureFreshEvidenceUrl(opts: EnsureFreshOpts): Promise<Ens
   }
 }
 
-/**
- * Fetch an evidence URL and return a base64 data URL. Used by the comment
- * letter export so embedded thumbnails survive being copy/pasted into email
- * or rendered offline in a saved PDF.
- */
-export async function evidenceUrlToDataUrl(url: string): Promise<string> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Fetch evidence failed: ${res.status}`);
-  const blob = await res.blob();
-  return await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error("FileReader failed"));
-    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
-    reader.readAsDataURL(blob);
-  });
-}

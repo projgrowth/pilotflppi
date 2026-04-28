@@ -107,14 +107,6 @@ export function getBusinessDaysElapsed(startDate: string | null, asOf?: Date): n
   return count;
 }
 
-export function getBusinessDaysRemaining(
-  startDate: string | null,
-  totalBusinessDays: number
-): number {
-  const elapsed = getBusinessDaysElapsed(startDate);
-  return Math.max(0, totalBusinessDays - elapsed);
-}
-
 export function getStatutoryDeadlineDate(
   startDate: string | null,
   totalBusinessDays: number
