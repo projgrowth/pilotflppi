@@ -134,53 +134,9 @@ Rules:
 };
 
 // Tool schemas for structured output
-const PLAN_REVIEW_TOOL = {
-  type: "function" as const,
-  function: {
-    name: "submit_findings",
-    description: "Submit plan review findings as structured data",
-    parameters: {
-      type: "object",
-      properties: {
-        findings: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              severity: { type: "string", enum: ["critical", "major", "minor"] },
-              discipline: { type: "string", enum: ["structural", "life_safety", "fire", "mechanical", "electrical", "plumbing", "energy", "ada", "site"] },
-              code_ref: { type: "string" },
-              county_specific: { type: "boolean" },
-              page: { type: "string" },
-              description: { type: "string" },
-              recommendation: { type: "string" },
-              confidence: { type: "string", enum: ["verified", "likely", "advisory"] },
-              county_amendment_ref: { type: "string", description: "Specific county amendment reference if county_specific is true (e.g., 'Miami-Dade Sec. 8A', 'Broward County Amendment to FBC Ch. 17')" },
-              markup: {
-                type: "object",
-                description: "Bounding box on the plan image. page_index is the 0-based position of the image in the multimodal content array (matches image_manifest.index). NOT a sheet number. grid_cell anchors the pin to one of 100 visible labelled cells (A0..J9) so the worst-case error is bounded.",
-                properties: {
-                  page_index: { type: "number", description: "0-based image array index from image_manifest. Must be in range 0..N-1." },
-                  grid_cell: { type: "string", description: "REQUIRED. Visible grid cell label containing the element's center, e.g. 'H7'. Row A-J (top→bottom) + column 0-9 (left→right). Must literally match one of the labels printed on the image." },
-                  nearest_text: { type: "string", description: "REQUIRED. Short string (≤40 chars) visible on the sheet within ~5% of the pin (callout number, dimension, note ref, schedule row label, grid line, 'TYP', etc.). Empty string '' if nothing readable is near." },
-                  x: { type: "number", description: "Left edge as percentage of image width (0-100). Refines location WITHIN the grid_cell." },
-                  y: { type: "number", description: "Top edge as percentage of image height (0-100). Refines location WITHIN the grid_cell." },
-                  width: { type: "number", description: "Box width as percentage. Pin (point issue) ≤ 4. Region ≤ 15. Never exceed 15." },
-                  height: { type: "number", description: "Box height as percentage. Pin ≤ 4. Region ≤ 10. Never exceed 10." },
-                },
-                required: ["page_index", "grid_cell", "nearest_text", "x", "y", "width", "height"],
-              },
-            },
-            required: ["severity", "discipline", "code_ref", "county_specific", "page", "description", "recommendation", "confidence", "markup"],
-            additionalProperties: false,
-          },
-        },
-      },
-      required: ["findings"],
-      additionalProperties: false,
-    },
-  },
-};
+// Note: PLAN_REVIEW_TOOL removed in Phase 2 audit. The active multi-stage
+// pipeline (run-review-pipeline/stages/*) declares its own tool schemas.
+
 
 const EXTRACT_PROJECT_TOOL = {
   type: "function" as const,
