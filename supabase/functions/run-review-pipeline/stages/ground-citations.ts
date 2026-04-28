@@ -17,6 +17,36 @@
 
 import { createClient } from "../_shared/supabase.ts";
 import { signedSheetUrls } from "../_shared/storage.ts";
+import { embedText } from "../_shared/embedding.ts";
+
+// Tier 2.3: When keyword grounding fails (mismatch / not_found / hallucinated),
+// embed the finding text and ask Postgres for the top semantically-similar
+// canonical section. This catches cases where the AI cited the wrong
+// sub-section but the *intent* matches a known requirement — e.g. cited
+// 1006.2.1 when 1006.3.2 is the right anchor for "two exits required".
+async function vectorSuggestSection(
+  admin: ReturnType<typeof createClient>,
+  finding: string,
+  requiredAction: string,
+): Promise<{ section: string; title: string; similarity: number; requirement_text: string } | null> {
+  const text = `${finding}\n${requiredAction}`.trim();
+  if (text.length < 20) return null;
+  const vec = await embedText(text);
+  if (!vec) return null;
+  const { data, error } = await admin.rpc("match_fbc_code_sections", {
+    query_vector: vec as unknown as string,
+    match_threshold: 0.55,
+    match_count: 1,
+  });
+  if (error) {
+    console.warn("[ground_citations] vector rpc failed", error.message);
+    return null;
+  }
+  const top = (data ?? [])[0] as
+    | { section: string; title: string; similarity: number; requirement_text: string }
+    | undefined;
+  return top ?? null;
+}
 
 /** Normalize a code-section identifier for canonical lookup. */
 function normalizeCitationSection(raw: string | null | undefined): string | null {
