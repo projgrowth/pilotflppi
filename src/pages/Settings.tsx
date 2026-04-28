@@ -77,6 +77,11 @@ export default function SettingsPage() {
  const [firmLicense, setFirmLicense] = useState("");
  const [firmLogoUrl, setFirmLogoUrl] = useState("");
  const [firmClosingLanguage, setFirmClosingLanguage] = useState("");
+ // E&O insurance — F.S. 553.791(20)
+ const [eoCarrier, setEoCarrier] = useState("");
+ const [eoPolicyNumber, setEoPolicyNumber] = useState("");
+ const [eoCoverageAmount, setEoCoverageAmount] = useState<string>("");
+ const [eoExpiresOn, setEoExpiresOn] = useState("");
 
  const [jurisdictions, setJurisdictions] = useState<string[]>(defaultJurisdictions);
  const [newJurisdiction, setNewJurisdiction] = useState("");
@@ -108,6 +113,12 @@ export default function SettingsPage() {
  setFirmLicense(firmSettings.license_number || "");
  setFirmLogoUrl(firmSettings.logo_url || "");
  setFirmClosingLanguage(firmSettings.closing_language || "");
+ setEoCarrier(firmSettings.eo_carrier ?? "");
+ setEoPolicyNumber(firmSettings.eo_policy_number ?? "");
+ setEoCoverageAmount(
+   firmSettings.eo_coverage_amount != null ? String(firmSettings.eo_coverage_amount) : ""
+ );
+ setEoExpiresOn(firmSettings.eo_expires_on ?? "");
  // Load jurisdictions from DB if they exist
  const dbJurisdictions = (firmSettings as unknown as Record<string, unknown>).jurisdictions;
  if (Array.isArray(dbJurisdictions) && dbJurisdictions.length > 0) {
@@ -161,6 +172,7 @@ export default function SettingsPage() {
   };
 
  const handleSaveFirm = () => {
+ const coverageNum = eoCoverageAmount.trim() ? Number(eoCoverageAmount) : null;
  saveFirmSettings({
  firm_name: firmName.trim(),
  license_number: firmLicense.trim(),
@@ -169,6 +181,10 @@ export default function SettingsPage() {
  address: firmAddress.trim(),
  logo_url: firmLogoUrl.trim(),
  closing_language: firmClosingLanguage.trim(),
+ eo_carrier: eoCarrier.trim() || null,
+ eo_policy_number: eoPolicyNumber.trim() || null,
+ eo_coverage_amount: coverageNum != null && !Number.isNaN(coverageNum) ? coverageNum : null,
+ eo_expires_on: eoExpiresOn.trim() || null,
  });
  };
 
