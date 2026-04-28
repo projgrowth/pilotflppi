@@ -628,11 +628,30 @@ export default function PlanReviewDetail() {
     onCancelLetter: cancelCommentLetter,
     onCopyLetter: copyLetter,
     onLetterChange: setCommentLetter,
-    onSendToContractor: () => {
+    onSendToContractor: async () => {
       const indexedStatuses: Record<number, FindingStatus> = {};
       findings.forEach((f, i) => { if (f.finding_id && findingStatuses[f.finding_id]) indexedStatuses[i] = findingStatuses[f.finding_id]; });
       const issues = lintCommentLetter(commentLetter, findings, indexedStatuses);
       setLintIssues(issues);
+      // Compute readiness from the live deficiencies_v2 rows so the gate the
+      // reviewer sees in the dialog matches what we'll snapshot at send-time.
+      try {
+        const r: any = review as any;
+        const readiness = await fetchReadinessForSend({
+          planReviewId: review.id,
+          qcStatus: review.qc_status,
+          noticeFiledAt: r.notice_to_building_official_filed_at ?? null,
+          affidavitSignedAt: r.compliance_affidavit_signed_at ?? null,
+          isThresholdBuilding: !!r.threshold_building,
+          thresholdTriggers: Array.isArray(r.threshold_triggers) ? r.threshold_triggers : [],
+          specialInspectorDesignated: !!r.special_inspector_designated,
+          reviewerLicensedDisciplines: [],
+          projectDnaMissingFields: [],
+        });
+        setPendingReadiness(readiness);
+      } catch {
+        setPendingReadiness(null);
+      }
       setShowLintDialog(true);
     },
     onQcApprove: async () => {
@@ -1006,9 +1025,44 @@ export default function PlanReviewDetail() {
         onOpenChange={setShowLintDialog}
         issues={lintIssues}
         blocked={hasBlockingIssues(lintIssues)}
-        onConfirmSend={() => {
-          setShowLintDialog(false);
-          toast.success("Letter ready to send");
+        readinessBlockingCount={pendingReadiness?.blockingCount ?? 0}
+        onConfirmSend={async (overrideReason) => {
+          if (!user || !review) return;
+          if (sending) return;
+          setSending(true);
+          try {
+            const recipient =
+              (review as any).contractor_email ??
+              (review.project as any)?.contractor_email ??
+              "";
+            const result = await sendCommentLetter({
+              planReviewId: review.id,
+              projectId: review.project_id,
+              round: review.round,
+              recipient,
+              letterHtml: commentLetter,
+              findings: findings as unknown as Array<Record<string, unknown>>,
+              firmInfo: (firmSettings ?? {}) as Record<string, unknown>,
+              readiness:
+                pendingReadiness ?? {
+                  checks: [],
+                  allRequiredPassing: true,
+                  blockingCount: 0,
+                },
+              overrideReason,
+              sentByUserId: user.id,
+              firmId: firmId ?? null,
+            });
+            setShowLintDialog(false);
+            toast.success("Letter sent — snapshot saved");
+            queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+            queryClient.invalidateQueries({ queryKey: ["project", review.project_id] });
+            void result;
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : "Failed to send letter");
+          } finally {
+            setSending(false);
+          }
         }}
       />
     </div>
