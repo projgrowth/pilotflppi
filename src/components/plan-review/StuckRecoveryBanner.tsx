@@ -49,10 +49,20 @@ export function StuckRecoveryBanner({
   recoveryCount,
   aiCheckStatus,
   failureReason,
+  qualityBreakdown,
   needsPreparation,
   onPrepareNow,
   preparingNow,
 }: Props) {
+  const [rerunning, setRerunning] = useState(false);
+
+  const handleRerunVerify = async () => {
+    setRerunning(true);
+    const r = await startPipeline(planReviewId, "core", "verify");
+    setRerunning(false);
+    if (r.ok) toast.success("Verifier re-run started");
+    else toast.error(r.message ?? "Could not start verifier");
+  };
   const dismissKey = autoRecoveredAt
     ? `stuck-recovery-dismissed:${planReviewId}:${autoRecoveredAt}`
     : null;
