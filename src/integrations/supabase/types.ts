@@ -212,6 +212,10 @@ export type Database = {
       comment_letter_snapshots: {
         Row: {
           created_at: string
+          delivered_at: string | null
+          delivery_confirmation: string | null
+          delivery_method: string | null
+          delivery_notes: string | null
           findings_json: Json
           firm_id: string | null
           firm_info_json: Json
@@ -230,6 +234,10 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          delivered_at?: string | null
+          delivery_confirmation?: string | null
+          delivery_method?: string | null
+          delivery_notes?: string | null
           findings_json?: Json
           firm_id?: string | null
           firm_info_json?: Json
@@ -248,6 +256,10 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          delivered_at?: string | null
+          delivery_confirmation?: string | null
+          delivery_method?: string | null
+          delivery_notes?: string | null
           findings_json?: Json
           firm_id?: string | null
           firm_info_json?: Json
@@ -1878,6 +1890,8 @@ export type Database = {
           assigned_to: string | null
           clock_pause_history: Json
           clock_pause_reason: string | null
+          clock_resume_reason: string | null
+          clock_resumed_at: string | null
           contractor_id: string | null
           county: string
           created_at: string
@@ -1909,6 +1923,8 @@ export type Database = {
           assigned_to?: string | null
           clock_pause_history?: Json
           clock_pause_reason?: string | null
+          clock_resume_reason?: string | null
+          clock_resumed_at?: string | null
           contractor_id?: string | null
           county?: string
           created_at?: string
@@ -1940,6 +1956,8 @@ export type Database = {
           assigned_to?: string | null
           clock_pause_history?: Json
           clock_pause_reason?: string | null
+          clock_resume_reason?: string | null
+          clock_resumed_at?: string | null
           contractor_id?: string | null
           county?: string
           created_at?: string
