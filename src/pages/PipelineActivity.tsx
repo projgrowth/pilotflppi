@@ -293,6 +293,24 @@ function ActivityRow({
           <HealthSummary health={health} />
         </div>
 
+        <div className="flex items-center gap-3 text-[11px] text-muted-foreground/80 tabular-nums">
+          {activity.rows[0]?.started_at && (
+            <span>Started {relTime(activity.rows[0].started_at)}</span>
+          )}
+          {current?.updated_at && (
+            <>
+              <span className="text-border">·</span>
+              <span>Last update {relTime(current.updated_at)}</span>
+            </>
+          )}
+          {!activity.hasActive && wallClock(activity.rows) && (
+            <>
+              <span className="text-border">·</span>
+              <span>{wallClock(activity.rows)}</span>
+            </>
+          )}
+        </div>
+
         {activity.isStuck && (
           <p className="text-orange-600 dark:text-orange-400 text-[11px]">
             ⚠ Stuck &gt;2 min — likely safe to cancel
