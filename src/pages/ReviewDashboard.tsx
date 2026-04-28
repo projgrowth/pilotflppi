@@ -34,6 +34,7 @@ import FilterChips from "@/components/review-dashboard/FilterChips";
 import AuditCoveragePanel from "@/components/review-dashboard/AuditCoveragePanel";
 import LetterReadinessGate from "@/components/plan-review/LetterReadinessGate";
 import LetterSnapshotViewer from "@/components/plan-review/LetterSnapshotViewer";
+import StatutoryCompliancePanel from "@/components/plan-review/StatutoryCompliancePanel";
 import { CRITICAL_DNA_FIELDS } from "@/lib/dna-fields";
 import { useLetterQualityCheck } from "@/hooks/useLetterQualityCheck";
 import {
@@ -57,6 +58,8 @@ interface ReviewWithProject {
   round: number;
   qc_status: string;
   comment_letter_draft: string | null;
+  notice_to_building_official_filed_at: string | null;
+  compliance_affidavit_signed_at: string | null;
   project: {
     name: string;
     address: string;
@@ -83,7 +86,7 @@ export default function ReviewDashboard() {
       const { data, error } = await supabase
         .from("plan_reviews")
         .select(
-          "id, project_id, round, qc_status, comment_letter_draft, project:projects(name, address, jurisdiction, county)",
+          "id, project_id, round, qc_status, comment_letter_draft, notice_to_building_official_filed_at, compliance_affidavit_signed_at, project:projects(name, address, jurisdiction, county)",
         )
         .eq("id", id!)
         .maybeSingle();
@@ -107,6 +110,28 @@ export default function ReviewDashboard() {
       return count ?? 0;
     },
     staleTime: 5 * 60 * 1000,
+  });
+
+  // Pull the signing reviewer's per-discipline professional licenses so the
+  // readiness gate can block sending letters that include disciplines the
+  // reviewer isn't licensed to sign for (F.S. 553.791(2)).
+  const { data: reviewerLicensedDisciplines = [] } = useQuery({
+    queryKey: ["reviewer_discipline_licenses_self"],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return [] as string[];
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("discipline_licenses")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (error) throw error;
+      const map = (data?.discipline_licenses ?? {}) as Record<string, unknown>;
+      return Object.entries(map)
+        .filter(([, v]) => typeof v === "string" && v.trim().length > 0)
+        .map(([k]) => k.toLowerCase());
+    },
+    staleTime: 60 * 1000,
   });
   const letterCheck = useLetterQualityCheck({
     deficiencies: defs,
@@ -450,6 +475,16 @@ export default function ReviewDashboard() {
         </div>
       )}
 
+      {/* F.S. 553.791 statutory prerequisites — Notice + Affidavit per round */}
+      {review && id && (
+        <StatutoryCompliancePanel
+          planReviewId={id}
+          round={review.round}
+          noticeFiledAt={review.notice_to_building_official_filed_at}
+          affidavitSignedAt={review.compliance_affidavit_signed_at}
+        />
+      )}
+
       {/* Letter readiness checklist — shown when there are findings to send */}
       {defs.length > 0 && (
         <LetterReadinessGate
@@ -457,6 +492,17 @@ export default function ReviewDashboard() {
           qcStatus={review?.qc_status}
           reviewerIsSoleSigner={true}
           projectDnaMissingFields={dnaIssue?.missing ?? []}
+          noticeToBuildingOfficialFiledAt={review?.notice_to_building_official_filed_at}
+          complianceAffidavitSignedAt={review?.compliance_affidavit_signed_at}
+          disciplinesInLetter={Array.from(
+            new Set(
+              defs
+                .filter((f) => (f.status ?? "open") === "open" || f.status === "needs_info")
+                .map((f) => (f.discipline ?? "").toLowerCase())
+                .filter(Boolean),
+            ),
+          )}
+          reviewerLicensedDisciplines={reviewerLicensedDisciplines}
           onJumpToFinding={() => setActiveTab("triage")}
         />
       )}

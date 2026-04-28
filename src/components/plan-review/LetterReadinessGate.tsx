@@ -37,6 +37,10 @@ export default function LetterReadinessGate({
   qcStatus,
   reviewerIsSoleSigner,
   projectDnaMissingFields,
+  noticeToBuildingOfficialFiledAt,
+  complianceAffidavitSignedAt,
+  disciplinesInLetter,
+  reviewerLicensedDisciplines,
   onJumpToFinding,
   onCompute,
   className,
@@ -48,8 +52,21 @@ export default function LetterReadinessGate({
         qcStatus,
         reviewerIsSoleSigner,
         projectDnaMissingFields,
+        noticeToBuildingOfficialFiledAt,
+        complianceAffidavitSignedAt,
+        disciplinesInLetter,
+        reviewerLicensedDisciplines,
       }),
-    [findings, qcStatus, reviewerIsSoleSigner, projectDnaMissingFields],
+    [
+      findings,
+      qcStatus,
+      reviewerIsSoleSigner,
+      projectDnaMissingFields,
+      noticeToBuildingOfficialFiledAt,
+      complianceAffidavitSignedAt,
+      disciplinesInLetter,
+      reviewerLicensedDisciplines,
+    ],
   );
 
   // Surface the result to the parent for its own gating UI (e.g. disabled buttons).

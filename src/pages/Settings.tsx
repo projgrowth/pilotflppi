@@ -49,8 +49,25 @@ export default function SettingsPage() {
  const { firmSettings, isLoading: firmLoading, saveFirmSettings, isSaving } = useFirmSettings();
  const isAdmin = useIsAdmin();
 
- const [fullName, setFullName] = useState("");
- const [saving, setSaving] = useState(false);
+  const [fullName, setFullName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // F.S. 553.791(2): per-discipline professional licenses for the reviewer.
+  // Map discipline (lowercase) → license number string. Saved on profiles.discipline_licenses.
+  const DISCIPLINE_KEYS = [
+    { key: "architectural", label: "Architectural (AR)" },
+    { key: "structural", label: "Structural (PE/SE)" },
+    { key: "mechanical", label: "Mechanical (PE)" },
+    { key: "electrical", label: "Electrical (PE)" },
+    { key: "plumbing", label: "Plumbing (PE)" },
+    { key: "fire", label: "Fire Protection (PE)" },
+    { key: "life_safety", label: "Life Safety" },
+    { key: "energy", label: "Energy" },
+    { key: "ada", label: "Accessibility / ADA" },
+    { key: "civil", label: "Civil (PE)" },
+  ] as const;
+  const [licenseMap, setLicenseMap] = useState<Record<string, string>>({});
+  const [savingLicenses, setSavingLicenses] = useState(false);
 
  // Firm info
  const [firmName, setFirmName] = useState("");
@@ -66,12 +83,20 @@ export default function SettingsPage() {
  const [jurisdictionsDirty, setJurisdictionsDirty] = useState(false);
  const [savingJurisdictions, setSavingJurisdictions] = useState(false);
 
- // Sync profile data
- useEffect(() => {
- if (profile) {
- setFullName(profile.full_name || "");
- }
- }, [profile]);
+  // Sync profile data
+  useEffect(() => {
+    if (profile) {
+      setFullName(profile.full_name || "");
+      const raw = (profile as unknown as { discipline_licenses?: unknown }).discipline_licenses;
+      if (raw && typeof raw === "object") {
+        const next: Record<string, string> = {};
+        for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+          if (typeof v === "string") next[k.toLowerCase()] = v;
+        }
+        setLicenseMap(next);
+      }
+    }
+  }, [profile]);
 
  // Sync firm settings from DB, including jurisdictions
  useEffect(() => {
@@ -107,9 +132,33 @@ export default function SettingsPage() {
  } catch (err) {
  toast.error(err instanceof Error ? err.message : "Failed to save");
  } finally {
- setSaving(false);
- }
- };
+  setSaving(false);
+  }
+  };
+
+  const saveLicenses = async () => {
+    if (!user) return;
+    setSavingLicenses(true);
+    try {
+      const cleaned: Record<string, string> = {};
+      for (const [k, v] of Object.entries(licenseMap)) {
+        const trimmed = (v ?? "").trim();
+        if (trimmed) cleaned[k] = trimmed;
+      }
+      const { error } = await supabase
+        .from("profiles")
+        .update({ discipline_licenses: cleaned })
+        .eq("id", user.id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ["profile"] });
+      queryClient.invalidateQueries({ queryKey: ["reviewer_discipline_licenses_self"] });
+      toast.success("Licenses updated");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSavingLicenses(false);
+    }
+  };
 
  const handleSaveFirm = () => {
  saveFirmSettings({
@@ -205,14 +254,39 @@ export default function SettingsPage() {
  <Label>Role</Label>
  <Input value={profile?.role || "reviewer"} disabled className="bg-muted/50 capitalize" />
  </div>
- <Button onClick={saveProfile} disabled={saving}>
- {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : "Save Profile"}
- </Button>
- </>
- )}
- </CardContent>
- </Card>
- </TabsContent>
+  <Button onClick={saveProfile} disabled={saving}>
+  {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : "Save Profile"}
+  </Button>
+
+  <div className="mt-6 space-y-3 border-t pt-4">
+    <div>
+      <Label className="text-sm font-medium">Florida Professional Licenses (F.S. 553.791(2))</Label>
+      <p className="text-[11px] text-muted-foreground mt-0.5">
+        Letters cannot be sent for a discipline you don't have a license on file for. Leave blank if not licensed.
+      </p>
+    </div>
+    <div className="grid gap-2 sm:grid-cols-2">
+      {DISCIPLINE_KEYS.map((d) => (
+        <div key={d.key} className="space-y-1">
+          <Label className="text-xs">{d.label}</Label>
+          <Input
+            value={licenseMap[d.key] ?? ""}
+            onChange={(e) => setLicenseMap((m) => ({ ...m, [d.key]: e.target.value }))}
+            placeholder="e.g. PE 12345"
+            className="h-8 text-xs"
+          />
+        </div>
+      ))}
+    </div>
+    <Button onClick={saveLicenses} disabled={savingLicenses} variant="secondary">
+      {savingLicenses ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : "Save Licenses"}
+    </Button>
+  </div>
+  </>
+  )}
+  </CardContent>
+  </Card>
+  </TabsContent>
 
  <TabsContent value="firm">
  <Card className="shadow-subtle">
