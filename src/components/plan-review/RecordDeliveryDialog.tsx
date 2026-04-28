@@ -28,6 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useAhjRecipients, useUpsertAhjRecipient } from "@/hooks/useAhjRecipients";
 
 type DeliveryMethod =
   | "email"
@@ -41,6 +42,8 @@ interface Props {
   snapshotId: string | null;
   planReviewId: string;
   defaultRecipient?: string;
+  /** Jurisdiction string used to scope AHJ address-book autocomplete. */
+  jurisdiction?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -49,6 +52,7 @@ export default function RecordDeliveryDialog({
   snapshotId,
   planReviewId,
   defaultRecipient,
+  jurisdiction,
   open,
   onOpenChange,
 }: Props) {
@@ -61,6 +65,18 @@ export default function RecordDeliveryDialog({
   });
   const [confirmation, setConfirmation] = useState("");
   const [notes, setNotes] = useState("");
+  const [recipientEmail, setRecipientEmail] = useState("");
+  const [contactName, setContactName] = useState("");
+
+  const { data: ahjOptions = [] } = useAhjRecipients(jurisdiction);
+  const upsertAhj = useUpsertAhjRecipient();
+
+  const applySuggestion = (id: string) => {
+    const hit = ahjOptions.find((r) => r.id === id);
+    if (!hit) return;
+    if (hit.email) setRecipientEmail(hit.email);
+    if (hit.contact_name) setContactName(hit.contact_name);
+  };
 
   const save = useMutation({
     mutationFn: async () => {
@@ -75,6 +91,19 @@ export default function RecordDeliveryDialog({
         })
         .eq("id", snapshotId);
       if (error) throw error;
+
+      // Persist to AHJ address book for future autocomplete (best-effort).
+      if (jurisdiction && (recipientEmail.trim() || contactName.trim())) {
+        try {
+          await upsertAhj.mutateAsync({
+            jurisdiction,
+            email: recipientEmail.trim() || null,
+            contact_name: contactName.trim() || null,
+          });
+        } catch {
+          /* non-blocking */
+        }
+      }
     },
     onSuccess: () => {
       toast.success("Delivery recorded");
