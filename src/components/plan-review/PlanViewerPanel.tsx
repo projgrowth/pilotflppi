@@ -11,6 +11,7 @@ import { useState } from "react";
 import { Progress } from "@/components/ui/progress";
 import { PlanMarkupViewer } from "@/components/PlanMarkupViewer";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
+import { ProcessingOverlay } from "@/components/plan-review/ProcessingOverlay";
 import { deletePlanReviewFile } from "@/lib/delete-plan-review-file";
 import { toast } from "sonner";
 import type { PDFPageImage } from "@/lib/pdf-utils";
@@ -24,6 +25,14 @@ interface Props {
   renderProgress: number;
   uploading: boolean;
   uploadSuccess: boolean;
+  /**
+   * When true and the document set has been uploaded but the AI pipeline hasn't
+   * finished yet, render the full-canvas ProcessingOverlay instead of a tiny
+   * "Loading document…" spinner. Drives the "I can see what's happening" UX.
+   */
+  pipelineProcessing?: boolean;
+  onPipelineComplete?: () => void;
+  onOpenDashboard?: () => void;
 
   findings: Finding[];
   activeFindingIndex: number | null;
@@ -105,9 +114,22 @@ export function PlanViewerPanel(props: Props) {
     );
   }
 
+  // While the AI pipeline is still working AND we don't yet have rendered
+  // pages to show, take over the canvas with the live progress overlay
+  // instead of stranding the user on a blank "Loading document…" spinner.
+  const showProcessing =
+    !!props.pipelineProcessing && props.pageImages.length === 0 && !!props.planReviewId;
+
   return (
     <>
-      {props.renderingPages && props.pageImages.length === 0 && (
+      {showProcessing && (
+        <ProcessingOverlay
+          planReviewId={props.planReviewId!}
+          onComplete={props.onPipelineComplete}
+          onOpenDashboard={props.onOpenDashboard}
+        />
+      )}
+      {!showProcessing && props.renderingPages && props.pageImages.length === 0 && (
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center space-y-3">
             <Loader2 className="h-8 w-8 text-accent mx-auto animate-spin" />

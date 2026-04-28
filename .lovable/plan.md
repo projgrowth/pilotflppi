@@ -1,89 +1,88 @@
+## The problem
 
-# Beta-Readiness Gaps — What's Still Missing
+After uploading a PDF, the left panel of `/plan-review/:id` either shows the empty drop zone or a tiny "Loading document…" spinner with a thin progress bar. Meanwhile the actual pipeline (upload → prepare_pages → sheet_map → … → comment letter) is humming along, but its only visual home is a popover hidden behind the "Re‑Analyze" button in the top bar. Users can't tell that anything is happening, so it feels broken.
 
-The core engine (pipeline, citation grounding, readiness gates, learning loop, snapshots, archive export) is solid. The remaining gaps are the things that make a first-time beta reviewer **bounce, get stuck, or lose confidence** — not engine quality.
+The fix: turn the left canvas itself into the pipeline status during processing, then automatically transition into the PDF + comments view the moment the pipeline lands. No extra clicks, no hidden popover, no jargon.
 
-Here's what to add, grouped by impact.
+## What we'll build
 
----
+### 1. New `ProcessingOverlay` component (left canvas)
 
-## Tier 1 — Blockers for a credible beta (must-have)
+When a review has files but is still processing (no rendered page images yet, OR the pipeline terminal stage isn't `complete`), the left panel renders a centered, calm "we're working on it" surface instead of the blank drop zone or a 8px spinner.
 
-### 1. First-run onboarding & empty-state guidance
-A new firm logs in to a blank `/projects` and has no idea what to do first. We need:
-- A 4-step "Get Started" checklist on `Dashboard`: (1) complete firm settings (name + license + E&O), (2) add reviewer license disciplines to profile, (3) create first project, (4) upload first plan set. Persist completion in `firm_settings` (new jsonb `onboarding_state`).
-- Friendly empty states on `Projects`, `Inspections`, `Invoices`, `Contractors`, `Deficiencies` — current ones are mostly bare tables.
-- A "Sample project" seed button in dev/beta that loads a tiny PDF + pre-canned findings so reviewers can see the full UX without uploading first.
+```text
+┌──────────────────────────────────────────────────┐
+│                                                  │
+│             ⟳  Reviewing your plans              │
+│        Architectural — chunk 5 of 10             │
+│                                                  │
+│   ✓ Files received                               │
+│   ✓ Prepared 24 pages                            │
+│   ✓ Indexed sheets                               │
+│   ⟳ Reading discipline sheets · 12s ago          │
+│   ○ Cross‑checking findings                      │
+│   ○ Grounding code citations                     │
+│   ○ Drafting comment letter                      │
+│                                                  │
+│   Usually 2–4 minutes. You can leave this page   │
+│   — we'll notify you when it's done.             │
+│                                                  │
+│            [View pipeline dashboard]             │
+└──────────────────────────────────────────────────┘
+```
 
-### 2. Pipeline cancel / rescue is undiscoverable
-`StuckRecoveryBanner` and `cancelPipelineForReview` exist but nothing tells the user *when* a run is genuinely stuck vs slow. Add:
-- A "Last activity Xm ago" indicator on the `PipelineProgressStepper`, surfacing in red after >5 min of no stage advancement.
-- Surface `pipeline_error_log` retries inline as the run proceeds (not just after) so users see "Critic stage retried 1× — continuing".
-- A clearly-labeled "Cancel run" button on the progress UI (currently only via banner), with confirmation.
+Implementation:
+- New file `src/components/plan-review/ProcessingOverlay.tsx`.
+- Internally just renders the existing `<PipelineProgressStepper compact mode="core" />` with a wrapper that adds the headline, current sub-stage subtitle (pulled from `disciplineProgress` when discipline_review is running), and an "estimated time" line.
+- Reuses all the heartbeat / stuck / auto-retry logic already in `PipelineProgressStepper` — no duplication.
 
-### 3. Global runtime safety net
-Wrap routed pages in route-level `ErrorBoundary` instances (we have one component, but it's only at the App root). A crash in `PlanReviewDetail` currently nukes the whole shell. Use the existing `ErrorBoundary` to scope each `<Route>` so users can bail out to `/projects` without a full reload.
+### 2. Wire it into `PlanViewerPanel`
 
-### 4. Auth/session UX
-- Show a session-expired toast + auto-redirect to `/login` when any query returns 401, instead of silent failure.
-- Detect `navigator.onLine === false` and show a single banner "You're offline — changes will not save". Currently nothing tells the reviewer their disposition save vanished.
+`PlanViewerPanel` currently has three states: empty drop zone, "Loading document…" spinner, and the rendered viewer. Add a fourth state and reorder priority:
 
-### 5. Reviewer license capture in profile
-`letter-readiness` blocks send when reviewer licenses don't match disciplines, but there is **no UI to add licenses to your profile**. We need a "Professional Licenses" section in `Settings` → My Profile (PE/RA disciplines + license number + jurisdiction + expiration). Without this, every beta tester hits a hard block on their first letter.
+1. No documents → drop zone (unchanged).
+2. Documents present **and pipeline not complete** → `<ProcessingOverlay planReviewId=… />` (NEW).
+3. Documents present + pipeline complete + still rasterizing locally → existing tiny "Loading document…" spinner.
+4. `pageImages.length > 0` → `PlanMarkupViewer` (unchanged).
 
-### 6. AHJ recipient address book
-`RecordDeliveryDialog` and CoC `ahj_recipient` are free-text. Add a simple per-firm `ahj_recipients` table (jurisdiction, name, email, address) populated from prior sends — autocomplete on the dialogs. Beta testers will retype the same building department 50 times otherwise.
+The page already knows `pageAssetCount`, `pipeRows` (via `usePipelineStatus`), and the terminal stage status — pass a single derived `processingState: "uploading" | "preparing" | "analyzing" | "ready"` prop down to keep `PlanViewerPanel` dumb.
 
----
+### 3. Auto-flip to "ready" view on completion
 
-## Tier 2 — High-leverage polish
+When the terminal stage transitions to `complete`:
+- The existing `PipelineProgressStepper.onComplete` already fires once. Hoist that handler to the page level so both the top‑bar popover and the new overlay share it.
+- On complete: invalidate `plan-review`, `pipeline_status`, and `page-asset-count` queries (already done in the existing `onPipelineComplete`), and flash a single subtle toast: "Review ready · {N} findings". No modal, no extra step.
+- Once `pageImages` are rendered, the overlay automatically unmounts and the PDF + pin overlays appear — which is already the existing behavior, so this part is just confirming the auto-transition works without a manual click.
 
-### 7. "What does this mean?" explainers
-The dashboard surfaces lots of jargon (citation_status, verification_status, challenger, dedupe_audit, sheet coverage, threshold building). Add a `(?)` popover next to each chip linking to a short plain-English explanation. One reusable `<MetricExplainer term="…" />` component sourced from a `src/lib/glossary.ts` file.
+### 4. Quiet the existing UI noise during processing
 
-### 8. Keyboard shortcut cheat sheet
-`TriageShortcutsOverlay` exists but isn't auto-shown. Trigger on first visit per user (localStorage) + bind `?` globally to re-open. Add shortcuts list to the `BetaFeedbackButton` menu.
+The current page stacks several banners above the canvas during processing (`StuckRecoveryBanner`, `SubmittalIncompleteBanner`, `DNAConfirmCard`, `ReviewProvenanceStrip`). They're useful *after* completion but compete for attention during the run. Rules:
+- `DNAConfirmCard`, `ReviewProvenanceStrip`, `RoundCarryoverPanel`: keep gated on `findings.length > 0` (already is for some). Add the same gate to DNAConfirmCard.
+- `StuckRecoveryBanner` and `SubmittalIncompleteBanner` and `preparePagesErrored`: keep — these are actionable error states and need to be visible.
+- The thin `UploadProgressBar` at the top stays during the actual file upload only (already correct).
 
-### 9. Letter preview in actual delivery format
-`LetterPanel` shows the editor but reviewers want to see what the AHJ receives. Add a "Preview as PDF" tab that renders the same HTML→PDF pipeline used for snapshots, before mark-sent. Currently they only see the rendered output post-send in `LetterSnapshotViewer`.
+### 5. Pin placement on the PDF (already correct, just verify)
 
-### 10. Bulk operations on findings
-`BulkActionBar` exists for confirm/reject but cannot bulk: assign discipline tag, change priority, or move between rounds. Reviewers triaging 80+ findings will ask for these by day 2.
+The user mentioned "all of the comments would be placed according to the page that they relate to." This is already how it works — `PlanMarkupViewer` renders `findings[i].markup.page_index/x/y/width/height` overlays per-page, deterministic placement is handled by the existing pin-placement logic in memory. **No change needed**, but the plan calls it out so we double‑check after the auto-flip lands that pins render correctly on first paint (no flash of unmarked PDF).
 
-### 11. Notification preferences
-Pipeline runs in the background — give the user the option to receive a browser notification (or email via existing edge function) when a long-running review completes. Currently they must keep the tab open or come back and guess.
+## Files
 
-### 12. Audit-ready export per finding
-Beyond the project archive zip, add a per-finding "Export evidence packet" (PDF: finding text, citation, code excerpt, sheet crop, lineage). AHJs increasingly request this for contested items.
+**New**
+- `src/components/plan-review/ProcessingOverlay.tsx` — full-canvas processing surface; thin wrapper around `PipelineProgressStepper`.
 
----
+**Modified**
+- `src/components/plan-review/PlanViewerPanel.tsx` — accept `processingState`, render `ProcessingOverlay` when documents exist but processing isn't done.
+- `src/pages/PlanReviewDetail.tsx` — derive `processingState` from `pipeRows` + `pageAssetCount` + `pageImages`, pass it down; add gentle "Review ready" completion toast; gate `DNAConfirmCard` on `findings.length > 0`.
 
-## Tier 3 — Nice-to-have for beta confidence
+## Out of scope (call-outs)
 
-- **Fee schedule defaults**: pre-populate FL counties from `jurisdictions_fl` so invoicing isn't blank on day 1.
-- **Project DNA "edit" UI**: today users can confirm or re-run; they can't manually correct extracted fields. Add inline edit on `DNAConfirmCard`.
-- **Comment letter templates**: allow the firm to save 2–3 letter intros/closings as named templates rather than only `closing_language` in `firm_settings`.
-- **Test-mode flag on firms**: tag beta firms so we can filter their data out of analytics rollups and so the AI cost meter labels their runs.
+- We are NOT removing the top‑bar popover stepper — it's still useful as a persistent peek and works once the overlay disappears.
+- We are NOT adding background/desktop notifications here — Phase C already shipped `usePipelineCompleteNotifications` for that.
+- No schema changes, no new edge functions, no new dependencies.
 
----
+## Risks
 
-## Out of scope (intentionally)
+- The page already mounts a lot of realtime subscriptions; the overlay reuses `usePipelineStatus` (same channel) so no extra socket cost.
+- One race to verify: after `onComplete` fires, `pageImages` may take 1–3s to finish rasterizing in-browser — during that window the overlay should show the existing tiny "Loading document…" state (step 3 above), not bounce back to the full processing surface.
 
-- Multi-state code support — Florida-only is fine for beta.
-- Mobile-first inspector app — desktop reviewer flow is the beta target.
-- Public AHJ portal — already deferred.
-
----
-
-## Suggested execution order
-
-If approved, I'd ship in this order to maximize beta value per phase:
-
-| Phase | Items | Why first |
-|-------|-------|-----------|
-| **A** | 5 (licenses), 4 (auth/offline), 3 (route error boundaries) | Unblocks first letter send + prevents data loss |
-| **B** | 1 (onboarding), 7 (explainers), 2 (cancel/rescue UX) | Removes "what now?" confusion |
-| **C** | 6 (AHJ book), 9 (letter PDF preview), 10 (bulk ops) | Reduces per-review friction |
-| **D** | 8, 11, 12 + Tier 3 | Polish |
-
-Approve the whole thing, or tell me which phases / items to drop and I'll implement.
+Approve to ship this as a single self-contained patch.

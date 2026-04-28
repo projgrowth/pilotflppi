@@ -162,6 +162,17 @@ export default function PlanReviewDetail() {
     expected: number;
   } | null>(null);
 
+  // Pipeline is "processing" when any stage row exists but the terminal
+  // `complete` row hasn't landed yet — OR when the user explicitly kicked off
+  // a Re-Analyze. Drives the full-canvas ProcessingOverlay so freshly-
+  // uploaded reviews show live progress instead of a blank panel.
+  const terminalComplete = pipeRows.some(
+    (r) => r.stage === "complete" && r.status === "complete",
+  );
+  const hasFatalError = pipeRows.some((r) => r.status === "error");
+  const pipelineProcessing =
+    aiRunning || (pipeRows.length > 0 && !terminalComplete && !hasFatalError);
+
   // Re-prepare pages in the browser using pdf.js — only path out of a
   // needs_browser_rasterization failure since Edge can't reliably rasterize PDFs.
   const handleReprepareInBrowser = useCallback(async () => {
@@ -429,13 +440,20 @@ export default function PlanReviewDetail() {
   const diff = useRoundDiff(findings, previousFindings, review?.round ?? 1);
 
   // Pipeline completion handler — declared as a hook here (above the early
-  // returns) so React's hook-order invariant holds. Idempotent: only flips
-  // state when a run is actually in flight, so a stray re-fire from the
-  // stepper can't loop us into a render storm (which crashed mobile).
+  // returns) so React's hook-order invariant holds. The stepper's internal
+  // `firedForRef` already latches on the terminal row's started_at, so this
+  // is called exactly once per pipeline run. Used by both the in-page
+  // ProcessingOverlay and the top-bar popover stepper.
+  const completeFiredFor = useRef<string | null>(null);
   const handlePipelineComplete = useCallback(() => {
-    if (!aiRunning) return;
+    // Belt-and-braces idempotency: also key on the review id so a fresh round
+    // can re-arm. The stepper handles same-round dedupe.
+    const key = review?.id ?? "no-review";
+    if (completeFiredFor.current === key) return;
+    completeFiredFor.current = key;
     queryClient.invalidateQueries({ queryKey: ["plan-review-findings-v2", review?.id] });
     queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
+    queryClient.invalidateQueries({ queryKey: ["plan-review-page-asset-count", id] });
     setAiRunning(false);
     setAiCompleteFlash(findings.length);
     setTimeout(() => setAiCompleteFlash(null), 3000);
@@ -447,7 +465,7 @@ export default function PlanReviewDetail() {
         ? `Review complete — ${findings.length} finding${findings.length === 1 ? "" : "s"}`
         : "Review complete — no findings",
     );
-  }, [aiRunning, queryClient, review?.id, id, findings.length]);
+  }, [queryClient, review?.id, id, findings.length]);
 
   if (isLoading) {
     return (
@@ -866,14 +884,18 @@ export default function PlanReviewDetail() {
 
       {/* DNA confirm card — surfaces a 30-second human sanity check after
           dna_extract completes and before the reviewer dives into findings.
-          Hides itself once `dna_confirmed_at` is written to ai_run_progress. */}
-      <div className="shrink-0 px-4 pt-2 empty:hidden">
-        <DNAConfirmCard
-          planReviewId={review.id}
-          aiRunProgress={(review as unknown as { ai_run_progress?: Record<string, unknown> | null }).ai_run_progress ?? null}
-          onEdit={openDashboard}
-        />
-      </div>
+          Hides itself once `dna_confirmed_at` is written to ai_run_progress.
+          Suppressed while the pipeline is still processing — the canvas
+          overlay owns the user's attention during that window. */}
+      {!pipelineProcessing && (
+        <div className="shrink-0 px-4 pt-2 empty:hidden">
+          <DNAConfirmCard
+            planReviewId={review.id}
+            aiRunProgress={(review as unknown as { ai_run_progress?: Record<string, unknown> | null }).ai_run_progress ?? null}
+            onEdit={openDashboard}
+          />
+        </div>
+      )}
 
       {/* Provenance / health strip — one-line trust receipt above the
           findings list. Reads useReviewHealth + project_dna + ai_run_progress. */}
@@ -939,6 +961,10 @@ export default function PlanReviewDetail() {
                 renderProgress={renderProgress}
                 uploading={uploading}
                 uploadSuccess={uploadSuccess}
+                pipelineProcessing={pipelineProcessing}
+                onPipelineComplete={handlePipelineComplete}
+                onOpenDashboard={openDashboard}
+                planReviewId={review.id}
                 findings={findings}
                 activeFindingIndex={activeFindingIndex}
                 onAnnotationClick={handleAnnotationClick}
@@ -1013,6 +1039,9 @@ export default function PlanReviewDetail() {
                 renderProgress={renderProgress}
                 uploading={uploading}
                 uploadSuccess={uploadSuccess}
+                pipelineProcessing={pipelineProcessing}
+                onPipelineComplete={handlePipelineComplete}
+                onOpenDashboard={openDashboard}
                 findings={findings}
                 activeFindingIndex={activeFindingIndex}
                 onAnnotationClick={handleAnnotationClick}
