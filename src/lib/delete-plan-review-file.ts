@@ -56,7 +56,6 @@ export async function deletePlanReviewFile(
     .update({
       deleted_at: new Date().toISOString(),
       deleted_by: userId,
-      delete_reason: args.reason ?? null,
     })
     .eq("plan_review_id", args.planReviewId)
     .eq("file_path", args.filePath)
