@@ -60,6 +60,9 @@ interface ReviewWithProject {
   comment_letter_draft: string | null;
   notice_to_building_official_filed_at: string | null;
   compliance_affidavit_signed_at: string | null;
+  special_inspector_designated: boolean | null;
+  special_inspector_name: string | null;
+  special_inspector_license: string | null;
   project: {
     name: string;
     address: string;
