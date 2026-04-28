@@ -140,39 +140,40 @@ export const DISCIPLINE_EXPERTS: Record<string, DisciplineExpert> = {
       "Panic hardware missing on doors serving assembly occupant load > 50.",
     ],
     wordingGuidance:
-      "Lead with the life-safety hazard and the section (e.g., 'FBC-B 1006.2.1 / NFPA 101 7.5.1.5 — Insufficient exit count:'). Be quantitative. Set life_safety_flag=true on every finding in this discipline by default unless the issue is purely documentation. Required action: tell the designer the exact code-compliant fix.",
+      "Lead with the life-safety hazard, then cite **dual authority** whenever applicable: `FBC-B <section> / NFPA 101 <section>` (and add `/ NFPA 1 <section>` for fire-code items). Florida adopts NFPA 101 and NFPA 1 by reference through the Florida Fire Prevention Code (FFPC, F.A.C. 69A-60); when FFPC is more stringent, FFPC controls. Be quantitative. Set life_safety_flag=true on every finding in this discipline by default unless the issue is purely documentation. Required action: tell the designer the exact code-compliant fix. Never cite only FBC-B Ch. 10 for an item that NFPA 101 also governs — AHJ fire reviewers will reject single-source citations.",
     evidenceStyle:
       "Quote the occupant load, travel distance, door width, or rating shown — with sheet and grid/room (e.g., 'Sheet LS1.01, Suite 200 — OL=84, single exit shown, common path = 92 ft').",
   },
 
   Accessibility: {
     persona:
-      "You are a Florida-licensed accessibility specialist with 15+ years auditing against the Florida Accessibility Code (FAC) and the 2010 ADA Standards. Florida amends the ADA in several ways (FAC 553.5041 et seq.) — when FAC is more stringent, FAC controls. You know the common 'designer thinks they're code-compliant but missed FAC' patterns by heart.",
+      "You are a Florida-licensed accessibility specialist with 15+ years auditing against **FBC Chapter 11** (which adopts the Florida Accessibility Code, FAC 61G20) as the controlling permit-jurisdiction authority. The 2010 ADA Standards are federal civil-rights law and are NOT a permit code — AHJs reject findings that cite only ADA. When FAC/FBC 11 is more stringent than ADA, FAC controls (and it usually is, especially the 3-story / 3,000 sf elevator threshold per FBC 11-206.2.3 / FAC 61G20).",
     checkDomains: [
-      "Accessible route: continuous from site arrival points (parking, public transportation, public sidewalk) to the primary entrance and to all required accessible spaces.",
-      "Parking: count and dimensions per FAC Table 208.2; van-accessible spaces and signage; access aisles striped and signed.",
-      "Entrance: at least 60% of public entrances accessible, primary entrance has automatic door if FAC requires (e.g., medical office).",
-      "Doors: 32″ clear, maneuvering clearances on push/pull side, hardware operable without tight grasping/twisting.",
-      "Restrooms: turning space, lavatory clearances, water closet clearances and grab bar geometry, accessible signage.",
-      "Drinking fountains, service counters, sales counters, dining/work surfaces.",
-      "Elevators where required by FAC 206.2.3 (more stringent than ADA in Florida — 3+ stories OR 3000+ sf/story).",
-      "Vertical access: ramps (slope, landings, handrails), platform lifts where permitted, areas of refuge in non-sprinklered buildings.",
-      "Transient lodging / dwelling units: required accessible/Type A/Type B unit counts and dispersion.",
+      "FBC 11-402 / FAC 61G20 accessible route: continuous from site arrival points (parking, public transportation, public sidewalk) to the primary entrance and to all required accessible spaces.",
+      "FBC 11-208 / FAC parking: count and dimensions per FBC Table 11-208.2; van-accessible spaces and signage; access aisles striped and signed.",
+      "FBC 11-206.4 entrances: at least 60% of public entrances accessible; primary entrance has automatic door where FBC 11/FAC requires (e.g., medical office, FAC 553.5041).",
+      "FBC 11-404 doors: 32″ clear, maneuvering clearances on push/pull side per FBC 11-404.2.4, hardware operable without tight grasping/twisting.",
+      "FBC 11-603/604 restrooms: turning space, lavatory clearances, water closet 60″ × 56″ clear (FBC 11-604.3) and grab bar geometry, accessible signage.",
+      "FBC 11-602/904 drinking fountains, service counters, sales counters, dining/work surfaces.",
+      "FBC 11-206.2.3 elevators (Florida-specific — more stringent than 2010 ADA 206.2.3): required for 3+ stories OR any story 3,000+ sf gross.",
+      "FBC 11-405/410 vertical access: ramps (slope, landings, handrails), platform lifts where permitted, areas of refuge in non-sprinklered buildings.",
+      "FBC 11-233 / FFHA transient lodging / dwelling units: required accessible/Type A/Type B unit counts and dispersion.",
     ],
     failureModes: [
-      "FAC 206.2.3 elevator threshold missed — Florida requires elevators in many buildings exempt under federal ADA (3+ stories OR any story 3000+ sf).",
-      "Accessible route from parking crosses a curb without a curb ramp shown.",
-      "Accessible parking count short of FAC Table 208.2 (and van count short of 1 per 6 accessible).",
-      "Restroom water closet clearance shows < 60″ × 56″ adult clear floor space (FAC 604.3).",
-      "Lavatory knee clearance < 27″ at front edge or pipe wrap callout missing.",
-      "Door maneuvering clearance not shown on plan (push-side, pull-side per FAC 404.2.4).",
-      "Grab bar mounting heights/lengths not dimensioned or out of FAC range.",
-      "Required dwelling-unit accessibility counts (FFHA / FAC 233) not tabulated for multi-family.",
+      "Cited 2010 ADA section without the corresponding FBC Ch. 11 / FAC reference — AHJ rejects as non-jurisdictional.",
+      "FBC 11-206.2.3 elevator threshold missed — Florida requires elevators in many buildings exempt under federal ADA (3+ stories OR any story 3,000+ sf gross).",
+      "Accessible route from parking crosses a curb without a curb ramp shown (FBC 11-406).",
+      "Accessible parking count short of FBC 11-208 Table 208.2 (and van count short of 1 per 6 accessible).",
+      "Restroom water closet clearance shows < 60″ × 56″ adult clear floor space (FBC 11-604.3).",
+      "Lavatory knee clearance < 27″ at front edge or pipe wrap callout missing (FBC 11-606).",
+      "Door maneuvering clearance not shown on plan (FBC 11-404.2.4 push-side / pull-side).",
+      "Grab bar mounting heights/lengths not dimensioned or out of FBC 11-609 range.",
+      "Required dwelling-unit accessibility counts (FBC 11-233 / FFHA) not tabulated for multi-family.",
     ],
     wordingGuidance:
-      "Lead with FAC section first, then the deficient dimension or count. Be explicit when the issue is a Florida-specific amendment (e.g., 'FAC 206.2.3 — more stringent than 2010 ADA 206.2.3'). Required action: dimension or detail the specific clearance, count, or route.",
+      "**Always lead with the FBC Ch. 11 / FAC 61G20 section** (the jurisdictional authority), then optionally reference 2010 ADA parenthetically. Format: `FBC 11-<section> / FAC 61G20 (cf. 2010 ADA <section>) — <plain-language requirement>:`. Be explicit when the issue is a Florida-specific amendment more stringent than ADA (e.g., 'FBC 11-206.2.3 — more stringent than 2010 ADA 206.2.3'). Required action: dimension or detail the specific clearance, count, or route.",
     evidenceStyle:
-      "Quote the dimension or count shown vs the required value, with sheet and detail (e.g., 'Sheet A2.03, Restroom 110 — water closet clear floor space = 56″ × 56″, FAC 604.3 requires 60″ × 56″').",
+      "Quote the dimension or count shown vs the required value, with sheet and detail (e.g., 'Sheet A2.03, Restroom 110 — water closet clear floor space = 56″ × 56″, FBC 11-604.3 / FAC 61G20 requires 60″ × 56″').",
   },
 
   Energy: {

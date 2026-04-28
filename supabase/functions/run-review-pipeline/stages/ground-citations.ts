@@ -82,10 +82,28 @@ type GroundingRow = {
   id: string;
   finding: string;
   required_action: string;
+  discipline: string | null;
   code_reference:
     | { code?: string | null; section?: string | null; edition?: string | null }
     | null;
 };
+
+/** Disciplines that should bias toward fire-family canonical sections (NFPA/FFPC) when present. */
+const FIRE_FAMILY_DISCIPLINES = new Set([
+  "life safety",
+  "lifesafety",
+  "fire protection",
+  "fireprotection",
+]);
+
+function preferredFamiliesFor(discipline: string | null | undefined): string[] {
+  const d = (discipline ?? "").toLowerCase().trim();
+  if (FIRE_FAMILY_DISCIPLINES.has(d)) return ["fire", "building"];
+  if (d === "accessibility") return ["accessibility", "building"];
+  if (d === "energy") return ["energy", "building"];
+  if (d === "mep") return ["mechanical", "plumbing", "electrical", "building"];
+  return ["building"];
+}
 
 export async function stageGroundCitations(
   admin: ReturnType<typeof createClient>,
@@ -93,7 +111,7 @@ export async function stageGroundCitations(
 ) {
   const { data: defsRaw, error } = await admin
     .from("deficiencies_v2")
-    .select("id, finding, required_action, code_reference")
+    .select("id, finding, required_action, code_reference, discipline")
     .eq("plan_review_id", planReviewId)
     .neq("status", "resolved")
     .neq("status", "waived")
@@ -176,7 +194,7 @@ export async function stageGroundCitations(
     distinctSections.length > 0
       ? await admin
           .from("fbc_code_sections")
-          .select("code, section, edition, title, requirement_text")
+          .select("code, section, edition, title, requirement_text, code_family")
           .in("section", distinctSections)
       : { data: [], error: null };
   if (canonErr) throw canonErr;
@@ -187,11 +205,26 @@ export async function stageGroundCitations(
     edition: string;
     title: string;
     requirement_text: string;
+    code_family?: string | null;
   };
   const canon = (canonRaw ?? []) as Canon[];
 
-  function lookup(k: Key): { hit: Canon; matchedSection: string } | null {
+  function lookup(
+    k: Key,
+    preferredFamilies: string[],
+  ): { hit: Canon; matchedSection: string } | null {
     for (const section of parentSections(k.section)) {
+      // Family-biased: try preferred families first (e.g. fire for Life Safety),
+      // so an NFPA 101 7.5.1.5 finding is matched against the NFPA canonical
+      // even if a same-numbered FBC row also exists.
+      for (const fam of preferredFamilies) {
+        const famHit = canon.find(
+          (c) =>
+            c.section === section &&
+            (c.code_family ?? "building").toLowerCase() === fam,
+        );
+        if (famHit) return { hit: famHit, matchedSection: section };
+      }
       let hit =
         (k.edition &&
           canon.find(
@@ -235,7 +268,7 @@ export async function stageGroundCitations(
       // a legitimately citation-less finding (missing metadata, AHJ verify).
       status = looksProcedural(def) ? "no_citation_required" : "hallucinated";
     } else {
-      const found = lookup(key);
+      const found = lookup(key, preferredFamiliesFor(def.discipline));
       if (!found) {
         status = "not_found";
       } else {
