@@ -230,17 +230,54 @@ export async function stageVerify(
         corrected_finding?: string;
         corrected_required_action?: string;
       }>;
-    };
-    try {
-      result = (await callAI(
-        [
-          { role: "system", content: VERIFY_SYSTEM },
-          { role: "user", content },
-        ],
-        VERIFY_SCHEMA as unknown as Record<string, unknown>,
-      )) as typeof result;
-    } catch (err) {
-      console.error(`[verify] batch ${start} failed:`, err);
+    } | null = null;
+    let lastError: string | null = null;
+    let attempts = 0;
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+      attempts = attempt + 1;
+      try {
+        result = (await callAI(
+          [
+            { role: "system", content: VERIFY_SYSTEM },
+            { role: "user", content },
+          ],
+          VERIFY_SCHEMA as unknown as Record<string, unknown>,
+        )) as typeof result;
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        // Hard fail on billing — no point retrying.
+        if (lastError === "payment_required") break;
+        const delay = RETRY_DELAYS_MS[attempt];
+        if (delay !== undefined) await sleep(delay);
+      }
+    }
+
+    if (!result) {
+      // All retries exhausted. Mark every finding in this slice as
+      // `needs_human` (instead of leaving `unverified`) so the
+      // defensibility gate in stages/complete.ts doesn't flip the whole
+      // review to needs_human_review just because one batch hiccupped.
+      console.error(`[verify] batch ${start} gave up after ${attempts} attempts:`, lastError);
+      const reasonText = `Verifier could not produce a verdict after ${attempts} attempts (last error: ${lastError ?? "unknown"}). Routed to human review.`;
+      for (const target of slice) {
+        await admin
+          .from("deficiencies_v2")
+          .update({
+            verification_status: "needs_human",
+            verification_notes: reasonText.slice(0, 1000),
+            requires_human_review: true,
+            human_review_reason:
+              "Verifier stage failed to return a verdict — please confirm this finding manually before sending.",
+            verification_meta: {
+              verifier_attempts: attempts,
+              verifier_last_error: (lastError ?? "unknown").slice(0, 240),
+              verifier_failed_at: new Date().toISOString(),
+            },
+          })
+          .eq("id", target.id);
+      }
       skipped += slice.length;
       continue;
     }
