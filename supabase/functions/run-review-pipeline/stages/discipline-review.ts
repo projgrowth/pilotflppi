@@ -312,6 +312,92 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
   const findings = result?.findings ?? [];
   if (findings.length === 0) return 0;
 
+  // -------- Tier 2.1: Self-critique pass --------
+  // Re-show the same images to a cheap second model with the model's own
+  // findings and ask it to label each {keep, weak, junk} with a reason.
+  // This catches: (a) findings whose evidence quote isn't actually visible
+  // on the supplied sheets, (b) findings that contradict context shown
+  // elsewhere on the sheet, (c) generic boilerplate that didn't observe a
+  // specific defect. We keep this lightweight (one call per chunk) so it
+  // doesn't blow the chunk timeout.
+  const SELF_CRITIQUE_SCHEMA = {
+    name: "submit_self_critique",
+    description:
+      "For each draft finding, decide if it is grounded in what is actually visible on the supplied sheets.",
+    parameters: {
+      type: "object",
+      properties: {
+        verdicts: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              index: { type: "integer", minimum: 0 },
+              verdict: { type: "string", enum: ["keep", "weak", "junk"] },
+              reason: { type: "string" },
+            },
+            required: ["index", "verdict", "reason"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["verdicts"],
+      additionalProperties: false,
+    },
+  } as const;
+
+  const critiqueVerdicts = new Map<number, { verdict: "keep" | "weak" | "junk"; reason: string }>();
+  if (findings.length > 0 && ctx.disciplineImageUrls.length > 0) {
+    try {
+      const draftSummary = findings
+        .map((f, i) =>
+          `#${i} [${f.priority}] sheets=${(f.sheet_refs ?? []).join(",") || "—"} cite=${f.code_section ?? "—"}\n` +
+          `  finding: ${f.finding.slice(0, 240)}\n` +
+          `  evidence: ${(f.evidence ?? []).slice(0, 2).map((e) => `"${e.slice(0, 140)}"`).join(" | ") || "(none)"}`,
+        )
+        .join("\n\n");
+      const critiqueText =
+        `You drafted ${findings.length} ${ctx.discipline} findings against these plan sheets. ` +
+        `Re-examine the images. For each finding, decide:\n` +
+        `- keep: defect is clearly visible AND the evidence quote is something a reader could find on the sheet.\n` +
+        `- weak: defect is plausible but evidence quote is vague, generic, or only loosely supported by what's visible.\n` +
+        `- junk: defect is not visible, evidence quote does not appear on the sheets, or the finding contradicts something visible (e.g. you flagged 'no occupant load shown' but a load IS shown).\n\n` +
+        `Be honest. False positives waste reviewer time. Output one verdict per finding via submit_self_critique.\n\n` +
+        `## Draft findings\n${draftSummary}`;
+      const critiqueContent: Array<
+        | { type: "text"; text: string }
+        | { type: "image_url"; image_url: { url: string } }
+      > = [
+        { type: "text", text: critiqueText },
+        ...ctx.disciplineImageUrls.slice(0, 8).map((u) => ({
+          type: "image_url" as const,
+          image_url: { url: u },
+        })),
+      ];
+      const critiqueResult = (await callAI(
+        [
+          {
+            role: "system",
+            content:
+              "You are a senior Florida plan reviewer auditing another reviewer's draft findings against the actual plan sheets. Reject anything not clearly visible.",
+          },
+          { role: "user", content: critiqueContent },
+        ],
+        SELF_CRITIQUE_SCHEMA as unknown as Record<string, unknown>,
+        "google/gemini-2.5-flash",
+      )) as {
+        verdicts: Array<{ index: number; verdict: "keep" | "weak" | "junk"; reason: string }>;
+      };
+      for (const v of critiqueResult?.verdicts ?? []) {
+        if (typeof v.index === "number" && v.index >= 0 && v.index < findings.length) {
+          critiqueVerdicts.set(v.index, { verdict: v.verdict, reason: (v.reason ?? "").slice(0, 280) });
+        }
+      }
+    } catch (err) {
+      console.error("[discipline_review] self-critique failed (non-fatal):", err);
+    }
+  }
+
   const promptVersionId = await getActivePromptVersionId(admin, ctx.discipline);
 
   // Compute next def_number using MAX of existing rows for this
