@@ -384,6 +384,8 @@ export type Database = {
           county: string | null
           created_at: string
           discipline: string
+          embedded_at: string | null
+          embedding_vector: string | null
           fbc_edition: string | null
           firm_id: string | null
           id: string
@@ -407,6 +409,8 @@ export type Database = {
           county?: string | null
           created_at?: string
           discipline: string
+          embedded_at?: string | null
+          embedding_vector?: string | null
           fbc_edition?: string | null
           firm_id?: string | null
           id?: string
@@ -430,6 +434,8 @@ export type Database = {
           county?: string | null
           created_at?: string
           discipline?: string
+          embedded_at?: string | null
+          embedding_vector?: string | null
           fbc_edition?: string | null
           firm_id?: string | null
           id?: string
@@ -2438,6 +2444,24 @@ export type Database = {
         }
         Returns: {
           correction_id: string
+          similarity: number
+        }[]
+      }
+      match_correction_patterns: {
+        Args: {
+          match_count?: number
+          match_threshold?: number
+          p_discipline?: string
+          p_firm_id?: string
+          query_vector: string
+        }
+        Returns: {
+          confirm_count: number
+          id: string
+          original_finding: string
+          pattern_summary: string
+          reason_notes: string
+          rejection_count: number
           similarity: number
         }[]
       }
