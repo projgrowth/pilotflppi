@@ -860,6 +860,16 @@ export default function PlanReviewDetail() {
               recoveryCount={typeof progress.auto_recovery_count === "number" ? progress.auto_recovery_count : undefined}
               aiCheckStatus={status}
               failureReason={typeof progress.failure_reason === "string" ? progress.failure_reason : null}
+              qualityBreakdown={
+                progress.quality_breakdown && typeof progress.quality_breakdown === "object"
+                  ? (progress.quality_breakdown as {
+                      unverified_pct?: number;
+                      has_hallucinated_citations?: boolean;
+                      total_live_findings?: number;
+                      blocker_reason?: string | null;
+                    })
+                  : null
+              }
               needsPreparation={fileUrls.length > 0 && pageAssetCount === 0 && !uploading}
               onPrepareNow={handleReprepareInBrowser}
               preparingNow={reprepping}
