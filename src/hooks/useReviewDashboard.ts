@@ -120,6 +120,7 @@ export interface PipelineRow {
   started_at: string | null;
   completed_at: string | null;
   error_message: string | null;
+  updated_at: string | null;
 }
 
 export interface ProjectDnaRow {

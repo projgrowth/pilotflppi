@@ -329,3 +329,29 @@ export function PipelineProgressStepper({
     </ul>
   );
 }
+
+/**
+ * Tiny last-activity badge — rerenders every 15s via the parent's tick state
+ * so reviewers see the heartbeat age without staring at a static label.
+ * Color escalates (muted → amber → red) once the worker stops emitting
+ * updates, well before the 90s auto-retry threshold kicks in.
+ */
+function LastActivity({ updatedAt }: { updatedAt: string }) {
+  const ageMs = Date.now() - new Date(updatedAt).getTime();
+  const seconds = Math.max(0, Math.round(ageMs / 1000));
+  const label =
+    seconds < 60
+      ? `${seconds}s ago`
+      : `${Math.round(seconds / 60)}m ago`;
+  const tone =
+    ageMs > 5 * 60_000
+      ? "text-destructive"
+      : ageMs > 3 * 60_000
+        ? "text-warning"
+        : "text-muted-foreground/70";
+  return (
+    <span className={cn("ml-1.5 text-2xs font-mono", tone)} title={`Last heartbeat ${updatedAt}`}>
+      · {label}
+    </span>
+  );
+}
