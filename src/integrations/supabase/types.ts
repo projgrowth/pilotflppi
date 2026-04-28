@@ -58,6 +58,57 @@ export type Database = {
           },
         ]
       }
+      ahj_recipients: {
+        Row: {
+          address: string | null
+          contact_name: string | null
+          created_at: string
+          created_by: string | null
+          department: string | null
+          email: string | null
+          firm_id: string | null
+          id: string
+          jurisdiction: string
+          last_used_at: string | null
+          notes: string
+          phone: string | null
+          updated_at: string
+          use_count: number
+        }
+        Insert: {
+          address?: string | null
+          contact_name?: string | null
+          created_at?: string
+          created_by?: string | null
+          department?: string | null
+          email?: string | null
+          firm_id?: string | null
+          id?: string
+          jurisdiction: string
+          last_used_at?: string | null
+          notes?: string
+          phone?: string | null
+          updated_at?: string
+          use_count?: number
+        }
+        Update: {
+          address?: string | null
+          contact_name?: string | null
+          created_at?: string
+          created_by?: string | null
+          department?: string | null
+          email?: string | null
+          firm_id?: string | null
+          id?: string
+          jurisdiction?: string
+          last_used_at?: string | null
+          notes?: string
+          phone?: string | null
+          updated_at?: string
+          use_count?: number
+        }
+        Relationships: []
+      }
       ai_outputs: {
         Row: {
           confidence_score: number | null
@@ -2347,6 +2398,48 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      reviewer_licenses: {
+        Row: {
+          created_at: string
+          discipline: string
+          expires_on: string | null
+          firm_id: string | null
+          id: string
+          is_active: boolean
+          jurisdiction: string
+          license_number: string
+          license_type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          discipline: string
+          expires_on?: string | null
+          firm_id?: string | null
+          id?: string
+          is_active?: boolean
+          jurisdiction?: string
+          license_number: string
+          license_type?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          discipline?: string
+          expires_on?: string | null
+          firm_id?: string | null
+          id?: string
+          is_active?: boolean
+          jurisdiction?: string
+          license_number?: string
+          license_type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       sheet_coverage: {
         Row: {
