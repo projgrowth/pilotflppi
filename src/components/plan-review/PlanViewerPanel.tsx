@@ -114,9 +114,22 @@ export function PlanViewerPanel(props: Props) {
     );
   }
 
+  // While the AI pipeline is still working AND we don't yet have rendered
+  // pages to show, take over the canvas with the live progress overlay
+  // instead of stranding the user on a blank "Loading document…" spinner.
+  const showProcessing =
+    !!props.pipelineProcessing && props.pageImages.length === 0 && !!props.planReviewId;
+
   return (
     <>
-      {props.renderingPages && props.pageImages.length === 0 && (
+      {showProcessing && (
+        <ProcessingOverlay
+          planReviewId={props.planReviewId!}
+          onComplete={props.onPipelineComplete}
+          onOpenDashboard={props.onOpenDashboard}
+        />
+      )}
+      {!showProcessing && props.renderingPages && props.pageImages.length === 0 && (
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center space-y-3">
             <Loader2 className="h-8 w-8 text-accent mx-auto animate-spin" />
