@@ -129,6 +129,50 @@ export default function RecordDeliveryDialog({
         </DialogHeader>
 
         <div className="space-y-3 py-2">
+          {ahjOptions.length > 0 && (
+            <div className="space-y-1">
+              <Label htmlFor="ahj_pick" className="text-xs">
+                AHJ contact (autocomplete from your address book{jurisdiction ? ` for ${jurisdiction}` : ""})
+              </Label>
+              <Select onValueChange={applySuggestion}>
+                <SelectTrigger id="ahj_pick" className="h-9">
+                  <SelectValue placeholder="Pick a saved contact…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ahjOptions.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {[r.contact_name, r.email, r.department].filter(Boolean).join(" · ") || r.jurisdiction}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label htmlFor="contact_name" className="text-xs">Contact name</Label>
+              <Input
+                id="contact_name"
+                value={contactName}
+                onChange={(e) => setContactName(e.target.value)}
+                maxLength={200}
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="contact_email" className="text-xs">Contact email</Label>
+              <Input
+                id="contact_email"
+                type="email"
+                value={recipientEmail}
+                onChange={(e) => setRecipientEmail(e.target.value)}
+                maxLength={200}
+                className="h-9"
+              />
+            </div>
+          </div>
+
           <div className="space-y-1">
             <Label htmlFor="method">Delivery method</Label>
             <Select value={method} onValueChange={(v) => setMethod(v as DeliveryMethod)}>
@@ -145,7 +189,6 @@ export default function RecordDeliveryDialog({
               </SelectContent>
             </Select>
           </div>
-
           <div className="space-y-1">
             <Label htmlFor="delivered_at">Delivered at</Label>
             <Input
