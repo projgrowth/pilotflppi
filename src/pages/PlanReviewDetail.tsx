@@ -884,14 +884,18 @@ export default function PlanReviewDetail() {
 
       {/* DNA confirm card — surfaces a 30-second human sanity check after
           dna_extract completes and before the reviewer dives into findings.
-          Hides itself once `dna_confirmed_at` is written to ai_run_progress. */}
-      <div className="shrink-0 px-4 pt-2 empty:hidden">
-        <DNAConfirmCard
-          planReviewId={review.id}
-          aiRunProgress={(review as unknown as { ai_run_progress?: Record<string, unknown> | null }).ai_run_progress ?? null}
-          onEdit={openDashboard}
-        />
-      </div>
+          Hides itself once `dna_confirmed_at` is written to ai_run_progress.
+          Suppressed while the pipeline is still processing — the canvas
+          overlay owns the user's attention during that window. */}
+      {!pipelineProcessing && (
+        <div className="shrink-0 px-4 pt-2 empty:hidden">
+          <DNAConfirmCard
+            planReviewId={review.id}
+            aiRunProgress={(review as unknown as { ai_run_progress?: Record<string, unknown> | null }).ai_run_progress ?? null}
+            onEdit={openDashboard}
+          />
+        </div>
+      )}
 
       {/* Provenance / health strip — one-line trust receipt above the
           findings list. Reads useReviewHealth + project_dna + ai_run_progress. */}
