@@ -47,33 +47,34 @@ export async function sendCommentLetter(
 
   // 2. Persist the immutable snapshot first. If this throws we never
   // change project status — half-sent letters are worse than not sent.
+  const insertRow = {
+    plan_review_id: args.planReviewId,
+    firm_id: args.firmId,
+    round: args.round,
+    sent_by: args.sentByUserId,
+    recipient: args.recipient.slice(0, 500),
+    letter_html: args.letterHtml,
+    letter_html_sha256: letterHtmlSha256,
+    findings_json: args.findings as unknown as never,
+    firm_info_json: args.firmInfo as unknown as never,
+    readiness_snapshot: {
+      all_required_passing: args.readiness.allRequiredPassing,
+      blocking_count: args.readiness.blockingCount,
+      checks: args.readiness.checks.map((c) => ({
+        id: c.id,
+        required: c.required,
+        severity: c.severity,
+        title: c.title,
+      })),
+    } as unknown as never,
+    override_reasons:
+      args.overrideReason && args.overrideReason.trim().length > 0
+        ? args.overrideReason.trim().slice(0, 2000)
+        : null,
+  };
   const { data: snap, error: snapErr } = await supabase
     .from("comment_letter_snapshots")
-    .insert({
-      plan_review_id: args.planReviewId,
-      firm_id: args.firmId,
-      round: args.round,
-      sent_by: args.sentByUserId,
-      recipient: args.recipient.slice(0, 500),
-      letter_html: args.letterHtml,
-      letter_html_sha256: letterHtmlSha256,
-      findings_json: args.findings as unknown as object,
-      firm_info_json: args.firmInfo as unknown as object,
-      readiness_snapshot: {
-        all_required_passing: args.readiness.allRequiredPassing,
-        blocking_count: args.readiness.blockingCount,
-        checks: args.readiness.checks.map((c) => ({
-          id: c.id,
-          required: c.required,
-          severity: c.severity,
-          title: c.title,
-        })),
-      } as unknown as object,
-      override_reasons:
-        args.overrideReason && args.overrideReason.trim().length > 0
-          ? args.overrideReason.trim().slice(0, 2000)
-          : null,
-    })
+    .insert(insertRow)
     .select("id")
     .single();
   if (snapErr || !snap) {
