@@ -37,6 +37,7 @@ import { CertificateOfComplianceCard } from "@/components/inspections/Certificat
 import { EditProjectDialog } from "@/components/EditProjectDialog";
 import { ScheduleInspectionDialog } from "@/components/ScheduleInspectionDialog";
 import { NewReviewDialog } from "@/components/NewReviewDialog";
+import PipelineHealthChip from "@/components/plan-review/PipelineHealthChip";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -268,6 +269,7 @@ export default function ProjectDetail() {
  ]}
  actions={
  <div className="flex items-center gap-2">
+ <PipelineHealthChip projectId={project.id} />
  <Button variant="outline" size="sm" className="text-xs" onClick={() => setEditOpen(true)}>
  <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
  </Button>
