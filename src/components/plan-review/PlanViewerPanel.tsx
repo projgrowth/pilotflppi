@@ -47,6 +47,26 @@ interface Props {
 }
 
 export function PlanViewerPanel(props: Props) {
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleConfirmDelete = async () => {
+    if (!pendingDelete || !props.planReviewId) return;
+    setDeleting(true);
+    const result = await deletePlanReviewFile({
+      planReviewId: props.planReviewId,
+      filePath: pendingDelete,
+    });
+    setDeleting(false);
+    if (result.ok) {
+      toast.success("File removed");
+      setPendingDelete(null);
+      props.onFileDeleted?.();
+    } else {
+      toast.error(result.blocker ?? "Could not delete file");
+    }
+  };
+
   if (!props.hasDocuments) {
     return (
       <div className="flex-1 flex items-center justify-center">
