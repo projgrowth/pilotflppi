@@ -276,6 +276,7 @@ Deno.serve(async (req) => {
           "verify",
           "dedupe",
           "ground_citations",
+          "challenger",
           "cross_check",
           "deferred_scope",
           "prioritize",
