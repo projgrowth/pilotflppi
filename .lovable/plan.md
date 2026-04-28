@@ -1,4 +1,4 @@
-## Sprint 2 — P1: Code coverage gaps + threshold automation
+## Sprint 2 — P1: Code coverage gaps + threshold automation ✅ shipped (auto-finding deferred to Sprint 3)
 
 Sprint 1 closed the statutory filing/license gates. Sprint 2 closes the **code authority** gaps a Florida private provider can be cited for: incomplete fire code coverage (NFPA 1 / NFPA 101 / FFPC), missing threshold-building detection (F.S. 553.79(5)), and reviewer guidance that still treats accessibility as ADA-first instead of FBC Ch. 11 + FAC 61G20-first.
 
