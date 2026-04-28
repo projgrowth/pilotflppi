@@ -194,13 +194,11 @@ const EXTRACT_ZONING_TOOL = {
 };
 
 // Actions that use multimodal (vision) capabilities
-const MULTIMODAL_ACTIONS = new Set(["plan_review_check_visual", "extract_project_info", "extract_zoning_data"]);
+const MULTIMODAL_ACTIONS = new Set(["extract_project_info", "extract_zoning_data"]);
 
 // Actions that use tool calling for structured output
 // deno-lint-ignore no-explicit-any
 const TOOL_CALL_ACTIONS: Record<string, any> = {
-  plan_review_check: PLAN_REVIEW_TOOL,
-  plan_review_check_visual: PLAN_REVIEW_TOOL,
   extract_project_info: EXTRACT_PROJECT_TOOL,
   extract_zoning_data: EXTRACT_ZONING_TOOL,
 };
