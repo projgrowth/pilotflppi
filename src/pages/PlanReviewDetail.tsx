@@ -654,15 +654,22 @@ export default function PlanReviewDetail() {
       }
       setShowLintDialog(true);
     },
-    onQcApprove: async () => {
+    onQcApprove: async (notes?: string) => {
       // FS 553.791 sign-off integrity: a reviewer cannot QC their own work.
       if (review.reviewer_id && review.reviewer_id === user?.id) {
         toast.error("You ran this review — a different team member must approve QC.");
         return;
       }
+      const trimmedNotes = (notes ?? "").trim().slice(0, 4000);
       await supabase
         .from("plan_reviews")
-        .update({ qc_status: "qc_approved", qc_reviewer_id: user?.id })
+        .update({
+          qc_status: "qc_approved",
+          qc_reviewer_id: user?.id,
+          qc_approved_by: user?.id,
+          qc_approved_at: new Date().toISOString(),
+          qc_notes: trimmedNotes,
+        })
         .eq("id", review.id);
       await supabase.from("activity_log").insert({
         event_type: "qc_approved",
@@ -670,14 +677,20 @@ export default function PlanReviewDetail() {
         project_id: review.project_id,
         actor_id: user?.id,
         actor_type: "user",
+        metadata: { notes_length: trimmedNotes.length },
       });
       queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
       toast.success("QC approved — exports unlocked");
     },
-    onQcReject: async () => {
+    onQcReject: async (notes?: string) => {
+      const trimmedNotes = (notes ?? "").trim().slice(0, 4000);
       await supabase
         .from("plan_reviews")
-        .update({ qc_status: "qc_rejected", qc_reviewer_id: user?.id })
+        .update({
+          qc_status: "qc_rejected",
+          qc_reviewer_id: user?.id,
+          qc_notes: trimmedNotes,
+        })
         .eq("id", review.id);
       await supabase.from("activity_log").insert({
         event_type: "qc_rejected",
@@ -685,6 +698,7 @@ export default function PlanReviewDetail() {
         project_id: review.project_id,
         actor_id: user?.id,
         actor_type: "user",
+        metadata: { notes_length: trimmedNotes.length },
       });
       queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
       toast.error("QC rejected");
