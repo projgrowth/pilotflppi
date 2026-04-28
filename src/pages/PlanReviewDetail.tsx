@@ -61,6 +61,10 @@ import { RoundCarryoverPanel } from "@/components/plan-review/RoundCarryoverPane
 import { UploadProgressBar } from "@/components/plan-review/UploadProgressBar";
 import { SubmittalIncompleteBanner } from "@/components/plan-review/SubmittalIncompleteBanner";
 import { ReviewProvenanceStrip } from "@/components/plan-review/ReviewProvenanceStrip";
+import { sendCommentLetter } from "@/lib/send-comment-letter";
+import { fetchReadinessForSend } from "@/lib/letter-readiness-fetch";
+import { useFirmId } from "@/hooks/useFirmId";
+import type { ReadinessResult } from "@/lib/letter-readiness";
 
 import { Wand2, AlertTriangle, Loader2 } from "lucide-react";
 
@@ -139,6 +143,9 @@ export default function PlanReviewDetail() {
   // showShortcuts removed — workspace shortcuts surface via the dashboard's TriageShortcutsOverlay.
   const [lintIssues, setLintIssues] = useState<LintIssue[]>([]);
   const [showLintDialog, setShowLintDialog] = useState(false);
+  const [pendingReadiness, setPendingReadiness] = useState<ReadinessResult | null>(null);
+  const [sending, setSending] = useState(false);
+  const { firmId } = useFirmId();
   const [aiRunning, setAiRunning] = useState(false);
   const [aiCompleteFlash, setAiCompleteFlash] = useState<number | null>(null);
   const [reprepping, setReprepping] = useState(false);
