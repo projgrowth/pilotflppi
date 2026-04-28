@@ -1,60 +1,49 @@
-# Next best improvement: Execute Sprint 4 — Inspections Compliance & Certificate of Compliance
+## Cleanup Audit Results
 
-## Why this, why now
+After scanning the codebase post-Sprint 4, the system is in good shape. Most files are wired and used. The remaining issues are small dead code, one orphaned helper, and three navigation/documentation inconsistencies that could trip up the plan-review flow.
 
-Sprints 1–3 hardened the **plan-review** half of F.S. 553.791 (DNA extraction, statutory clock, county-styled comment letters, immutable hashed letter snapshots, dedupe).
+### 1. Orphaned File (created but never imported)
 
-The **inspections** half is still a plain checklist. From a private-provider standard, that's the single largest remaining liability:
+**`src/lib/inspection-window.ts`** — created in Sprint 4 to compute the F.S. 553.791(8) 10-business-day inspection window, but never wired into any UI or report. Two options:
+- **(a) Delete it** — keep the codebase honest. We can re-add when we actually surface the window in the inspection UI.
+- **(b) Wire it** — surface a "Inspection due by X" badge inside `RequiredInspectionsPanel.tsx` next to each required inspection row.
 
-- No required-inspections matrix per F.S. 553.79(5) / FBC 110 → provider can miss a statutorily required inspection.
-- No inspection report submitted to the AHJ per F.S. 553.791(8) → no defensible record.
-- **No Certificate of Compliance per F.S. 553.791(10)** → AHJ literally cannot issue the CO from our output today. This is the document our entire pipeline exists to produce.
-- No photo chain-of-custody → inspection evidence is challengeable.
-- No inspection-side statutory clock → overdue inspections aren't surfaced like overdue reviews are.
+**Recommendation: (b) wire it.** The function exists for a real statutory requirement and the panel already has the right context. This converts dead code into real value with ~10 lines of UI.
 
-Everything else on the roadmap (analytics polish, more counties, AI tuning) is incremental. This one closes the loop end-to-end: **intake → review → letter → inspections → CoC → CO**.
+### 2. Stale Documentation References
 
-## Scope (already detailed in `.lovable/plan.md`)
+**`src/lib/file-hash.ts`** header comment still mentions `send-letter-snapshot.ts` (deleted last sprint). Fix the comment to reference the current callers (`plan-review-upload.ts`, `send-inspection-report.ts`, `certificate-of-compliance.ts`).
 
-1. **Required-inspections matrix** — auto-derived from `plan_reviews.dna_extracted` (occupancy, stories, threshold flag). New `required_inspections` table + panel on `ProjectDetail`.
-2. **Inspection reports** — new `inspection_reports` table + `generate-inspection-report` edge function, county-styled HTML, hashed snapshot mirroring Sprint 3's letter-snapshot pattern.
-3. **Inspection readiness gate** — analog of `LetterReadinessGate` (license check, ≥3 photos, threshold special-inspector signature, narrative present).
-4. **Photo chain-of-custody** — extend `file-hash.ts` to preserve EXIF (capture time, GPS); new `inspection_photos` table with sha256 + geo + timestamp.
-5. **Certificate of Compliance** — new `certificate-of-compliance.ts` + `generate-coc` edge function. Verifies every required inspection passed, computes a Merkle-style chained SHA-256 over all inspection-report hashes, renders the certificate with chained hash + per-inspection attestations. Final attestation dialog (typed "I attest" + license #).
-6. **Inspection statutory clock** — extend `statutory-deadlines.ts` with `computeInspectionWindow`, reuse `DeadlineBar` styling (no animations, per project memory).
+### 3. Redundant / Confusing Routes
 
-## Files
+Two parallel review entry points exist in `App.tsx`:
 
-**New**
-- `supabase/migrations/<ts>_inspections_compliance.sql` (3 tables + RLS mirroring plan-review tables)
-- `supabase/functions/generate-inspection-report/index.ts`
-- `supabase/functions/generate-coc/index.ts`
-- `src/lib/required-inspections.ts`
-- `src/lib/inspection-readiness.ts`
-- `src/lib/send-inspection-report.ts`
-- `src/lib/certificate-of-compliance.ts`
-- `src/components/inspections/InspectionReadinessGate.tsx`
-- `src/components/inspections/InspectionReportPanel.tsx`
-- `src/components/inspections/InspectionPhotoUploader.tsx`
-- `src/components/CertificateOfComplianceCard.tsx`
+```
+/review              → Review.tsx          (project list, "Reviews" tab)
+/review/:id          → ReviewDetail.tsx    (84-line redirect shim)
+/plan-review/:id     → PlanReviewDetail.tsx (real workspace, 1009 lines)
+/plan-review/:id/dashboard → ReviewDashboard.tsx
+```
 
-**Edited**
-- `src/pages/Inspections.tsx`, `src/pages/ProjectDetail.tsx`
-- `src/lib/file-hash.ts` (EXIF-preserving variant), `src/lib/statutory-deadlines.ts`
+`ReviewDetail.tsx` is just a redirect helper that finds-or-creates a `plan_reviews` row then forwards to `/plan-review/:id`. It's fine functionally, but the `/review` vs `/plan-review` split is confusing for anyone reading the codebase.
 
-## Acceptance criteria
+**Recommendation:** Leave routes alone (they're working and any URL change risks breaking bookmarks), but add a one-line comment in `App.tsx` documenting the split: `/review` = project list, `/plan-review/:id` = workspace.
 
-- A pending project auto-generates its required inspections list from DNA; threshold projects include F.S. 553.79(5) Special Inspector items.
-- Each inspection produces a hashed, county-styled report; resending requires re-hash.
-- Photos store sha256 + EXIF capture time + GPS where present.
-- CoC button is disabled until **every** required inspection is `pass` and signed by a license valid for that trade.
-- CoC document embeds the chained hash and lists every report id + sha + inspector license.
-- Overdue inspections surface in the same statutory-clock UI as overdue reviews.
+### 4. Verified clean (no action)
 
-## Out of scope (explicitly deferred)
+I checked these and they're all wired correctly — no action needed:
+- All Sprint-4 inspection components (`RequiredInspectionsPanel`, `CertificateOfComplianceCard`, `InspectionReportEditor`) are imported and rendered.
+- All `src/components/plan-review/*` files are used.
+- `plan-review-upload.ts` is dynamic-imported by `PlanReviewDetail.tsx` (looked like an orphan to grep, isn't).
+- All 21 page files are route-mounted in `App.tsx`.
+- All hooks under `src/hooks/` are referenced.
+- No stale references to last-sprint deletions (`send-letter-snapshot`, `chunkPromises`, `verifySha256`, etc.).
 
-- Inspector mobile app / offline capture (tablet web is fine for now).
-- e-signature integrations (typed attestation + license# is statutorily acceptable).
-- Multi-provider co-signing.
+### What this changes
 
-Approve and I'll implement in one pass, in the order above (migration first, then libs, then edge functions, then UI).
+- ~3 file edits, no deletions.
+- `inspection-window.ts` becomes live (badge in RequiredInspectionsPanel showing 10-business-day deadline once an inspection is requested).
+- Docstring fixed in `file-hash.ts`.
+- Route map clarified in `App.tsx`.
+
+Approve to execute the cleanup + wire-up.
