@@ -162,6 +162,17 @@ export default function PlanReviewDetail() {
     expected: number;
   } | null>(null);
 
+  // Pipeline is "processing" when any stage row exists but the terminal
+  // `complete` row hasn't landed yet — OR when the user explicitly kicked off
+  // a Re-Analyze. Drives the full-canvas ProcessingOverlay so freshly-
+  // uploaded reviews show live progress instead of a blank panel.
+  const terminalComplete = pipeRows.some(
+    (r) => r.stage === "complete" && r.status === "complete",
+  );
+  const hasFatalError = pipeRows.some((r) => r.status === "error");
+  const pipelineProcessing =
+    aiRunning || (pipeRows.length > 0 && !terminalComplete && !hasFatalError);
+
   // Re-prepare pages in the browser using pdf.js — only path out of a
   // needs_browser_rasterization failure since Edge can't reliably rasterize PDFs.
   const handleReprepareInBrowser = useCallback(async () => {
