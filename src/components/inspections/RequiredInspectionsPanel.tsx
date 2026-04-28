@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { ClipboardList, ShieldAlert, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { deriveRequiredInspections } from "@/lib/required-inspections";
-import { evaluateThresholdBuilding } from "@/lib/threshold-building";
+import { detectThresholdBuilding } from "@/lib/threshold-building";
 
 interface Props {
   projectId: string;
@@ -77,7 +77,7 @@ export function RequiredInspectionsPanel({ projectId, tradeType }: Props) {
   });
 
   const threshold = useMemo(
-    () => evaluateThresholdBuilding(dnaRow as never),
+    () => detectThresholdBuilding(dnaRow as never),
     [dnaRow],
   );
 
