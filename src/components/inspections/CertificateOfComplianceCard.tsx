@@ -93,7 +93,7 @@ export function CertificateOfComplianceCard({ projectId, project }: Props) {
       attestor_license: attestorLicense,
       typed_attestation: attestation,
     });
-    if (!validation.ok) {
+    if (validation.ok === false) {
       toast.error(validation.reason);
       return;
     }
