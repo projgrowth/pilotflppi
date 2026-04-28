@@ -360,6 +360,27 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
 
   const rows = findings.map((f, i) => {
     const validSection = cleanSection(f.code_section);
+    const cleanedEvidence = (f.evidence ?? [])
+      .slice(0, 3)
+      .map((s) => (typeof s === "string" ? s.slice(0, 200) : ""))
+      .filter((s) => s.length > 0);
+    const evidenceCheck = verifyEvidenceShape(
+      cleanedEvidence,
+      f.finding,
+      f.sheet_refs ?? [],
+    );
+    // Findings whose evidence quotes look fabricated get auto-routed to
+    // human review. We don't delete them — a real defect can have weak
+    // quoting — but we don't let them silently flow to letter generation.
+    const baseConf = Math.max(0, Math.min(1, f.confidence_score ?? 0.5));
+    const adjustedConf = evidenceCheck.suspicious
+      ? Math.max(0.1, baseConf * 0.6)
+      : baseConf;
+    const requiresHumanReview =
+      !!f.requires_human_review || evidenceCheck.suspicious;
+    const humanReviewReason = evidenceCheck.suspicious
+      ? `Evidence verification: ${evidenceCheck.reason}. Confirm finding on the plan.`
+      : f.human_review_reason ?? null;
     return {
       plan_review_id: planReviewId,
       firm_id: firmId,
@@ -371,15 +392,22 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
         : {},
       finding: f.finding,
       required_action: f.required_action,
-      evidence: (f.evidence ?? []).slice(0, 3).map((s) => s.slice(0, 200)),
+      evidence: cleanedEvidence,
+      evidence_crop_meta: {
+        evidence_check: {
+          suspicious: evidenceCheck.suspicious,
+          reason: evidenceCheck.reason,
+          checked_at: new Date().toISOString(),
+        },
+      },
       priority: f.priority ?? "medium",
       life_safety_flag: !!f.life_safety_flag,
       permit_blocker: !!f.permit_blocker,
       liability_flag: !!f.liability_flag,
-      requires_human_review: !!f.requires_human_review,
-      human_review_reason: f.human_review_reason ?? null,
+      requires_human_review: requiresHumanReview,
+      human_review_reason: humanReviewReason,
       human_review_verify: f.human_review_verify ?? null,
-      confidence_score: Math.max(0, Math.min(1, f.confidence_score ?? 0.5)),
+      confidence_score: adjustedConf,
       confidence_basis: f.confidence_basis ?? "Vision-extracted",
       model_version: "google/gemini-2.5-flash",
       prompt_version_id: promptVersionId,
