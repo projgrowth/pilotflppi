@@ -18,7 +18,7 @@ interface Props {
     id: string;
     project_id: string;
     inspection_type: string;
-    result: "pending" | "pass" | "fail" | "partial";
+    result: string;
     notes: string | null;
     project?: { trade_type?: string | null } | null;
   };
