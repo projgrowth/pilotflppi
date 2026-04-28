@@ -35,7 +35,7 @@ import { RequiredInspectionsPanel } from "@/components/inspections/RequiredInspe
 import { CertificateOfComplianceCard } from "@/components/inspections/CertificateOfComplianceCard";
 import { EditProjectDialog } from "@/components/EditProjectDialog";
 import { ScheduleInspectionDialog } from "@/components/ScheduleInspectionDialog";
-import { NewPlanReviewWizard } from "@/components/NewPlanReviewWizard";
+import { NewReviewDialog } from "@/components/NewReviewDialog";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -298,7 +298,7 @@ export default function ProjectDetail() {
  {/* Dialogs */}
  <EditProjectDialog open={editOpen} onOpenChange={setEditOpen} project={project} />
  <ScheduleInspectionDialog open={scheduleOpen} onOpenChange={setScheduleOpen} projectId={project.id} />
- <NewPlanReviewWizard open={wizardOpen} onOpenChange={setWizardOpen} onComplete={(reviewId) => navigate(`/plan-review/${reviewId}`)} preselectedProjectId={project.id} />
+ <NewReviewDialog open={wizardOpen} onOpenChange={setWizardOpen} preselectedProjectId={project.id} />
 
  {/* Horizontal stepper */}
  <Card className="shadow-subtle mb-6">
