@@ -126,36 +126,47 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
     jumpFindingId: untriaged[0]?.id,
   });
 
-  // 2. Citations grounded — block on (a) hallucinated citations OR
-  //    (b) unverified+low-confidence combos. Hallucinated citations are
-  //    ALWAYS a hard block.
+  // 2. Citations grounded — block on:
+  //   (a) hallucinated citations (always — fabricated section numbers),
+  //   (b) mismatch / not_found citations that the reviewer hasn't dispositioned
+  //       (these are real risk: section exists but wording diverges, or section
+  //       isn't in the FBC index at all),
+  //   (c) verified_stub when the firm opts in,
+  //   (d) unverified + low-confidence combos.
+  // A finding with a non-null reviewer_disposition is treated as "the human
+  // has decided" — they accepted, waived, or rewrote. We trust that and don't
+  // block on the AI's grade anymore.
   const hallucinated = live.filter((f) => f.citation_status === "hallucinated");
-  const NON_BLOCKING = new Set([
-    "verified",
-    "no_citation_required",
-    "mismatch",
-    "not_found",
-  ]);
+  const undecided = (f: { reviewer_disposition: string | null }) =>
+    f.reviewer_disposition === null;
+  const undecidedMismatch = live.filter(
+    (f) => f.citation_status === "mismatch" && undecided(f),
+  );
+  const undecidedNotFound = live.filter(
+    (f) => f.citation_status === "not_found" && undecided(f),
+  );
   // verified_stub becomes blocking when the firm setting is on (default true).
   const blockStubs = input.blockLetterOnUngrounded !== false;
   const stubCitations = blockStubs
-    ? live.filter((f) => f.citation_status === "verified_stub")
+    ? live.filter((f) => f.citation_status === "verified_stub" && undecided(f))
     : [];
   const weakCitations = live.filter(
     (f) =>
-      !NON_BLOCKING.has(f.citation_status ?? "unverified") &&
-      f.citation_status !== "verified_stub" &&
       (f.citation_status ?? "unverified") === "unverified" &&
       typeof f.confidence_score === "number" &&
-      f.confidence_score < 0.7,
+      f.confidence_score < 0.7 &&
+      undecided(f),
   );
+  const undecidedTotal =
+    undecidedMismatch.length + undecidedNotFound.length;
   const unverified = live.filter(
     (f) => (f.verification_status ?? "unverified") === "unverified",
   );
   const unverifiedPct = live.length === 0 ? 0 : unverified.length / live.length;
   const verifierStalled = unverifiedPct > 0.25;
 
-  const citationProblems = hallucinated.length + weakCitations.length + stubCitations.length;
+  const citationProblems =
+    hallucinated.length + weakCitations.length + stubCitations.length + undecidedTotal;
   checks.push({
     id: "citations",
     required: true,
@@ -164,19 +175,32 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
       citationProblems === 0
         ? "Citations look defensible"
         : hallucinated.length > 0
-          ? `${hallucinated.length} hallucinated citation${hallucinated.length === 1 ? "" : "s"}${weakCitations.length || stubCitations.length ? ` + ${weakCitations.length + stubCitations.length} ungrounded` : ""}`
-          : stubCitations.length > 0
-            ? `${stubCitations.length} citation${stubCitations.length === 1 ? "" : "s"} reference an FBC stub (no canonical text)`
-            : `${weakCitations.length} ungrounded low-confidence citation${weakCitations.length === 1 ? "" : "s"}`,
+          ? `${hallucinated.length} hallucinated citation${hallucinated.length === 1 ? "" : "s"}${
+              undecidedTotal + weakCitations.length + stubCitations.length > 0
+                ? ` + ${undecidedTotal + weakCitations.length + stubCitations.length} ungrounded`
+                : ""
+            }`
+          : undecidedTotal > 0
+            ? `${undecidedTotal} citation${undecidedTotal === 1 ? "" : "s"} need a reviewer decision (mismatch / not in DB)`
+            : stubCitations.length > 0
+              ? `${stubCitations.length} citation${stubCitations.length === 1 ? "" : "s"} reference an FBC stub (no canonical text)`
+              : `${weakCitations.length} ungrounded low-confidence citation${weakCitations.length === 1 ? "" : "s"}`,
     detail:
       citationProblems === 0
         ? "No findings combine an unverified FBC citation with low AI confidence, no hallucinated citations remain, and every grounded section has full canonical text."
         : hallucinated.length > 0
           ? "These cite an FBC section the system could not parse. Fix or remove them before sending."
-          : stubCitations.length > 0
-            ? "These cite real FBC sections, but the canonical requirement text isn't seeded yet — so the AI can't prove the citation actually supports the finding. Verify by hand or remove."
-            : "These cite an FBC section the system couldn't ground AND scored under 0.7. Verify by hand or remove.",
-    jumpFindingId: hallucinated[0]?.id ?? stubCitations[0]?.id ?? weakCitations[0]?.id,
+          : undecidedTotal > 0
+            ? "Mismatch / not-in-DB citations need a reviewer decision (confirm, modify, or reject) before sending. Use 'Re-ground' on the finding card to retry, or accept it manually."
+            : stubCitations.length > 0
+              ? "These cite real FBC sections, but the canonical requirement text isn't seeded yet — so the AI can't prove the citation actually supports the finding. Verify by hand or remove."
+              : "These cite an FBC section the system couldn't ground AND scored under 0.7. Verify by hand or remove.",
+    jumpFindingId:
+      hallucinated[0]?.id ??
+      undecidedMismatch[0]?.id ??
+      undecidedNotFound[0]?.id ??
+      stubCitations[0]?.id ??
+      weakCitations[0]?.id,
   });
 
   // 2b. Verifier completion — required check (two-pair-of-eyes promise).

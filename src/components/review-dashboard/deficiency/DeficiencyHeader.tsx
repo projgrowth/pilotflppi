@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, ShieldCheck, ShieldX, ShieldAlert, GitMerge } from "lucide-react";
+import { ExternalLink, ShieldCheck, ShieldX, ShieldAlert, GitMerge, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -14,6 +14,8 @@ import {
   type DeficiencyV2Row,
   useSheetCoverage,
 } from "@/hooks/useReviewDashboard";
+import CitationBadge from "../CitationBadge";
+import { useRegroundCitation } from "@/hooks/useRegroundCitation";
 
 interface Props {
   planReviewId: string;
@@ -136,7 +138,21 @@ export default function DeficiencyHeader({ planReviewId, def }: Props) {
       {/* Body */}
       <div className="mt-3 space-y-2">
         {codeRefStr && (
-          <div className="text-2xs font-mono text-muted-foreground">{codeRefStr}</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-2xs font-mono text-muted-foreground">{codeRefStr}</span>
+            <CitationBadge
+              status={def.citation_status}
+              matchScore={def.citation_match_score}
+              canonicalText={def.citation_canonical_text}
+              compact
+            />
+            {needsReground(def.citation_status) && (
+              <RegroundButton
+                planReviewId={planReviewId}
+                deficiencyId={def.id}
+              />
+            )}
+          </div>
         )}
         <div>
           <div className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -239,6 +255,50 @@ function priorityCls(p: "high" | "medium" | "low") {
   if (p === "high") return "bg-destructive/10 text-destructive border-destructive/30";
   if (p === "medium") return "bg-orange-500/10 text-orange-600 border-orange-500/30 dark:text-orange-400";
   return "bg-muted text-muted-foreground border-border";
+}
+
+function needsReground(status: DeficiencyV2Row["citation_status"]): boolean {
+  return (
+    status === "mismatch" ||
+    status === "not_found" ||
+    status === "hallucinated" ||
+    status === "unverified"
+  );
+}
+
+function RegroundButton({
+  planReviewId,
+  deficiencyId,
+}: {
+  planReviewId: string;
+  deficiencyId: string;
+}) {
+  const reground = useRegroundCitation();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-6 gap-1 px-1.5 text-2xs"
+          disabled={reground.isPending}
+          onClick={(e) => {
+            e.stopPropagation();
+            reground.mutate({ planReviewId, deficiencyId });
+          }}
+        >
+          <RefreshCw
+            className={cn("h-3 w-3", reground.isPending && "animate-spin")}
+          />
+          Re-ground
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-xs text-xs">
+        Re-runs FBC citation matching for just this finding. Use after editing
+        the code reference, or to retry a hallucinated/mismatched citation.
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 function Tag({
