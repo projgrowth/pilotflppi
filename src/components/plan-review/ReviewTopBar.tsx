@@ -1,8 +1,7 @@
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ArrowLeft, Sparkles, Loader2, Check, Wind, Plus, ChevronDown, ExternalLink } from "lucide-react";
+import { ArrowLeft, Sparkles, Loader2, Check, Wind, Plus, ChevronDown, ExternalLink, MoreVertical, Trash2 } from "lucide-react";
 import { DeadlineRing } from "@/components/DeadlineRing";
 import { ContractorHoverCard } from "@/components/ContractorHoverCard";
 import { PipelineProgressStepper } from "@/components/plan-review/PipelineProgressStepper";
@@ -30,13 +29,14 @@ interface ReviewTopBarProps {
   onNewRound: () => void;
   onPipelineComplete?: () => void;
   onOpenDashboard?: () => void;
+  onDeleteReview?: () => void;
 }
 
 export function ReviewTopBar({
   projectName, tradeType, address, county, hvhz, contractor,
   round, reviewId, daysLeft, aiRunning, aiCompleteFlash, hasFindings,
   rounds, onBack, onRunAICheck, onNavigateRound, onNewRound,
-  onPipelineComplete, onOpenDashboard,
+  onPipelineComplete, onOpenDashboard, onDeleteReview,
 }: ReviewTopBarProps) {
   const button = (
     <Button
@@ -140,6 +140,32 @@ export function ReviewTopBar({
           </Popover>
         ) : (
           button
+        )}
+
+        {onDeleteReview && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" aria-label="Review actions">
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[180px]">
+              {onOpenDashboard && (
+                <>
+                  <DropdownMenuItem onClick={onOpenDashboard} className="text-xs">
+                    <ExternalLink className="h-3.5 w-3.5 mr-2" /> Pipeline dashboard
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              <DropdownMenuItem
+                onClick={onDeleteReview}
+                className="text-xs text-destructive focus:text-destructive"
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete this round
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
     </div>
