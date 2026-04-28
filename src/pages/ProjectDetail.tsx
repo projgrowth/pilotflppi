@@ -120,7 +120,8 @@ export default function ProjectDetail() {
  const [scheduleOpen, setScheduleOpen] = useState(false);
  const [wizardOpen, setWizardOpen] = useState(false);
  const [statusUpdating, setStatusUpdating] = useState(false);
- const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { exportArchive, exporting } = useExportProjectArchive();
 
  const DOC_CATEGORIES = [
  { value: "all", label: "All" },
@@ -273,10 +274,24 @@ export default function ProjectDetail() {
  <Button variant="outline" size="sm" className="text-xs" onClick={() => setScheduleOpen(true)}>
  <CalendarPlus className="h-3.5 w-3.5 mr-1" /> Inspect
  </Button>
- <Button variant="outline" size="sm" className="text-xs" onClick={() => fileInputRef.current?.click()}>
- <Upload className="h-3.5 w-3.5 mr-1" /> Upload
- </Button>
- {reviews && reviews.length > 0 ? (
+  <Button variant="outline" size="sm" className="text-xs" onClick={() => fileInputRef.current?.click()}>
+  <Upload className="h-3.5 w-3.5 mr-1" /> Upload
+  </Button>
+  <Button
+    variant="outline"
+    size="sm"
+    className="text-xs"
+    onClick={() => exportArchive(project.id, project.name)}
+    disabled={exporting}
+    title="Download AHJ records-retention bundle (letters, reports, COCs, activity log, hashes)"
+  >
+    {exporting ? (
+      <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+    ) : (
+      <Archive className="h-3.5 w-3.5 mr-1" />
+    )}
+    Archive
+  </Button>
  <Button
  size="sm"
  className="text-xs"
