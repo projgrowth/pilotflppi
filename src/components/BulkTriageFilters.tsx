@@ -116,6 +116,40 @@ export function BulkTriageFilters({
         );
       })}
 
+      {/* Quality chips — only visible when AI flagged unverified or
+          hallucinated findings (Phase 4 hardening). */}
+      {showQuality && qualityCounts && onQualityFilterChange && (
+        <>
+          <span className="mx-0.5 h-3 w-px bg-border/60" aria-hidden />
+          {(["unverified", "hallucinated"] as const).map((key) => {
+            const count = qualityCounts[key] ?? 0;
+            if (count === 0 && qualityFilter !== key) return null;
+            const active = qualityFilter === key;
+            const label = key === "unverified" ? "Unverified" : "Hallucinated";
+            return (
+              <button
+                key={key}
+                onClick={() => onQualityFilterChange(active ? "all" : key)}
+                title={
+                  key === "unverified"
+                    ? "AI verifier didn't reach a verdict — needs human eyes"
+                    : "Cited FBC section couldn't be matched to the canonical library"
+                }
+                className={cn(
+                  "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition-all border",
+                  active
+                    ? "bg-destructive/10 text-destructive border-destructive/25"
+                    : "bg-transparent text-muted-foreground/60 border-transparent hover:bg-muted/50",
+                )}
+              >
+                {label}
+                <span className="opacity-70">{count}</span>
+              </button>
+            );
+          })}
+        </>
+      )}
+
       {/* Secondary filters tucked into popover */}
       {hasSecondary && (
         <Popover>
