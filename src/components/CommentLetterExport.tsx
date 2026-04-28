@@ -26,6 +26,11 @@ export interface FirmInfo {
   address: string;
   logo_url: string;
   closing_language: string;
+  // F.S. 553.791(20) — printed on the letter for AHJ defensibility
+  eo_carrier?: string | null;
+  eo_policy_number?: string | null;
+  eo_coverage_amount?: number | null;
+  eo_expires_on?: string | null;
 }
 
 interface CommentLetterExportProps {
@@ -170,7 +175,7 @@ function buildSupplementalSections(config: CountyRequirements): string {
 
 function buildLetterHTML(props: CommentLetterExportProps): string {
   const { projectName, address, county, jurisdiction, tradeType, round, findings, findingStatuses, firmInfo } = props;
-  const firm = firmInfo || { firm_name: "", license_number: "", email: "", phone: "", address: "", logo_url: "", closing_language: "" };
+  const firm = firmInfo || { firm_name: "", license_number: "", email: "", phone: "", address: "", logo_url: "", closing_language: "", eo_carrier: null, eo_policy_number: null, eo_coverage_amount: null, eo_expires_on: null };
   const config = getCountyRequirements(county);
   const date = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
   const grouped = groupByDiscipline(findings);
@@ -347,6 +352,7 @@ ${buildSupplementalSections(config)}
     Plan Review Engineer<br>
     ${firm.firm_name || "[Firm Name]"}<br>
     License # ${firm.license_number || "[License #]"}
+    ${firm.eo_policy_number ? `<br><span style="font-size:10px;color:#555">E&amp;O Insurance: ${firm.eo_carrier || "Carrier on file"} · Policy ${firm.eo_policy_number}${firm.eo_coverage_amount ? ` · $${Number(firm.eo_coverage_amount).toLocaleString()} coverage` : ""}${firm.eo_expires_on ? ` · expires ${firm.eo_expires_on}` : ""} (F.S. 553.791(20))</span>` : ""}
   </div>
 </div>
 
