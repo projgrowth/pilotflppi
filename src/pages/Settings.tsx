@@ -254,14 +254,39 @@ export default function SettingsPage() {
  <Label>Role</Label>
  <Input value={profile?.role || "reviewer"} disabled className="bg-muted/50 capitalize" />
  </div>
- <Button onClick={saveProfile} disabled={saving}>
- {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : "Save Profile"}
- </Button>
- </>
- )}
- </CardContent>
- </Card>
- </TabsContent>
+  <Button onClick={saveProfile} disabled={saving}>
+  {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : "Save Profile"}
+  </Button>
+
+  <div className="mt-6 space-y-3 border-t pt-4">
+    <div>
+      <Label className="text-sm font-medium">Florida Professional Licenses (F.S. 553.791(2))</Label>
+      <p className="text-[11px] text-muted-foreground mt-0.5">
+        Letters cannot be sent for a discipline you don't have a license on file for. Leave blank if not licensed.
+      </p>
+    </div>
+    <div className="grid gap-2 sm:grid-cols-2">
+      {DISCIPLINE_KEYS.map((d) => (
+        <div key={d.key} className="space-y-1">
+          <Label className="text-xs">{d.label}</Label>
+          <Input
+            value={licenseMap[d.key] ?? ""}
+            onChange={(e) => setLicenseMap((m) => ({ ...m, [d.key]: e.target.value }))}
+            placeholder="e.g. PE 12345"
+            className="h-8 text-xs"
+          />
+        </div>
+      ))}
+    </div>
+    <Button onClick={saveLicenses} disabled={savingLicenses} variant="secondary">
+      {savingLicenses ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : "Save Licenses"}
+    </Button>
+  </div>
+  </>
+  )}
+  </CardContent>
+  </Card>
+  </TabsContent>
 
  <TabsContent value="firm">
  <Card className="shadow-subtle">
