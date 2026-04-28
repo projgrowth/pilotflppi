@@ -57,6 +57,8 @@ interface ReviewWithProject {
   round: number;
   qc_status: string;
   comment_letter_draft: string | null;
+  notice_to_building_official_filed_at: string | null;
+  compliance_affidavit_signed_at: string | null;
   project: {
     name: string;
     address: string;
@@ -83,7 +85,7 @@ export default function ReviewDashboard() {
       const { data, error } = await supabase
         .from("plan_reviews")
         .select(
-          "id, project_id, round, qc_status, comment_letter_draft, project:projects(name, address, jurisdiction, county)",
+          "id, project_id, round, qc_status, comment_letter_draft, notice_to_building_official_filed_at, compliance_affidavit_signed_at, project:projects(name, address, jurisdiction, county)",
         )
         .eq("id", id!)
         .maybeSingle();
