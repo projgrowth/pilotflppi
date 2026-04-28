@@ -230,6 +230,21 @@ function buildLetterHTML(props: CommentLetterExportProps): string {
   .signature-block { margin-top: 40px; }
   .signature-line { border-top: 1px solid #1a1a1a; width: 250px; margin-top: 40px; padding-top: 4px; font-size: 9pt; }
   .footer { margin-top: 30px; padding-top: 8px; border-top: 1px solid #cbd5e0; font-size: 7.5pt; color: #718096; text-align: center; }
+  .appendix-divider { page-break-before: always; }
+  .appendix-cover { padding: 24px 0 16px; border-bottom: 2px solid #1a365d; margin-bottom: 16px; }
+  .appendix-cover h2 { font-size: 14pt; color: #1a365d; letter-spacing: 1px; margin-bottom: 8px; }
+  .appendix-cover p { font-size: 9.5pt; line-height: 1.55; margin-bottom: 6px; }
+  .appendix-cover-meta { font-size: 8.5pt; color: #4a5568; font-style: italic; }
+  .appendix-list { display: block; }
+  .appendix-item { page-break-inside: avoid; margin-bottom: 18px; padding: 10px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fafbfc; }
+  .appendix-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
+  .appendix-num { font-weight: bold; color: #1a365d; font-size: 10pt; }
+  .appendix-disc { font-size: 8pt; color: #4a5568; margin-left: auto; text-transform: uppercase; letter-spacing: 0.5px; }
+  .appendix-refs { font-size: 9pt; color: #2d3748; margin-bottom: 6px; }
+  .appendix-sheet { margin-left: 8px; font-family: 'Courier New', monospace; font-size: 8.5pt; color: #4a5568; }
+  .appendix-img { display: block; max-width: 100%; max-height: 4.5in; margin: 6px 0; border: 1px solid #cbd5e0; }
+  .appendix-no-crop { padding: 8px; background: #f7fafc; border: 1px dashed #cbd5e0; font-size: 8.5pt; color: #718096; font-style: italic; margin: 6px 0; }
+  .appendix-caption { font-size: 9pt; color: #2d3748; line-height: 1.5; margin-top: 4px; }
 </style>
 </head><body>
 
@@ -334,6 +349,54 @@ ${buildSupplementalSections(config)}
     License # ${firm.license_number || "[License #]"}
   </div>
 </div>
+
+${(() => {
+  // Evidence Appendix (Exhibit A): a consolidated, page-broken section listing
+  // every finding's visual evidence crop with finding number, sheet ref, code
+  // citation, and severity. AHJ reviewers can scan all evidence in one place
+  // without flipping through the body of the letter. Findings without an
+  // evidence crop URL are still listed (with a "no crop available" note) so
+  // the appendix is a complete index of the letter's findings.
+  if (findings.length === 0) return "";
+  let n = 0;
+  const rows = DISCIPLINE_ORDER.filter((d) => grouped[d])
+    .map((discipline) => {
+      const items = grouped[discipline];
+      return items
+        .map(({ finding }) => {
+          n++;
+          const status = (finding.finding_id && findingStatuses[finding.finding_id]) || "open";
+          const sevClass = `sev-${finding.severity}`;
+          return `
+<div class="appendix-item">
+  <div class="appendix-meta">
+    <span class="appendix-num">Exhibit ${n}</span>
+    <span class="finding-severity ${sevClass}">${finding.severity.toUpperCase()}</span>
+    ${status !== "open" ? `<span class="status-tag status-${status}">${status.toUpperCase()}</span>` : ""}
+    <span class="appendix-disc">${getDisciplineLabel(discipline)}</span>
+  </div>
+  <div class="appendix-refs">
+    <span class="code-ref">${finding.code_ref}</span>
+    <span class="appendix-sheet">Sheet: ${finding.page}</span>
+  </div>
+  ${finding.evidence_crop_url
+    ? `<img src="${finding.evidence_crop_url}" alt="Evidence for finding ${n} (${finding.code_ref}) on sheet ${finding.page}" class="appendix-img" />`
+    : `<div class="appendix-no-crop">No visual crop available — refer to ${finding.page} in the full plan set.</div>`}
+  <div class="appendix-caption">${finding.description}</div>
+</div>`;
+        })
+        .join("");
+    })
+    .join("");
+  return `
+<div class="appendix-divider"></div>
+<div class="appendix-cover">
+  <h2>Exhibit A — Evidence Appendix</h2>
+  <p>The following pages reproduce visual evidence for each numbered finding in this letter. Each exhibit corresponds to the finding number in the body. This appendix is provided so the Authority Having Jurisdiction can verify each citation against the actual plan markup without flipping back to the source set.</p>
+  <p class="appendix-cover-meta">${findings.length} finding${findings.length === 1 ? "" : "s"} · ${findings.filter((f) => f.evidence_crop_url).length} visual crop${findings.filter((f) => f.evidence_crop_url).length === 1 ? "" : "s"}</p>
+</div>
+<div class="appendix-list">${rows}</div>`;
+})()}
 
 <div class="footer">
   ${firm.firm_name || "[Firm Name]"} | Licensed Private Provider under F.S. 553.791 | This document is confidential and intended for the addressee only.

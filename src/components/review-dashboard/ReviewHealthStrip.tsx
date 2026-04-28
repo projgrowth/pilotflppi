@@ -33,6 +33,7 @@ import ReviewerMemoryCard from "./ReviewerMemoryCard";
 import CrossCheckBanner from "./CrossCheckBanner";
 import ReviewSummaryHeader from "./ReviewSummaryHeader";
 import CoverageChip from "./CoverageChip";
+import SheetRoutingBanner from "./SheetRoutingBanner";
 
 interface Props {
   planReviewId: string;
@@ -282,6 +283,8 @@ export default function ReviewHealthStrip({
         </Chip>
 
         <CoverageChip planReviewId={planReviewId} />
+
+        <SheetRoutingBanner planReviewId={planReviewId} />
 
         {hasPageGap && (
           <button
