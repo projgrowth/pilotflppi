@@ -1,4 +1,4 @@
-import { Check, X, Loader2 } from "lucide-react";
+import { Check, X, Loader2, Flag, Tag } from "lucide-react";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -28,12 +28,53 @@ const REJECTION_REASONS = Object.entries(REJECTION_REASON_LABELS).map(
   ([value, label]) => ({ value: value as RejectionReason, label }),
 );
 
+const DISCIPLINE_OPTIONS = [
+  "architectural",
+  "structural",
+  "mechanical",
+  "electrical",
+  "plumbing",
+  "fire_protection",
+  "civil",
+  "energy",
+  "accessibility",
+  "life_safety",
+] as const;
+
+const PRIORITY_OPTIONS: Array<{ value: "high" | "medium" | "low"; label: string }> = [
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
+];
+
 export default function BulkActionBar({ planReviewId, selected, onClear }: Props) {
   const qc = useQueryClient();
-  const [busy, setBusy] = useState<"confirm" | "reject" | null>(null);
+  const [busy, setBusy] = useState<"confirm" | "reject" | "priority" | "discipline" | null>(null);
   const [reason, setReason] = useState<RejectionReason>(REJECTION_REASONS[0].value);
 
   if (selected.length === 0) return null;
+
+  async function bulkUpdate(
+    patch: Record<string, unknown>,
+    busyTag: "priority" | "discipline",
+    successMsg: string,
+  ) {
+    setBusy(busyTag);
+    try {
+      const ids = selected.map((d) => d.id);
+      const { error } = await supabase
+        .from("deficiencies_v2")
+        .update(patch)
+        .in("id", ids);
+      if (error) throw error;
+      qc.invalidateQueries({ queryKey: ["deficiencies_v2", planReviewId] });
+      toast.success(`${successMsg} (${ids.length})`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Bulk update failed");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function confirmAll() {
     setBusy("confirm");
