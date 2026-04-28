@@ -252,6 +252,13 @@ export async function stageDedupe(
   // match is found; otherwise the auto-generated UUID stays.
   await applyCrossRoundLineage(admin, planReviewId, rows);
 
+  // -------- Sprint 3: Threshold building auto-finding (F.S. 553.79(5)) --------
+  // Conditional: only emit if reviewer hasn't already recorded a Special
+  // Inspector AND no existing finding already references 553.79(5). Avoids
+  // noise on resubmittals where the reviewer cleared the gate manually.
+  await emitThresholdAutoFinding(admin, planReviewId, rows);
+
+
   if (rows.length < 2) {
     return { examined: rows.length, groups_merged: 0, findings_superseded: 0 };
   }
