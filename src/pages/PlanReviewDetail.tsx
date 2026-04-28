@@ -758,8 +758,8 @@ export default function PlanReviewDetail() {
           const ok = await confirm({
             title: "Cancel pipeline?",
             description: "Stop the AI analysis. Already-saved findings remain. You can re-run later.",
-            confirmText: "Cancel pipeline",
-            destructive: true,
+            confirmLabel: "Cancel pipeline",
+            variant: "destructive",
           });
           if (!ok) return;
           try {
