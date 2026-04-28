@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ExternalLink, ShieldCheck, ShieldX, ShieldAlert } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { ExternalLink, ShieldCheck, ShieldX, ShieldAlert, GitMerge } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
