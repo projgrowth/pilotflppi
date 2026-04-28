@@ -298,8 +298,19 @@ export const DISCIPLINE_EXPERTS: Record<string, DisciplineExpert> = {
  * shared review rules consistent across all 9 disciplines while letting the
  * persona / domains / failure modes vary.
  */
-export function composeDisciplineSystemPrompt(discipline: string): string {
+export function composeDisciplineSystemPrompt(
+  discipline: string,
+  options?: { missingDisciplines?: string[] },
+): string {
   const expert = DISCIPLINE_EXPERTS[discipline];
+  const missing = (options?.missingDisciplines ?? []).filter(Boolean);
+  const missingBlock =
+    missing.length > 0
+      ? `\n## Submittal completeness — IMPORTANT\n` +
+        `The following disciplines are NOT in this submittal: ${missing.join(", ")}.\n` +
+        `Do NOT raise findings whose evidence depends on sheets from those missing disciplines (e.g., do not flag missing structural calcs against a Structural sheet that wasn't submitted). ` +
+        `If a deficiency only exists because a missing trade isn't here, classify it as a procedural finding (no code_section, set permit_blocker=true, requires_human_review=true) noting which trade is missing — the submittal-check stage already raised a top-level blocker.\n`
+      : "";
 
   // Fallback for unknown disciplines — preserves old generic behavior so the
   // pipeline never breaks if a new discipline is added before its config.
@@ -307,6 +318,7 @@ export function composeDisciplineSystemPrompt(discipline: string): string {
     return (
       `You are a Florida private-provider plan reviewer specializing in ${discipline}. ` +
       `Audit submitted construction documents against the Florida Building Code and applicable referenced standards. ` +
+      missingBlock +
       SHARED_RULES
     );
   }
@@ -324,6 +336,7 @@ export function composeDisciplineSystemPrompt(discipline: string): string {
     `## Common failure modes — be biased to detect these\n${failureModesBlock}\n\n` +
     `## Wording style for ${discipline} findings\n${expert.wordingGuidance}\n` +
     (expert.evidenceStyle ? `\n## Evidence style\n${expert.evidenceStyle}\n` : "") +
+    missingBlock +
     `\n${SHARED_RULES}`
   );
 }
