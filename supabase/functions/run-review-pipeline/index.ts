@@ -38,6 +38,7 @@ import {
   type DnaHealth,
 } from "./stages/dna.ts";
 import { stageDisciplineReview } from "./stages/discipline-review.ts";
+import { stageCritic } from "./stages/critic.ts";
 import { stageVerify } from "./stages/verify.ts";
 import { stageDedupe } from "./stages/dedupe.ts";
 import { stageGroundCitations } from "./stages/ground-citations.ts";
@@ -157,6 +158,7 @@ Deno.serve(async (req) => {
           ? stageDnaReevaluate(admin, plan_review_id)
           : stageDnaExtract(admin, plan_review_id, firmId),
       discipline_review: () => stageDisciplineReview(admin, plan_review_id, firmId),
+      critic: () => stageCritic(admin, plan_review_id),
       verify: () => stageVerify(admin, plan_review_id),
       dedupe: () => stageDedupe(admin, plan_review_id),
       ground_citations: () => stageGroundCitations(admin, plan_review_id),
@@ -268,6 +270,7 @@ Deno.serve(async (req) => {
         const NON_FATAL_RETRY_STAGES = new Set<Stage>([
           "sheet_map",
           "discipline_review",
+          "critic",
           "verify",
           "dedupe",
           "ground_citations",
