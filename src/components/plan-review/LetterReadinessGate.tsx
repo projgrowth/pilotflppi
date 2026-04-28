@@ -41,6 +41,9 @@ export default function LetterReadinessGate({
   complianceAffidavitSignedAt,
   disciplinesInLetter,
   reviewerLicensedDisciplines,
+  isThresholdBuilding,
+  thresholdTriggers,
+  specialInspectorDesignated,
   onJumpToFinding,
   onCompute,
   className,
@@ -56,6 +59,9 @@ export default function LetterReadinessGate({
         complianceAffidavitSignedAt,
         disciplinesInLetter,
         reviewerLicensedDisciplines,
+        isThresholdBuilding,
+        thresholdTriggers,
+        specialInspectorDesignated,
       }),
     [
       findings,
@@ -66,6 +72,9 @@ export default function LetterReadinessGate({
       complianceAffidavitSignedAt,
       disciplinesInLetter,
       reviewerLicensedDisciplines,
+      isThresholdBuilding,
+      thresholdTriggers,
+      specialInspectorDesignated,
     ],
   );
 
