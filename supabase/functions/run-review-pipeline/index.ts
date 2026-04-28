@@ -42,6 +42,7 @@ import { stageCritic } from "./stages/critic.ts";
 import { stageVerify } from "./stages/verify.ts";
 import { stageDedupe } from "./stages/dedupe.ts";
 import { stageGroundCitations } from "./stages/ground-citations.ts";
+import { stageChallenger } from "./stages/challenger.ts";
 import { stageCrossCheck } from "./stages/cross-check.ts";
 import { stageDeferredScope } from "./stages/deferred-scope.ts";
 import { stagePrioritize } from "./stages/prioritize.ts";
@@ -162,6 +163,7 @@ Deno.serve(async (req) => {
       verify: () => stageVerify(admin, plan_review_id),
       dedupe: () => stageDedupe(admin, plan_review_id),
       ground_citations: () => stageGroundCitations(admin, plan_review_id),
+      challenger: () => stageChallenger(admin, plan_review_id),
       cross_check: () => stageCrossCheck(admin, plan_review_id, firmId),
       deferred_scope: () => stageDeferredScope(admin, plan_review_id, firmId),
       prioritize: () => stagePrioritize(admin, plan_review_id),
@@ -274,6 +276,7 @@ Deno.serve(async (req) => {
           "verify",
           "dedupe",
           "ground_citations",
+          "challenger",
           "cross_check",
           "deferred_scope",
           "prioritize",

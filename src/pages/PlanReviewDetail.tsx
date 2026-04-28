@@ -65,6 +65,8 @@ import { sendCommentLetter } from "@/lib/send-comment-letter";
 import { fetchReadinessForSend } from "@/lib/letter-readiness-fetch";
 import { useFirmId } from "@/hooks/useFirmId";
 import type { ReadinessResult } from "@/lib/letter-readiness";
+import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
+import { deletePlanReview } from "@/lib/delete-plan-review";
 
 import { Wand2, AlertTriangle, Loader2 } from "lucide-react";
 
@@ -510,6 +512,24 @@ export default function PlanReviewDetail() {
   const hasFindings = findings.length > 0;
   const openDashboard = () => navigate(`/plan-review/${review.id}/dashboard`);
 
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const projectName = review.project?.name || "this review";
+  const handleDeleteReview = async () => {
+    if (!user || !review) return;
+    setDeleting(true);
+    try {
+      const result = await deletePlanReview(review.id, user.id);
+      toast.success(`Round deleted — removed ${result.filesRemoved} file(s)`);
+      navigate(`/projects/${review.project_id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete review");
+      throw err;
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const runAICheck = async () => {
     if (!review || aiRunning) return;
 
@@ -730,6 +750,24 @@ export default function PlanReviewDetail() {
         onNewRound={createNewRound}
         onPipelineComplete={handlePipelineComplete}
         onOpenDashboard={openDashboard}
+        onDeleteReview={() => setDeleteOpen(true)}
+      />
+
+      <DeleteConfirmDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        resourceLabel="round"
+        expectedConfirmText={projectName}
+        title={`Delete round ${review.round}?`}
+        description="This soft-deletes the review round and removes uploaded plan files from storage. Findings are archived. A sent comment letter blocks deletion."
+        cascadeItems={[
+          "All uploaded PDFs for this round (storage)",
+          "Rendered page images (storage)",
+          "Findings will be archived as waived",
+          "Pipeline run history will be cleared",
+        ]}
+        loading={deleting}
+        onConfirm={handleDeleteReview}
       />
 
       <UploadProgressBar

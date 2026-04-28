@@ -12,6 +12,7 @@ export type Stage =
   | "verify"
   | "dedupe"
   | "ground_citations"
+  | "challenger"
   | "cross_check"
   | "deferred_scope"
   | "prioritize"
@@ -31,6 +32,7 @@ export const STAGES: Stage[] = [
   "verify",
   "dedupe",
   "ground_citations",
+  "challenger",
   "cross_check",
   "deferred_scope",
   "prioritize",
@@ -52,6 +54,10 @@ export const STAGES: Stage[] = [
 // cheap deterministic comparison per finding (no AI call) — worth it because
 // it's the difference between a reviewer signing a letter with verified code
 // references vs. shipping AI guesses.
+//
+// `challenger` runs after grounding so the adversarial pass can see the
+// canonical code text. It self-filters to only high-stakes + low-confidence
+// findings, so the cost is bounded.
 export const CORE_STAGES: Stage[] = [
   "upload",
   "prepare_pages",
@@ -62,6 +68,7 @@ export const CORE_STAGES: Stage[] = [
   "critic",
   "dedupe",
   "ground_citations",
+  "challenger",
   "complete",
 ];
 
