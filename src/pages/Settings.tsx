@@ -454,3 +454,48 @@ export default function SettingsPage() {
  </div>
  );
 }
+
+/**
+ * NotificationPrefs — single in-browser toggle for "ping me when a pipeline
+ * completes". Backed by localStorage; on enable we request the browser
+ * Notification permission so the desktop notice can actually fire.
+ */
+function NotificationPrefs() {
+  const [enabled, setEnabled] = useState<boolean>(() => isPipelineNotifyEnabled());
+
+  async function handleToggle(next: boolean) {
+    if (next && typeof Notification !== "undefined" && Notification.permission === "default") {
+      try {
+        await Notification.requestPermission();
+      } catch {
+        // Permission flow can fail silently — toggle still respected so the in-app toast fires.
+      }
+    }
+    setPipelineNotifyEnabled(next);
+    setEnabled(next);
+    toast.success(next ? "Notifications on" : "Notifications off");
+  }
+
+  const blocked =
+    typeof Notification !== "undefined" && Notification.permission === "denied";
+
+  return (
+    <div className="mt-6 space-y-3 border-t pt-4">
+      <div className="flex items-start gap-3">
+        <Bell className="h-4 w-4 mt-0.5 text-muted-foreground" />
+        <div className="flex-1 min-w-0">
+          <Label className="text-sm font-medium">Notify me when a review finishes</Label>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            Sends an in-app toast and a desktop notification (if your browser allows it) the moment a pipeline reaches the comment-letter stage.
+          </p>
+          {blocked && (
+            <p className="text-[11px] text-destructive mt-1">
+              Browser notifications are blocked for this site — toast alerts will still appear.
+            </p>
+          )}
+        </div>
+        <Switch checked={enabled} onCheckedChange={handleToggle} />
+      </div>
+    </div>
+  );
+}
