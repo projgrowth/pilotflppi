@@ -117,14 +117,14 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
   });
 
   // 2. Citations grounded — block on (a) hallucinated citations OR
-  //    (b) unverified+low-confidence combos.
-  // verified, verified_stub, and no_citation_required are NOT blockers.
+  //    (b) unverified+low-confidence combos. Hallucinated citations are
+  //    ALWAYS a hard block.
   const hallucinated = live.filter((f) => f.citation_status === "hallucinated");
   const NON_BLOCKING = new Set([
     "verified",
     "verified_stub",
     "no_citation_required",
-    "mismatch", // mismatch is informational — flagged in useLetterQualityCheck per-finding
+    "mismatch",
     "not_found",
   ]);
   const weakCitations = live.filter(
@@ -134,6 +134,12 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
       typeof f.confidence_score === "number" &&
       f.confidence_score < 0.7,
   );
+  const unverified = live.filter(
+    (f) => (f.verification_status ?? "unverified") === "unverified",
+  );
+  const unverifiedPct = live.length === 0 ? 0 : unverified.length / live.length;
+  const verifierStalled = unverifiedPct > 0.25;
+
   const citationProblems = hallucinated.length + weakCitations.length;
   checks.push({
     id: "citations",
@@ -149,9 +155,23 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
       citationProblems === 0
         ? "No findings combine an unverified FBC citation with low AI confidence, and no hallucinated citations remain."
         : hallucinated.length > 0
-          ? "These cite an FBC section the system could not parse at all. Fix or remove them before sending."
-          : "These cite an FBC section the system couldn't ground AND scored under 0.7. Verify them by hand or remove from the letter.",
+          ? "These cite an FBC section the system could not parse. Fix or remove them before sending."
+          : "These cite an FBC section the system couldn't ground AND scored under 0.7. Verify by hand or remove.",
     jumpFindingId: hallucinated[0]?.id ?? weakCitations[0]?.id,
+  });
+
+  // 2b. Verifier completion — required check (two-pair-of-eyes promise).
+  checks.push({
+    id: "citations",
+    required: true,
+    severity: verifierStalled ? "block" : "ok",
+    title: verifierStalled
+      ? `${unverified.length} of ${live.length} findings never reached the verifier (${Math.round(unverifiedPct * 100)}%)`
+      : "Adversarial verifier ran on every finding",
+    detail: verifierStalled
+      ? "Re-run Deep QA, or triage the unverified items by hand before sending."
+      : `${live.length - unverified.length} of ${live.length} findings have a verifier verdict.`,
+    jumpFindingId: unverified[0]?.id,
   });
 
   // 3. Sheet refs resolved — Track-2 metadata flag.
