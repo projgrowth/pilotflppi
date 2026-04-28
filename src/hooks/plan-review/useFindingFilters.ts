@@ -43,14 +43,26 @@ export function useFindingFilters(
     // treated as "open" — they can't have a stored status anyway.
     const statusOf = (f: Finding) => (f.finding_id ? findingStatuses[f.finding_id] || "open" : "open");
 
+    const isUnverified = (f: Finding) =>
+      !f.verification_status || f.verification_status === "unverified";
+    const isHallucinated = (f: Finding) => f.citation_status === "hallucinated";
+
     const filtered = findings.filter((f) => {
       if (filters.status !== "all" && statusOf(f) !== filters.status) return false;
       if (filters.confidence !== "all" && (f.confidence || "low") !== filters.confidence) return false;
       if (filters.discipline !== "all" && (f.discipline || "structural") !== filters.discipline) return false;
       if (filters.sheet !== "all" && (f.page || "Unknown").trim() !== filters.sheet) return false;
+      if (filters.quality === "unverified" && !isUnverified(f)) return false;
+      if (filters.quality === "hallucinated" && !isHallucinated(f)) return false;
       return true;
     });
     const filteredGrouped = groupFindingsByDiscipline(filtered);
+
+    const qualityCounts: Record<QualityFilter, number> = {
+      all: findings.length,
+      unverified: findings.filter(isUnverified).length,
+      hallucinated: findings.filter(isHallucinated).length,
+    };
 
     const confidenceCounts: Record<ConfidenceFilter, number> = {
       all: findings.length,
