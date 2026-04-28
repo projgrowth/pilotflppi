@@ -1387,12 +1387,14 @@ export type Database = {
           ai_run_progress: Json | null
           checklist_state: Json | null
           comment_letter_draft: string
+          compliance_affidavit_signed_at: string | null
           created_at: string
           fbc_edition: string | null
           file_urls: string[]
           finding_statuses: Json | null
           firm_id: string | null
           id: string
+          notice_to_building_official_filed_at: string | null
           pipeline_version: string
           previous_findings: Json | null
           project_id: string
@@ -1409,12 +1411,14 @@ export type Database = {
           ai_run_progress?: Json | null
           checklist_state?: Json | null
           comment_letter_draft?: string
+          compliance_affidavit_signed_at?: string | null
           created_at?: string
           fbc_edition?: string | null
           file_urls?: string[]
           finding_statuses?: Json | null
           firm_id?: string | null
           id?: string
+          notice_to_building_official_filed_at?: string | null
           pipeline_version?: string
           previous_findings?: Json | null
           project_id: string
@@ -1431,12 +1435,14 @@ export type Database = {
           ai_run_progress?: Json | null
           checklist_state?: Json | null
           comment_letter_draft?: string
+          compliance_affidavit_signed_at?: string | null
           created_at?: string
           fbc_edition?: string | null
           file_urls?: string[]
           finding_statuses?: Json | null
           firm_id?: string | null
           id?: string
+          notice_to_building_official_filed_at?: string | null
           pipeline_version?: string
           previous_findings?: Json | null
           project_id?: string
@@ -1462,6 +1468,7 @@ export type Database = {
         Row: {
           avatar_url: string | null
           created_at: string
+          discipline_licenses: Json
           full_name: string
           id: string
           role: string
@@ -1470,6 +1477,7 @@ export type Database = {
         Insert: {
           avatar_url?: string | null
           created_at?: string
+          discipline_licenses?: Json
           full_name?: string
           id: string
           role?: string
@@ -1478,6 +1486,7 @@ export type Database = {
         Update: {
           avatar_url?: string | null
           created_at?: string
+          discipline_licenses?: Json
           full_name?: string
           id?: string
           role?: string
@@ -1578,6 +1587,8 @@ export type Database = {
         Row: {
           address: string
           assigned_to: string | null
+          clock_pause_history: Json
+          clock_pause_reason: string | null
           contractor_id: string | null
           county: string
           created_at: string
@@ -1604,6 +1615,8 @@ export type Database = {
         Insert: {
           address: string
           assigned_to?: string | null
+          clock_pause_history?: Json
+          clock_pause_reason?: string | null
           contractor_id?: string | null
           county?: string
           created_at?: string
@@ -1630,6 +1643,8 @@ export type Database = {
         Update: {
           address?: string
           assigned_to?: string | null
+          clock_pause_history?: Json
+          clock_pause_reason?: string | null
           contractor_id?: string | null
           county?: string
           created_at?: string
