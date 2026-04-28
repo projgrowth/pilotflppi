@@ -9,6 +9,10 @@ import { ClipboardList, ShieldAlert, CheckCircle2, AlertCircle, Loader2 } from "
 import { toast } from "sonner";
 import { deriveRequiredInspections } from "@/lib/required-inspections";
 import { detectThresholdBuilding } from "@/lib/threshold-building";
+import {
+  computeInspectionWindow,
+  getInspectionDaysRemaining,
+} from "@/lib/inspection-window";
 
 interface Props {
   projectId: string;
@@ -188,6 +192,10 @@ export function RequiredInspectionsPanel({ projectId, tradeType }: Props) {
             <ul className="divide-y divide-border">
               {required!.map((r) => {
                 const badge = STATUS_BADGE[r.status] ?? STATUS_BADGE.not_started;
+                const isOpen = r.status !== "passed" && r.status !== "na" && r.status !== "waived";
+                const deadline = isOpen ? computeInspectionWindow(r.scheduled_for) : null;
+                const daysLeft = isOpen ? getInspectionDaysRemaining(r.scheduled_for) : null;
+                const overdue = daysLeft !== null && daysLeft < 0;
                 return (
                   <li key={r.id} className="flex items-center justify-between gap-3 py-2">
                     <div className="flex items-start gap-2 min-w-0">
@@ -204,6 +212,22 @@ export function RequiredInspectionsPanel({ projectId, tradeType }: Props) {
                           )}
                         </div>
                         <div className="text-[11px] text-muted-foreground font-mono">{r.code_basis}</div>
+                        {deadline && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div
+                                className={`text-[10px] mt-0.5 ${overdue ? "text-destructive font-medium" : "text-muted-foreground"}`}
+                              >
+                                {overdue
+                                  ? `Overdue by ${Math.abs(daysLeft!)} business day${Math.abs(daysLeft!) === 1 ? "" : "s"}`
+                                  : `Due by ${deadline.toLocaleDateString()} (${daysLeft} business day${daysLeft === 1 ? "" : "s"} left)`}
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              F.S. 553.791(8): private provider must perform the inspection within 10 business days of the contractor request.
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
                       </div>
                     </div>
                     <Badge variant="outline" className={badge.className}>{badge.label}</Badge>

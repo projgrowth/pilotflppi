@@ -65,6 +65,13 @@ const App = () => (
               <Route path="/projects" element={<Projects />} />
               <Route path="/projects/:id" element={<ProjectDetail />} />
               <Route path="/invoices" element={<Invoices />} />
+              {/*
+                Review URL map:
+                  /review            → project list (Reviews tab)
+                  /review/:id        → redirect shim: finds-or-creates the latest plan_review row, forwards to /plan-review/:id
+                  /plan-review/:id   → main reviewer workspace (PDF + findings + letter)
+                  /plan-review/:id/dashboard → triage / health dashboard for that review
+              */}
               <Route path="/review" element={<Review />} />
               <Route path="/review/:id" element={<ReviewDetail />} />
               <Route path="/pipelines" element={<PipelineActivity />} />
