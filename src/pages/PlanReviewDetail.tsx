@@ -435,6 +435,7 @@ export default function PlanReviewDetail() {
     confidence: confidenceFilter,
     discipline: disciplineFilter,
     sheet: sheetFilter,
+    quality: qualityFilter,
   };
   const f = useFindingFilters(findings, findingStatuses, filterState);
   const previousFindings = (review?.previous_findings as Finding[] | undefined) || [];
