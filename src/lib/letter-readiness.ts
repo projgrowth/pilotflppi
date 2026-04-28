@@ -258,6 +258,7 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
         : `Add a license number under your profile for: ${uniqueUncovered.join(", ")}. Until then this letter cannot be sent under your signature.`,
   });
 
+  const required = checks.filter((c) => c.required);
   const blockingCount = required.filter((c) => c.severity === "block").length;
   return {
     checks,
