@@ -47,7 +47,7 @@ export interface CorrectionPatternRow {
   updated_at: string;
 }
 
-export interface AppliedCorrectionRow {
+interface AppliedCorrectionRow {
   id: string;
   plan_review_id: string;
   pattern_id: string;
@@ -55,22 +55,6 @@ export interface AppliedCorrectionRow {
   pattern_summary: string;
   applied_at: string;
   pattern?: CorrectionPatternRow | null;
-}
-
-/** All patterns for the active firm. */
-export function useCorrectionPatterns() {
-  return useQuery({
-    queryKey: ["correction_patterns"],
-    queryFn: async () => {
-      const { data, error } = await db
-        .from("correction_patterns")
-        .select("*")
-        .order("rejection_count", { ascending: false })
-        .order("last_seen_at", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as CorrectionPatternRow[];
-    },
-  });
 }
 
 /** Patterns that were applied (suppressed) on this specific review. */
@@ -186,17 +170,12 @@ export async function setPatternActive(patternId: string, active: boolean) {
   if (error) throw error;
 }
 
-export async function deletePattern(patternId: string) {
-  const { error } = await db.from("correction_patterns").delete().eq("id", patternId);
-  if (error) throw error;
-}
-
 /**
  * Normalise a discipline label so AI-emitted variants ("Mechanical") match
  * stored ones ("MEP", "mechanical"). Without this, `recordPatternConfirmation`
  * silently misses 100% of MEP-class patterns.
  */
-export function normalizeDiscipline(raw: string): string[] {
+function normalizeDiscipline(raw: string): string[] {
   const t = raw.trim().toLowerCase();
   // Each input → the set of stored labels we should match against.
   const groups: Record<string, string[]> = {
