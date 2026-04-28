@@ -722,6 +722,7 @@ export type Database = {
           sheet_refs: string[] | null
           status: string
           updated_at: string
+          verification_meta: Json
           verification_notes: string
           verification_status: string
           verified_by_challenger: boolean
@@ -762,6 +763,7 @@ export type Database = {
           sheet_refs?: string[] | null
           status?: string
           updated_at?: string
+          verification_meta?: Json
           verification_notes?: string
           verification_status?: string
           verified_by_challenger?: boolean
@@ -802,6 +804,7 @@ export type Database = {
           sheet_refs?: string[] | null
           status?: string
           updated_at?: string
+          verification_meta?: Json
           verification_notes?: string
           verification_status?: string
           verified_by_challenger?: boolean
@@ -1671,6 +1674,53 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "pipeline_error_log_plan_review_id_fkey"
+            columns: ["plan_review_id"]
+            isOneToOne: false
+            referencedRelation: "plan_reviews"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pipeline_quality_events: {
+        Row: {
+          ai_check_status: string
+          blocker_reason: string | null
+          created_at: string
+          firm_id: string | null
+          hallucinated_count: number
+          id: string
+          plan_review_id: string
+          quality_score: number
+          total_live_findings: number
+          unverified_pct: number
+        }
+        Insert: {
+          ai_check_status: string
+          blocker_reason?: string | null
+          created_at?: string
+          firm_id?: string | null
+          hallucinated_count?: number
+          id?: string
+          plan_review_id: string
+          quality_score?: number
+          total_live_findings?: number
+          unverified_pct?: number
+        }
+        Update: {
+          ai_check_status?: string
+          blocker_reason?: string | null
+          created_at?: string
+          firm_id?: string | null
+          hallucinated_count?: number
+          id?: string
+          plan_review_id?: string
+          quality_score?: number
+          total_live_findings?: number
+          unverified_pct?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pipeline_quality_events_plan_review_id_fkey"
             columns: ["plan_review_id"]
             isOneToOne: false
             referencedRelation: "plan_reviews"
