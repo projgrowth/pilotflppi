@@ -11,6 +11,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Finding } from "@/components/FindingCard";
 import type { ReadinessResult } from "./letter-readiness";
+import { sha256Hex } from "./file-hash";
 
 export interface SendLetterArgs {
   planReviewId: string;
@@ -73,6 +74,16 @@ export async function sendCommentLetter(
     })),
   };
 
+  // Sprint 3: hash the rendered letter HTML at send-time so months later we
+  // can prove the on-screen letter matches what was archived. Best-effort —
+  // if subtle.digest is unavailable in the runtime we still write the row.
+  let letterHtmlHash: string | null = null;
+  try {
+    letterHtmlHash = await sha256Hex(args.letterHtml);
+  } catch (err) {
+    console.warn("[send-letter-snapshot] could not hash letter HTML:", err);
+  }
+
   type SnapshotInsert = {
     plan_review_id: string;
     round: number;
@@ -83,6 +94,7 @@ export async function sendCommentLetter(
     firm_info_json: unknown;
     readiness_snapshot: unknown;
     override_reasons: string | null;
+    letter_html_sha256: string | null;
   };
   const insertRow: SnapshotInsert = {
     plan_review_id: args.planReviewId,
@@ -94,6 +106,7 @@ export async function sendCommentLetter(
     firm_info_json: args.firmInfo ?? {},
     readiness_snapshot: readinessSnapshot,
     override_reasons: args.overrideReason ?? null,
+    letter_html_sha256: letterHtmlHash,
   };
   const { data: snap, error: snapErr } = await (supabase
     .from("comment_letter_snapshots") as unknown as {

@@ -54,15 +54,21 @@ F.S. 553.79(5) requires a Special Inspector designated by the Engineer of Record
 - `src/components/plan-review/StatutoryCompliancePanel.tsx` — Threshold Building section + Special Inspector form.
 - `src/components/StatutoryClockCard.tsx` — holiday-shifted indicator.
 
-### Out of scope (saved for Sprint 3)
+## Sprint 3 — P2: Chain-of-custody + cross-round tracking ✅ shipped
 
-- PDF hashing / immutable chain-of-custody for snapshots (P2).
-- `lineage_id` on `deficiencies_v2` for cross-round defect tracking (P2).
-- Multi-pause statutory clock history UI (the column was added in Sprint 1; UI ships in Sprint 3).
+**Migration**: `pdf_sha256` + `file_size_bytes` on `plan_review_files`; `pdf_sha256` + `letter_html_sha256` on `comment_letter_snapshots`; `lineage_id` (uuid, default gen_random_uuid()) on `deficiencies_v2` with indexes.
+
+**Hashing**: `src/lib/file-hash.ts` (Web Crypto SHA-256 helpers). `plan-review-upload.ts` fingerprints every PDF before bucket upload; `send-letter-snapshot.ts` hashes the letter HTML at send time.
+
+**Cross-round lineage**: `dedupe.ts` runs `applyCrossRoundLineage()` for Round 2+ — matches each new finding to the prior-round finding on (same FBC section OR same discipline) + sheet overlap + Jaccard ≥ 0.55, then inherits the prior `lineage_id`. Logged via `activity_log` event_type `lineage_carryover`.
+
+**Threshold auto-finding (conditional)**: `emitThresholdAutoFinding()` in `dedupe.ts` emits a high-severity Structural `DEF-S###` citing F.S. 553.79(5) when DNA classifies the project as threshold AND no Special Inspector has been recorded AND no existing finding already covers Special Inspections.
+
+**Statutory clock history UI**: `StatutoryClockCard.tsx` now fetches `activity_log` events of type `statutory_clock_*` / `deadline_overdue` for the project and renders a collapsible audit trail. Removed the prior `animate-pulse` urgency styling per project memory rule.
 
 ### Acceptance
-
-- A 4-story office submittal triggers `is_threshold_building=true`, generates a high-severity Structural finding referencing F.S. 553.79(5), and `LetterReadinessGate` blocks letter generation until Special Inspector is recorded.
-- A Life Safety finding for a corridor dead-end shows dual citation `FBC-B 1020.4 / NFPA 101 7.5.1.5` after grounding.
-- An Accessibility finding leads with `FBC 11-206.2.3 / FAC 61G20` and only mentions 2010 ADA parenthetically.
-- A resubmission window starting on the Tuesday before Thanksgiving lands on the correct post-holiday business day, not 14 raw calendar days.
+- An uploaded PDF round-trips with its SHA-256 stored on `plan_review_files`.
+- A sent letter writes `letter_html_sha256` for tamper detection.
+- A Round 2 finding matching a Round 1 defect inherits the same `lineage_id`.
+- A 4-story office without a Statement of Special Inspections gets an auto-emitted `DEF-S###`; a reviewer recording the Special Inspector before re-running suppresses re-emission.
+- The clock card shows pause/resume/reset history without animations.

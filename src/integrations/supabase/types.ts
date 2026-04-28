@@ -151,7 +151,9 @@ export type Database = {
           firm_info_json: Json
           id: string
           letter_html: string
+          letter_html_sha256: string | null
           override_reasons: string | null
+          pdf_sha256: string | null
           pdf_storage_path: string | null
           plan_review_id: string
           readiness_snapshot: Json
@@ -167,7 +169,9 @@ export type Database = {
           firm_info_json?: Json
           id?: string
           letter_html?: string
+          letter_html_sha256?: string | null
           override_reasons?: string | null
+          pdf_sha256?: string | null
           pdf_storage_path?: string | null
           plan_review_id: string
           readiness_snapshot?: Json
@@ -183,7 +187,9 @@ export type Database = {
           firm_info_json?: Json
           id?: string
           letter_html?: string
+          letter_html_sha256?: string | null
           override_reasons?: string | null
+          pdf_sha256?: string | null
           pdf_storage_path?: string | null
           plan_review_id?: string
           readiness_snapshot?: Json
@@ -516,6 +522,7 @@ export type Database = {
           id: string
           liability_flag: boolean
           life_safety_flag: boolean
+          lineage_id: string
           model_version: string | null
           permit_blocker: boolean
           plan_review_id: string
@@ -553,6 +560,7 @@ export type Database = {
           id?: string
           liability_flag?: boolean
           life_safety_flag?: boolean
+          lineage_id?: string
           model_version?: string | null
           permit_blocker?: boolean
           plan_review_id: string
@@ -590,6 +598,7 @@ export type Database = {
           id?: string
           liability_flag?: boolean
           life_safety_flag?: boolean
+          lineage_id?: string
           model_version?: string | null
           permit_blocker?: boolean
           plan_review_id?: string
@@ -1299,8 +1308,10 @@ export type Database = {
       plan_review_files: {
         Row: {
           file_path: string
+          file_size_bytes: number | null
           firm_id: string | null
           id: string
+          pdf_sha256: string | null
           plan_review_id: string
           round: number
           uploaded_at: string
@@ -1308,8 +1319,10 @@ export type Database = {
         }
         Insert: {
           file_path: string
+          file_size_bytes?: number | null
           firm_id?: string | null
           id?: string
+          pdf_sha256?: string | null
           plan_review_id: string
           round?: number
           uploaded_at?: string
@@ -1317,8 +1330,10 @@ export type Database = {
         }
         Update: {
           file_path?: string
+          file_size_bytes?: number | null
           firm_id?: string | null
           id?: string
+          pdf_sha256?: string | null
           plan_review_id?: string
           round?: number
           uploaded_at?: string
