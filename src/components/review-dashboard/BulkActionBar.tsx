@@ -193,6 +193,49 @@ export default function BulkActionBar({ planReviewId, selected, onClear }: Props
           Reject all
         </Button>
       </div>
+
+      <div className="flex items-center gap-1">
+        <Flag className="h-3 w-3 text-muted-foreground" />
+        <Select
+          onValueChange={(v) =>
+            bulkUpdate({ priority: v as "high" | "medium" | "low" }, "priority", "Priority updated")
+          }
+          disabled={!!busy}
+        >
+          <SelectTrigger className="h-7 w-28 text-xs">
+            <SelectValue placeholder="Priority…" />
+          </SelectTrigger>
+          <SelectContent>
+            {PRIORITY_OPTIONS.map((p) => (
+              <SelectItem key={p.value} value={p.value}>
+                {p.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {busy === "priority" && <Loader2 className="h-3 w-3 animate-spin" />}
+      </div>
+
+      <div className="flex items-center gap-1">
+        <Tag className="h-3 w-3 text-muted-foreground" />
+        <Select
+          onValueChange={(v) => bulkUpdate({ discipline: v }, "discipline", "Discipline reassigned")}
+          disabled={!!busy}
+        >
+          <SelectTrigger className="h-7 w-36 text-xs">
+            <SelectValue placeholder="Discipline…" />
+          </SelectTrigger>
+          <SelectContent>
+            {DISCIPLINE_OPTIONS.map((d) => (
+              <SelectItem key={d} value={d}>
+                {d.replace(/_/g, " ")}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {busy === "discipline" && <Loader2 className="h-3 w-3 animate-spin" />}
+      </div>
+
       <Button
         size="sm"
         variant="ghost"
