@@ -74,7 +74,12 @@ export function BulkTriageFilters({
   disciplines, disciplineFilter, onDisciplineFilterChange,
   sheets, sheetFilter, onSheetFilterChange,
   visibleCount, allVisibleResolved, onMarkVisibleResolved,
+  qualityCounts, qualityFilter = "all", onQualityFilterChange,
 }: Props) {
+  const showQuality =
+    !!onQualityFilterChange &&
+    !!qualityCounts &&
+    ((qualityCounts.unverified ?? 0) > 0 || (qualityCounts.hallucinated ?? 0) > 0 || qualityFilter !== "all");
   const secondaryActiveCount =
     (confidenceFilter !== "all" ? 1 : 0) +
     (disciplineFilter !== "all" ? 1 : 0) +
