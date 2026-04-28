@@ -88,7 +88,9 @@ export interface CocAttestationInput {
   typed_attestation: string;
 }
 
-export function validateAttestation(input: CocAttestationInput): { ok: true } | { ok: false; reason: string } {
+export type AttestationValidation = { ok: true } | { ok: false; reason: string };
+
+export function validateAttestation(input: CocAttestationInput): AttestationValidation {
   if (!input.attestor_name.trim()) return { ok: false, reason: "Attestor name required" };
   if (!input.attestor_license.trim()) return { ok: false, reason: "Attestor license required" };
   if (!/i\s+attest/i.test(input.typed_attestation)) {
