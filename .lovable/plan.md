@@ -115,8 +115,44 @@ Foundational improvements to attack the three root causes of finding/citation no
 
 Edge functions `seed-canonical-section` and `run-review-pipeline` redeployed.
 
-## Tiers 2 & 3 (queued)
+## Tier 2 Accuracy Upgrade (shipped — partial)
 
-After Tier 1 is verified on a real review, the next batches are:
-- **Tier 2:** vision-anchored evidence verification (crop the cited sheet region and re-ask the model whether the quote actually appears), reviewer feedback loop into the critic prompt, per-discipline confidence calibration.
-- **Tier 3:** vector-similarity grounder (replace Jaccard once canonical library is dense), cross-discipline conflict detector, automatic re-verify of all open findings when canonical rows are updated.
+### 2.1 Per-chunk self-critique pass *(shipped)*
+
+- After each discipline chunk's draft findings come back, the same images are re-shown to `gemini-2.5-flash` along with a compact list of the model's own findings, evidence quotes, sheet refs, and code citations.
+- Critic emits one verdict per finding via `submit_self_critique`:
+  - `keep` → unchanged
+  - `weak` → `requires_human_review = true`, confidence × 0.5, reason surfaced as `Self-critique flagged weak: …`
+  - `junk` → status auto-set to `waived`, confidence floored at 0.15, reason surfaced as `Self-critique rejected: …`
+- Verdicts persisted on `deficiencies_v2.evidence_crop_meta.self_critique` for audit + future learning loop.
+- Falls back gracefully (logs + skip) if the critique call errors so a single AI hiccup never breaks the chunk.
+- Cost: one extra `gemini-2.5-flash` call per chunk (~8 images, 1 short text). Worth it — these are the calls that catch the "AI invented a defect that isn't on the sheet" class of error that no deterministic check can.
+
+This is *in addition to* the global `critic` stage (Tier 1.2). Per-chunk runs immediately after the draft when the same context is hot; global runs later across the whole review for cross-chunk coherence.
+
+### 2.2 Sheet-anchor enforcement *(shipped)*
+
+`verifyEvidenceShape` in `discipline-review.ts` upgraded:
+
+- **Sheet-ref enforcement:** every finding must cite at least one sheet that was actually rendered for the model in this chunk. Findings that name a sheet not in the chunk's `disciplineSheets` get `suspicious: 'cited sheet(s) X not in the chunk shown to the model'` and are routed to human review. Catches the failure mode where the AI fabricates a plausible-sounding sheet number.
+- **Anchor strictness raised:** dropped weak generic anchors (`section`, `table`, `symbol`, bare letter-number patterns) and now require either a known chunk sheet ref OR a strong anchor: detail callout (`A5.2`, `3/A-501`), dimensioned value (`24 in`, `30 psf`), numbered note, numbered detail, or `Table X-N`. Generic boilerplate quotes no longer pass.
+- Empty `sheet_refs` arrays are now suspicious (previously only checked evidence content).
+
+Together, 2.1 + 2.2 hit the same problem from two angles: 2.2 catches structural fabrications deterministically (free), 2.1 catches semantic fabrications with the model (one cheap call/chunk).
+
+### 2.3 Vector-similarity grounder *(deferred)*
+
+Adding embeddings to `fbc_code_sections` is overkill while >70% of rows are still stubs. Tier 1.1 (canonical seeding admin UI) needs to run first; once the library is dense, embeddings become high-leverage. Schema change (add `embedding vector` column + ivfflat index + `match_fbc_section` RPC) is queued but not implemented.
+
+## Files added/changed (Tier 2)
+
+- **Edited:** `supabase/functions/run-review-pipeline/stages/discipline-review.ts` (self-critique pass + sheet-anchor enforcement)
+
+`run-review-pipeline` redeployed.
+
+## Tier 3 (queued)
+
+- Vector-similarity grounder once canonical library is dense (depends on 2.3 prerequisite + Tier 1.1 seeding velocity).
+- Cross-discipline conflict detector (e.g. structural says CMU wall, life-safety says rated GWB).
+- Reviewer feedback loop into the critic prompt (use `correction_patterns` to bias the self-critique toward known firm-specific reject patterns).
+- Automatic re-verify of all open findings when canonical rows are upgraded from stub → real text.

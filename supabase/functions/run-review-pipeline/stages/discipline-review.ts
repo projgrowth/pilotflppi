@@ -312,6 +312,92 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
   const findings = result?.findings ?? [];
   if (findings.length === 0) return 0;
 
+  // -------- Tier 2.1: Self-critique pass --------
+  // Re-show the same images to a cheap second model with the model's own
+  // findings and ask it to label each {keep, weak, junk} with a reason.
+  // This catches: (a) findings whose evidence quote isn't actually visible
+  // on the supplied sheets, (b) findings that contradict context shown
+  // elsewhere on the sheet, (c) generic boilerplate that didn't observe a
+  // specific defect. We keep this lightweight (one call per chunk) so it
+  // doesn't blow the chunk timeout.
+  const SELF_CRITIQUE_SCHEMA = {
+    name: "submit_self_critique",
+    description:
+      "For each draft finding, decide if it is grounded in what is actually visible on the supplied sheets.",
+    parameters: {
+      type: "object",
+      properties: {
+        verdicts: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              index: { type: "integer", minimum: 0 },
+              verdict: { type: "string", enum: ["keep", "weak", "junk"] },
+              reason: { type: "string" },
+            },
+            required: ["index", "verdict", "reason"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["verdicts"],
+      additionalProperties: false,
+    },
+  } as const;
+
+  const critiqueVerdicts = new Map<number, { verdict: "keep" | "weak" | "junk"; reason: string }>();
+  if (findings.length > 0 && ctx.disciplineImageUrls.length > 0) {
+    try {
+      const draftSummary = findings
+        .map((f, i) =>
+          `#${i} [${f.priority}] sheets=${(f.sheet_refs ?? []).join(",") || "—"} cite=${f.code_section ?? "—"}\n` +
+          `  finding: ${f.finding.slice(0, 240)}\n` +
+          `  evidence: ${(f.evidence ?? []).slice(0, 2).map((e) => `"${e.slice(0, 140)}"`).join(" | ") || "(none)"}`,
+        )
+        .join("\n\n");
+      const critiqueText =
+        `You drafted ${findings.length} ${ctx.discipline} findings against these plan sheets. ` +
+        `Re-examine the images. For each finding, decide:\n` +
+        `- keep: defect is clearly visible AND the evidence quote is something a reader could find on the sheet.\n` +
+        `- weak: defect is plausible but evidence quote is vague, generic, or only loosely supported by what's visible.\n` +
+        `- junk: defect is not visible, evidence quote does not appear on the sheets, or the finding contradicts something visible (e.g. you flagged 'no occupant load shown' but a load IS shown).\n\n` +
+        `Be honest. False positives waste reviewer time. Output one verdict per finding via submit_self_critique.\n\n` +
+        `## Draft findings\n${draftSummary}`;
+      const critiqueContent: Array<
+        | { type: "text"; text: string }
+        | { type: "image_url"; image_url: { url: string } }
+      > = [
+        { type: "text", text: critiqueText },
+        ...ctx.disciplineImageUrls.slice(0, 8).map((u) => ({
+          type: "image_url" as const,
+          image_url: { url: u },
+        })),
+      ];
+      const critiqueResult = (await callAI(
+        [
+          {
+            role: "system",
+            content:
+              "You are a senior Florida plan reviewer auditing another reviewer's draft findings against the actual plan sheets. Reject anything not clearly visible.",
+          },
+          { role: "user", content: critiqueContent },
+        ],
+        SELF_CRITIQUE_SCHEMA as unknown as Record<string, unknown>,
+        "google/gemini-2.5-flash",
+      )) as {
+        verdicts: Array<{ index: number; verdict: "keep" | "weak" | "junk"; reason: string }>;
+      };
+      for (const v of critiqueResult?.verdicts ?? []) {
+        if (typeof v.index === "number" && v.index >= 0 && v.index < findings.length) {
+          critiqueVerdicts.set(v.index, { verdict: v.verdict, reason: (v.reason ?? "").slice(0, 280) });
+        }
+      }
+    } catch (err) {
+      console.error("[discipline_review] self-critique failed (non-fatal):", err);
+    }
+  }
+
   const promptVersionId = await getActivePromptVersionId(admin, ctx.discipline);
 
   // Compute next def_number using MAX of existing rows for this
@@ -358,12 +444,12 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
     return stripped;
   };
 
-  // Evidence shape verifier. We can't OCR the PDFs cheaply at this stage,
-  // but we CAN catch the common fabrication patterns that have surfaced in
-  // production: empty quotes, quotes that are just the finding restated,
-  // generic notes with no plan-specific anchor, or quotes with no overlap
-  // to the cited sheet refs at all. Suspicious findings get auto-routed to
-  // human review with a clear reason.
+  // Tier 2.2: the sheet refs we actually showed the model in this chunk.
+  // Findings whose sheet_refs don't intersect this set are auto-suspicious —
+  // the model invented a sheet number it never saw.
+  const knownChunkSheets = new Set(
+    ctx.disciplineSheets.map((s) => (s.sheet_ref ?? "").toUpperCase().trim()).filter(Boolean),
+  );
   const verifyEvidenceShape = (
     evidence: string[],
     finding: string,
@@ -371,6 +457,22 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
   ): { suspicious: boolean; reason: string } => {
     if (evidence.length === 0) {
       return { suspicious: true, reason: "no quoted evidence on the plan" };
+    }
+    // Sheet-anchor enforcement: the finding must name at least one sheet
+    // we actually rendered for the model. Generic / fabricated sheet refs
+    // (e.g. "A-999") are rejected at this gate.
+    const claimedSheets = (sheetRefs ?? []).map((s) => (s ?? "").toUpperCase().trim()).filter(Boolean);
+    if (claimedSheets.length === 0) {
+      return { suspicious: true, reason: "no sheet_refs cited" };
+    }
+    if (knownChunkSheets.size > 0) {
+      const anyKnown = claimedSheets.some((s) => knownChunkSheets.has(s));
+      if (!anyKnown) {
+        return {
+          suspicious: true,
+          reason: `cited sheet(s) ${claimedSheets.join(", ")} not in the chunk shown to the model (${[...knownChunkSheets].slice(0, 4).join(", ")}…)`,
+        };
+      }
     }
     const findingTokens = new Set(
       finding.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 4),
@@ -392,29 +494,27 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
         }
       }
     }
-    // If quotes never reference any cited sheet ref OR a recognizable plan
-    // artifact (sheet name, detail callout, dimension, code ref), they may be
-    // generic. We're permissive here — only flag when ALL quotes are vague.
-    const PLAN_ANCHORS = [
-      /\b[A-Z]-?\d{2,4}\b/, // sheet/detail callouts
-      /\b\d+(?:'|-|\.\d+)?\s*(?:in|inch|inches|ft|feet|psf|°|deg)\b/i,
-      /\bdetail\b/i,
+    // Require at least one quote contain a known sheet ref OR a strong
+    // plan-specific anchor (callout id, dimension, note number). Mere
+    // generic words like "section" or "table" no longer satisfy.
+    const STRONG_ANCHORS = [
+      /\b[A-Z]{1,3}-?\d{1,3}\.\d{1,3}\b/, // detail callouts e.g. A5.2 or 1/A5.2
+      /\b\d+\/[A-Z]{1,3}-?\d{1,4}\b/, // detail-of-sheet e.g. 3/A-501
+      /\b\d+(?:\.\d+)?\s*(?:in|inch|inches|"|ft|feet|'|psf|°|deg|kips|psi)\b/i,
       /\bnote\s*\d+\b/i,
-      /\bsheet\b/i,
-      /\bsection\b/i,
-      /\bsymbol\b/i,
-      /\btable\b/i,
+      /\bdetail\s*\d/i,
+      /\btable\s+[A-Z0-9]/i,
     ];
-    const sheetUpper = sheetRefs.map((s) => s.toUpperCase());
+    const sheetUpper = claimedSheets;
     const anyAnchor = evidence.some(
       (e) =>
         sheetUpper.some((s) => e.toUpperCase().includes(s)) ||
-        PLAN_ANCHORS.some((re) => re.test(e)),
+        STRONG_ANCHORS.some((re) => re.test(e)),
     );
     if (!anyAnchor) {
       return {
         suspicious: true,
-        reason: "evidence quotes contain no plan-specific anchor (sheet ref, detail, dimension, or note number)",
+        reason: "evidence has no strong plan anchor (sheet ref, detail callout, dimension, or numbered note)",
       };
     }
     return { suspicious: false, reason: "" };
@@ -431,18 +531,30 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
       f.finding,
       f.sheet_refs ?? [],
     );
-    // Findings whose evidence quotes look fabricated get auto-routed to
-    // human review. We don't delete them — a real defect can have weak
-    // quoting — but we don't let them silently flow to letter generation.
+    const critique = critiqueVerdicts.get(i);
+    const isJunk = critique?.verdict === "junk";
+    const isWeak = critique?.verdict === "weak";
+
+    // Self-critique 'junk' → auto-waive (still stored for audit).
+    // Self-critique 'weak' → require human review with the model's reason.
+    // Evidence-shape suspicious → require human review (existing Tier 1 behavior).
     const baseConf = Math.max(0, Math.min(1, f.confidence_score ?? 0.5));
-    const adjustedConf = evidenceCheck.suspicious
-      ? Math.max(0.1, baseConf * 0.6)
-      : baseConf;
+    let adjustedConf = baseConf;
+    if (isJunk) adjustedConf = Math.min(adjustedConf, 0.15);
+    else if (isWeak) adjustedConf = Math.max(0.1, baseConf * 0.5);
+    else if (evidenceCheck.suspicious) adjustedConf = Math.max(0.1, baseConf * 0.6);
+
     const requiresHumanReview =
-      !!f.requires_human_review || evidenceCheck.suspicious;
-    const humanReviewReason = evidenceCheck.suspicious
-      ? `Evidence verification: ${evidenceCheck.reason}. Confirm finding on the plan.`
-      : f.human_review_reason ?? null;
+      !!f.requires_human_review || evidenceCheck.suspicious || isWeak || isJunk;
+    const humanReviewReason = isJunk
+      ? `Self-critique rejected: ${critique?.reason ?? "not visible on plan"}`
+      : isWeak
+        ? `Self-critique flagged weak: ${critique?.reason ?? "evidence weak"}`
+        : evidenceCheck.suspicious
+          ? `Evidence verification: ${evidenceCheck.reason}. Confirm finding on the plan.`
+          : f.human_review_reason ?? null;
+    const status = isJunk ? "waived" : "open";
+
     return {
       plan_review_id: planReviewId,
       firm_id: firmId,
@@ -461,6 +573,9 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
           reason: evidenceCheck.reason,
           checked_at: new Date().toISOString(),
         },
+        self_critique: critique
+          ? { verdict: critique.verdict, reason: critique.reason }
+          : null,
       },
       priority: f.priority ?? "medium",
       life_safety_flag: !!f.life_safety_flag,
@@ -473,7 +588,7 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
       confidence_basis: f.confidence_basis ?? "Vision-extracted",
       model_version: "google/gemini-2.5-flash",
       prompt_version_id: promptVersionId,
-      status: "open",
+      status,
     };
   });
 
