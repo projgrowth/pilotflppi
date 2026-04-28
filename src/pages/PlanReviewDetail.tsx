@@ -1028,6 +1028,9 @@ export default function PlanReviewDetail() {
                 renderProgress={renderProgress}
                 uploading={uploading}
                 uploadSuccess={uploadSuccess}
+                pipelineProcessing={pipelineProcessing}
+                onPipelineComplete={handlePipelineComplete}
+                onOpenDashboard={openDashboard}
                 findings={findings}
                 activeFindingIndex={activeFindingIndex}
                 onAnnotationClick={handleAnnotationClick}
