@@ -61,6 +61,7 @@ import { RoundCarryoverPanel } from "@/components/plan-review/RoundCarryoverPane
 import { UploadProgressBar } from "@/components/plan-review/UploadProgressBar";
 import { SubmittalIncompleteBanner } from "@/components/plan-review/SubmittalIncompleteBanner";
 import { ReviewProvenanceStrip } from "@/components/plan-review/ReviewProvenanceStrip";
+import DNAConfirmCard from "@/components/plan-review/DNAConfirmCard";
 import { sendCommentLetter } from "@/lib/send-comment-letter";
 import { fetchReadinessForSend } from "@/lib/letter-readiness-fetch";
 import { useFirmId } from "@/hooks/useFirmId";
