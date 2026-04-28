@@ -11,7 +11,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Building2, Users, MapPin, Plus, X, Loader2, Receipt, BookOpen } from "lucide-react";
+import { Building2, Users, MapPin, Plus, X, Loader2, Receipt, BookOpen, Bell } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import {
+  isPipelineNotifyEnabled,
+  setPipelineNotifyEnabled,
+} from "@/hooks/usePipelineCompleteNotifications";
 import { FeeScheduleSettings } from "@/components/FeeScheduleSettings";
 import { CanonicalCodeLibrary } from "@/components/CanonicalCodeLibrary";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
