@@ -194,7 +194,7 @@ export async function stageGroundCitations(
     distinctSections.length > 0
       ? await admin
           .from("fbc_code_sections")
-          .select("code, section, edition, title, requirement_text")
+          .select("code, section, edition, title, requirement_text, code_family")
           .in("section", distinctSections)
       : { data: [], error: null };
   if (canonErr) throw canonErr;
@@ -205,11 +205,26 @@ export async function stageGroundCitations(
     edition: string;
     title: string;
     requirement_text: string;
+    code_family?: string | null;
   };
   const canon = (canonRaw ?? []) as Canon[];
 
-  function lookup(k: Key): { hit: Canon; matchedSection: string } | null {
+  function lookup(
+    k: Key,
+    preferredFamilies: string[],
+  ): { hit: Canon; matchedSection: string } | null {
     for (const section of parentSections(k.section)) {
+      // Family-biased: try preferred families first (e.g. fire for Life Safety),
+      // so an NFPA 101 7.5.1.5 finding is matched against the NFPA canonical
+      // even if a same-numbered FBC row also exists.
+      for (const fam of preferredFamilies) {
+        const famHit = canon.find(
+          (c) =>
+            c.section === section &&
+            (c.code_family ?? "building").toLowerCase() === fam,
+        );
+        if (famHit) return { hit: famHit, matchedSection: section };
+      }
       let hit =
         (k.edition &&
           canon.find(
