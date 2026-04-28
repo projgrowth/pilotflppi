@@ -598,11 +598,13 @@ export type Database = {
           requires_human_review: boolean
           reviewer_disposition: string | null
           reviewer_notes: string | null
+          round_diff_status: string | null
           sheet_refs: string[] | null
           status: string
           updated_at: string
           verification_notes: string
           verification_status: string
+          verified_by_challenger: boolean
         }
         Insert: {
           citation_canonical_text?: string | null
@@ -636,11 +638,13 @@ export type Database = {
           requires_human_review?: boolean
           reviewer_disposition?: string | null
           reviewer_notes?: string | null
+          round_diff_status?: string | null
           sheet_refs?: string[] | null
           status?: string
           updated_at?: string
           verification_notes?: string
           verification_status?: string
+          verified_by_challenger?: boolean
         }
         Update: {
           citation_canonical_text?: string | null
@@ -674,11 +678,13 @@ export type Database = {
           requires_human_review?: boolean
           reviewer_disposition?: string | null
           reviewer_notes?: string | null
+          round_diff_status?: string | null
           sheet_refs?: string[] | null
           status?: string
           updated_at?: string
           verification_notes?: string
           verification_status?: string
+          verified_by_challenger?: boolean
         }
         Relationships: [
           {
@@ -902,6 +908,9 @@ export type Database = {
       firm_settings: {
         Row: {
           address: string | null
+          block_letter_on_low_coverage: boolean
+          block_letter_on_ungrounded: boolean
+          block_review_on_incomplete_submittal: boolean
           closing_language: string | null
           created_at: string
           email: string | null
@@ -916,6 +925,9 @@ export type Database = {
         }
         Insert: {
           address?: string | null
+          block_letter_on_low_coverage?: boolean
+          block_letter_on_ungrounded?: boolean
+          block_review_on_incomplete_submittal?: boolean
           closing_language?: string | null
           created_at?: string
           email?: string | null
@@ -930,6 +942,9 @@ export type Database = {
         }
         Update: {
           address?: string | null
+          block_letter_on_low_coverage?: boolean
+          block_letter_on_ungrounded?: boolean
+          block_review_on_incomplete_submittal?: boolean
           closing_language?: string | null
           created_at?: string
           email?: string | null
@@ -1522,6 +1537,8 @@ export type Database = {
       }
       plan_review_files: {
         Row: {
+          deleted_at: string | null
+          deleted_by: string | null
           file_path: string
           file_size_bytes: number | null
           firm_id: string | null
@@ -1533,6 +1550,8 @@ export type Database = {
           uploaded_by: string | null
         }
         Insert: {
+          deleted_at?: string | null
+          deleted_by?: string | null
           file_path: string
           file_size_bytes?: number | null
           firm_id?: string | null
@@ -1544,6 +1563,8 @@ export type Database = {
           uploaded_by?: string | null
         }
         Update: {
+          deleted_at?: string | null
+          deleted_by?: string | null
           file_path?: string
           file_size_bytes?: number | null
           firm_id?: string | null
@@ -1622,6 +1643,9 @@ export type Database = {
           comment_letter_draft: string
           compliance_affidavit_signed_at: string | null
           created_at: string
+          delete_reason: string | null
+          deleted_at: string | null
+          deleted_by: string | null
           fbc_edition: string | null
           file_urls: string[]
           finding_statuses: Json | null
@@ -1651,6 +1675,9 @@ export type Database = {
           comment_letter_draft?: string
           compliance_affidavit_signed_at?: string | null
           created_at?: string
+          delete_reason?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
           fbc_edition?: string | null
           file_urls?: string[]
           finding_statuses?: Json | null
@@ -1680,6 +1707,9 @@ export type Database = {
           comment_letter_draft?: string
           compliance_affidavit_signed_at?: string | null
           created_at?: string
+          delete_reason?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
           fbc_edition?: string | null
           file_urls?: string[]
           finding_statuses?: Json | null
@@ -1841,6 +1871,9 @@ export type Database = {
           county: string
           created_at: string
           deadline_at: string | null
+          delete_reason: string | null
+          deleted_at: string | null
+          deleted_by: string | null
           firm_id: string | null
           hold_reason: string | null
           id: string
@@ -1869,6 +1902,9 @@ export type Database = {
           county?: string
           created_at?: string
           deadline_at?: string | null
+          delete_reason?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
           firm_id?: string | null
           hold_reason?: string | null
           id?: string
@@ -1897,6 +1933,9 @@ export type Database = {
           county?: string
           created_at?: string
           deadline_at?: string | null
+          delete_reason?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
           firm_id?: string | null
           hold_reason?: string | null
           id?: string
