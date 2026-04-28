@@ -1080,6 +1080,7 @@ export async function stageDisciplineReview(
                   dna,
                   jurisdiction,
                   useType,
+                  missingDisciplines,
                 });
                 return { chunkIdx, cs, chunkSheets, inserted };
               }),
