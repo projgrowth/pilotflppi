@@ -177,6 +177,20 @@ export function CanonicalCodeLibrary() {
                 </>
               )}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={runEmbedBatch}
+              disabled={embedRunning || unembedded === 0}
+              title="Generate vector embeddings for unembedded sections so the citation grounder can semantically re-rank findings."
+            >
+              {embedRunning ? (
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <Brain className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              Embed {Math.min(200, unembedded)}
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="p-0">
