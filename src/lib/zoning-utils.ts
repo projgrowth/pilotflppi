@@ -50,22 +50,22 @@ export interface ZoningCheck {
   detail?: string;
 }
 
-export function computeFAR(totalBuildingArea: number | null, lotArea: number | null): number | null {
+function computeFAR(totalBuildingArea: number | null, lotArea: number | null): number | null {
   if (!totalBuildingArea || !lotArea || lotArea === 0) return null;
   return totalBuildingArea / lotArea;
 }
 
-export function computeLotCoverage(footprint: number | null, lotArea: number | null): number | null {
+function computeLotCoverage(footprint: number | null, lotArea: number | null): number | null {
   if (!footprint || !lotArea || lotArea === 0) return null;
   return (footprint / lotArea) * 100;
 }
 
-export function computeParkingRequired(totalArea: number | null, ratioPer: number | null): number | null {
+function computeParkingRequired(totalArea: number | null, ratioPer: number | null): number | null {
   if (!totalArea || !ratioPer || ratioPer === 0) return null;
   return Math.ceil(totalArea / ratioPer);
 }
 
-export function computeSignageAllowance(frontage: number | null, ratio: number | null): number | null {
+function computeSignageAllowance(frontage: number | null, ratio: number | null): number | null {
   if (!frontage || !ratio) return null;
   return frontage * ratio;
 }

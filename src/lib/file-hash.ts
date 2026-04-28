@@ -33,16 +33,3 @@ export async function sha256OfFile(file: File): Promise<string> {
   return sha256Hex(await file.arrayBuffer());
 }
 
-/**
- * Verify a previously-stored SHA matches the current bytes. Returns true
- * when both are present and match; false otherwise. Used by the snapshot
- * viewer to flag tampered downloads with a red banner.
- */
-export async function verifySha256(
-  data: ArrayBuffer | Blob | string,
-  expectedHex: string | null | undefined,
-): Promise<boolean> {
-  if (!expectedHex) return false;
-  const actual = await sha256Hex(data);
-  return actual.toLowerCase() === expectedHex.toLowerCase();
-}
