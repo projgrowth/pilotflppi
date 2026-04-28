@@ -38,6 +38,13 @@ interface Props {
   visibleCount: number;
   allVisibleResolved: boolean;
   onMarkVisibleResolved: () => void;
+
+  /** Optional Quality filter (Phase 4 hardening). When provided, exposes
+   *  Unverified / Hallucinated chips so reviewers can triage AI quality
+   *  issues directly. Counts of 0 hide the corresponding chip. */
+  qualityCounts?: Record<QualityFilter, number>;
+  qualityFilter?: QualityFilter;
+  onQualityFilterChange?: (q: QualityFilter) => void;
 }
 
 const statusMeta: Record<FindingStatus | "all", { label: string; icon?: typeof CheckCheck; cls: string }> = {
