@@ -143,6 +143,72 @@ export type Database = {
           },
         ]
       }
+      certificates_of_compliance: {
+        Row: {
+          ahj_recipient: string | null
+          attestation_text: string
+          attestor_license: string
+          attestor_name: string
+          certificate_html: string
+          certificate_html_sha256: string | null
+          chained_hash: string
+          created_at: string
+          firm_id: string | null
+          id: string
+          included_report_ids: Json
+          issued_at: string
+          issued_by: string
+          pdf_sha256: string | null
+          pdf_storage_path: string | null
+          project_id: string
+          revocation_reason: string | null
+          revoked_at: string | null
+          sent_to_ahj_at: string | null
+        }
+        Insert: {
+          ahj_recipient?: string | null
+          attestation_text: string
+          attestor_license: string
+          attestor_name: string
+          certificate_html?: string
+          certificate_html_sha256?: string | null
+          chained_hash: string
+          created_at?: string
+          firm_id?: string | null
+          id?: string
+          included_report_ids?: Json
+          issued_at?: string
+          issued_by: string
+          pdf_sha256?: string | null
+          pdf_storage_path?: string | null
+          project_id: string
+          revocation_reason?: string | null
+          revoked_at?: string | null
+          sent_to_ahj_at?: string | null
+        }
+        Update: {
+          ahj_recipient?: string | null
+          attestation_text?: string
+          attestor_license?: string
+          attestor_name?: string
+          certificate_html?: string
+          certificate_html_sha256?: string | null
+          chained_hash?: string
+          created_at?: string
+          firm_id?: string | null
+          id?: string
+          included_report_ids?: Json
+          issued_at?: string
+          issued_by?: string
+          pdf_sha256?: string | null
+          pdf_storage_path?: string | null
+          project_id?: string
+          revocation_reason?: string | null
+          revoked_at?: string | null
+          sent_to_ahj_at?: string | null
+        }
+        Relationships: []
+      }
       comment_letter_snapshots: {
         Row: {
           created_at: string
@@ -930,6 +996,155 @@ export type Database = {
             columns: ["correction_id"]
             isOneToOne: false
             referencedRelation: "corrections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inspection_photos: {
+        Row: {
+          caption: string
+          captured_at: string | null
+          created_at: string
+          deficiency_ref: string | null
+          firm_id: string | null
+          gps_lat: number | null
+          gps_lng: number | null
+          id: string
+          inspection_report_id: string | null
+          project_id: string
+          required_inspection_id: string | null
+          sha256: string
+          storage_path: string
+          uploaded_by: string | null
+        }
+        Insert: {
+          caption?: string
+          captured_at?: string | null
+          created_at?: string
+          deficiency_ref?: string | null
+          firm_id?: string | null
+          gps_lat?: number | null
+          gps_lng?: number | null
+          id?: string
+          inspection_report_id?: string | null
+          project_id: string
+          required_inspection_id?: string | null
+          sha256: string
+          storage_path: string
+          uploaded_by?: string | null
+        }
+        Update: {
+          caption?: string
+          captured_at?: string | null
+          created_at?: string
+          deficiency_ref?: string | null
+          firm_id?: string | null
+          gps_lat?: number | null
+          gps_lng?: number | null
+          id?: string
+          inspection_report_id?: string | null
+          project_id?: string
+          required_inspection_id?: string | null
+          sha256?: string
+          storage_path?: string
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inspection_photos_inspection_report_id_fkey"
+            columns: ["inspection_report_id"]
+            isOneToOne: false
+            referencedRelation: "inspection_reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inspection_photos_required_inspection_id_fkey"
+            columns: ["required_inspection_id"]
+            isOneToOne: false
+            referencedRelation: "required_inspections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inspection_reports: {
+        Row: {
+          ahj_recipient: string | null
+          created_at: string
+          deficiencies: Json
+          firm_id: string | null
+          id: string
+          inspection_type: string
+          inspector_id: string | null
+          inspector_license: string
+          inspector_name: string
+          narrative: string
+          pdf_sha256: string | null
+          pdf_storage_path: string | null
+          performed_at: string
+          photo_refs: Json
+          project_id: string
+          readiness_snapshot: Json
+          report_html: string
+          report_html_sha256: string | null
+          required_inspection_id: string | null
+          result: string
+          sent_to_ahj_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          ahj_recipient?: string | null
+          created_at?: string
+          deficiencies?: Json
+          firm_id?: string | null
+          id?: string
+          inspection_type: string
+          inspector_id?: string | null
+          inspector_license?: string
+          inspector_name?: string
+          narrative?: string
+          pdf_sha256?: string | null
+          pdf_storage_path?: string | null
+          performed_at?: string
+          photo_refs?: Json
+          project_id: string
+          readiness_snapshot?: Json
+          report_html?: string
+          report_html_sha256?: string | null
+          required_inspection_id?: string | null
+          result?: string
+          sent_to_ahj_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          ahj_recipient?: string | null
+          created_at?: string
+          deficiencies?: Json
+          firm_id?: string | null
+          id?: string
+          inspection_type?: string
+          inspector_id?: string | null
+          inspector_license?: string
+          inspector_name?: string
+          narrative?: string
+          pdf_sha256?: string | null
+          pdf_storage_path?: string | null
+          performed_at?: string
+          photo_refs?: Json
+          project_id?: string
+          readiness_snapshot?: Json
+          report_html?: string
+          report_html_sha256?: string | null
+          required_inspection_id?: string | null
+          result?: string
+          sent_to_ahj_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inspection_reports_required_inspection_id_fkey"
+            columns: ["required_inspection_id"]
+            isOneToOne: false
+            referencedRelation: "required_inspections"
             referencedColumns: ["id"]
           },
         ]
@@ -1741,6 +1956,63 @@ export type Database = {
           prompt_key?: string
           system_prompt?: string
           version?: number
+        }
+        Relationships: []
+      }
+      required_inspections: {
+        Row: {
+          code_basis: string
+          completed_at: string | null
+          created_at: string
+          firm_id: string | null
+          id: string
+          inspection_type: string
+          inspector_id: string | null
+          is_threshold_inspection: boolean
+          project_id: string
+          report_id: string | null
+          result: string | null
+          scheduled_for: string | null
+          sort_order: number
+          status: string
+          trade: string
+          updated_at: string
+        }
+        Insert: {
+          code_basis?: string
+          completed_at?: string | null
+          created_at?: string
+          firm_id?: string | null
+          id?: string
+          inspection_type: string
+          inspector_id?: string | null
+          is_threshold_inspection?: boolean
+          project_id: string
+          report_id?: string | null
+          result?: string | null
+          scheduled_for?: string | null
+          sort_order?: number
+          status?: string
+          trade?: string
+          updated_at?: string
+        }
+        Update: {
+          code_basis?: string
+          completed_at?: string | null
+          created_at?: string
+          firm_id?: string | null
+          id?: string
+          inspection_type?: string
+          inspector_id?: string | null
+          is_threshold_inspection?: boolean
+          project_id?: string
+          report_id?: string | null
+          result?: string | null
+          scheduled_for?: string | null
+          sort_order?: number
+          status?: string
+          trade?: string
+          updated_at?: string
         }
         Relationships: []
       }
