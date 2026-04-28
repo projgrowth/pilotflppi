@@ -231,5 +231,13 @@ export async function stageCritic(
     }
   }
 
-  return { examined: targets.length, kept, weak, junk, failed, skipped: rows.length - targets.length };
+  return {
+    examined: targets.length,
+    kept,
+    weak,
+    junk,
+    failed,
+    skipped: rows.length - targets.length,
+    used_learned_patterns: usedLearnedPatterns,
+  };
 }
