@@ -75,12 +75,15 @@ interface Props {
   onDisciplineFilterChange: (d: string | "all") => void;
   sheetFilter: string | "all";
   onSheetFilterChange: (s: string | "all") => void;
+  qualityFilter?: QualityFilter;
+  onQualityFilterChange?: (q: QualityFilter) => void;
 
   // Roll-ups
   openCount: number;
   resolvedCount: number;
   deferredCount: number;
   confidenceCounts: Record<ConfidenceFilter, number>;
+  qualityCounts?: Record<QualityFilter, number>;
   disciplinesPresent: string[];
   sheetsPresent: string[];
   allVisibleResolved: boolean;
