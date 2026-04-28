@@ -122,7 +122,7 @@ export default function Dashboard() {
       {/* Needs my review banner */}
       {(needsReviewCount ?? 0) > 0 && (
         <button
-          onClick={() => navigate("/review")}
+          onClick={() => navigate("/projects")}
           className="w-full text-left flex items-center gap-3 px-4 py-3 rounded-md border border-warning/30 bg-warning/5 hover:bg-warning/10 transition-colors"
         >
           <AlertTriangle className="h-4 w-4 text-warning shrink-0" />
@@ -193,7 +193,7 @@ export default function Dashboard() {
                 hasActive={pipeline?.hasActive ?? false}
                 stageStartedAt={pipeline?.current?.started_at ?? null}
                 onClick={() =>
-                  navigate(reviewId ? `/plan-review/${reviewId}` : `/review/${project.id}`)
+                  navigate(reviewId ? `/plan-review/${reviewId}` : `/projects/${project.id}`)
                 }
               />
             ))}

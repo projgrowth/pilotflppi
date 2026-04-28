@@ -7,7 +7,7 @@ import { StatusChip } from "@/components/StatusChip";
 import { DeadlineRing } from "@/components/DeadlineRing";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
-import { NewPlanReviewWizard } from "@/components/NewPlanReviewWizard";
+import { NewReviewDialog } from "@/components/NewReviewDialog";
 import { useProjects, getDaysElapsed, getDaysRemaining } from "@/hooks/useProjects";
 import {
  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -176,11 +176,10 @@ export default function Projects() {
  )}
  </Card>
 
- {/* Upload-first wizard: AI extracts project info from the title block */}
- <NewPlanReviewWizard
+  {/* Single-form dialog. AI auto-fill runs in the background; pipeline runs in the workspace. */}
+ <NewReviewDialog
  open={wizardOpen}
  onOpenChange={setWizardOpen}
- onComplete={(_reviewId, projectId) => navigate(`/projects/${projectId}`)}
  />
  </div>
  );
