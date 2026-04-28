@@ -31,7 +31,8 @@ export interface ReadinessCheck {
     | "notice_filed"
     | "affidavit_signed"
     | "reviewer_licensed"
-    | "threshold_special_inspector";
+    | "threshold_special_inspector"
+    | "coverage";
   severity: ReadinessSeverity;
   /** Required vs advisory — only required checks gate the export button. */
   required: boolean;
