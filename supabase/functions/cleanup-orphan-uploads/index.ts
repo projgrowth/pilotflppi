@@ -130,6 +130,7 @@ Deno.serve(async (req) => {
         reviews_cleaned: reviewsCleaned,
         files_deleted: totalFiles,
         logs_deleted: logsDeleted,
+        cost_rows_deleted: costsDeleted,
         errors,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
