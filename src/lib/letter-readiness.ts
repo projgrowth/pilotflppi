@@ -204,7 +204,60 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
         : `Missing: ${missing.slice(0, 4).join(", ")}${missing.length > 4 ? "…" : ""}. The letter will still send but some boilerplate may be incomplete.`,
   });
 
-  const required = checks.filter((c) => c.required);
+  // 6. Notice to Building Official filed (F.S. 553.791(4)(a)) — required.
+  const noticeFiled = !!input.noticeToBuildingOfficialFiledAt;
+  checks.push({
+    id: "notice_filed",
+    required: true,
+    severity: noticeFiled ? "ok" : "block",
+    title: noticeFiled
+      ? "Notice to Building Official on file"
+      : "Notice to Building Official not filed",
+    detail: noticeFiled
+      ? `Filed ${new Date(input.noticeToBuildingOfficialFiledAt!).toLocaleDateString()}. F.S. 553.791(4)(a) prerequisite met.`
+      : "F.S. 553.791(4)(a) requires the Notice to be on file with the AHJ before the private provider's review is delivered. Generate it from Documents and mark it filed.",
+  });
+
+  // 7. Plan Compliance Affidavit signed for this round (F.S. 553.791(7)(b)).
+  const affidavitSigned = !!input.complianceAffidavitSignedAt;
+  checks.push({
+    id: "affidavit_signed",
+    required: true,
+    severity: affidavitSigned ? "ok" : "block",
+    title: affidavitSigned
+      ? "Plan Compliance Affidavit signed"
+      : "Plan Compliance Affidavit not signed for this round",
+    detail: affidavitSigned
+      ? `Signed ${new Date(input.complianceAffidavitSignedAt!).toLocaleDateString()}. Required to accompany the submittal.`
+      : "F.S. 553.791(7)(b) requires a signed affidavit with every plan submittal. Generate from Documents and mark it signed.",
+  });
+
+  // 8. Reviewer license coverage — block when a discipline in the letter has
+  // no matching professional license on the signing reviewer's profile.
+  // Cross-discipline / administrative findings are intentionally excluded —
+  // they are documentation flags, not engineering judgments.
+  const NON_DISCIPLINE = new Set(["cross_sheet", "administrative", "general"]);
+  const licensed = new Set(
+    (input.reviewerLicensedDisciplines ?? []).map((d) => d.toLowerCase()),
+  );
+  const uncovered = (input.disciplinesInLetter ?? [])
+    .map((d) => d.toLowerCase())
+    .filter((d) => d && !NON_DISCIPLINE.has(d) && !licensed.has(d));
+  const uniqueUncovered = Array.from(new Set(uncovered));
+  checks.push({
+    id: "reviewer_licensed",
+    required: true,
+    severity: uniqueUncovered.length === 0 ? "ok" : "block",
+    title:
+      uniqueUncovered.length === 0
+        ? "Reviewer licensed for every discipline in the letter"
+        : `Reviewer not licensed for ${uniqueUncovered.length} discipline${uniqueUncovered.length === 1 ? "" : "s"}`,
+    detail:
+      uniqueUncovered.length === 0
+        ? "F.S. 553.791(2) requires the signing reviewer to hold the appropriate Florida professional license for each discipline reviewed."
+        : `Add a license number under your profile for: ${uniqueUncovered.join(", ")}. Until then this letter cannot be sent under your signature.`,
+  });
+
   const blockingCount = required.filter((c) => c.severity === "block").length;
   return {
     checks,
