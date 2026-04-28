@@ -154,6 +154,8 @@ export default function PlanReviewDetail() {
   const [aiRunning, setAiRunning] = useState(false);
   const [aiCompleteFlash, setAiCompleteFlash] = useState<number | null>(null);
   const [reprepping, setReprepping] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{
     phase: string;
     prepared: number;
@@ -515,8 +517,6 @@ export default function PlanReviewDetail() {
   const hasFindings = findings.length > 0;
   const openDashboard = () => navigate(`/plan-review/${review.id}/dashboard`);
 
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const projectName = review.project?.name || "this review";
   const handleDeleteReview = async () => {
     if (!user || !review) return;
