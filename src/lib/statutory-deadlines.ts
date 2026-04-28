@@ -18,8 +18,10 @@ function getFloridaHolidays(year: number): Set<string> {
 
   // Fixed holidays
   addDate(0, 1);   // New Year's Day
+  addDate(5, 19);  // Juneteenth (federal + FL observance, since 2021)
   addDate(6, 4);   // Independence Day
   addDate(10, 11);  // Veterans Day
+  addDate(11, 24);  // Christmas Eve (FL state holiday per s. 110.117(1)(j))
   addDate(11, 25);  // Christmas Day
 
   // MLK Day: 3rd Monday in January
