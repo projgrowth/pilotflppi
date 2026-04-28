@@ -37,6 +37,9 @@ export interface DeficiencyV2Lite {
   requires_human_review: boolean;
   human_review_reason: string | null;
   verification_status: string;
+  /** Citation grounding result from the ground-citations stage:
+   *  verified | verified_stub | mismatch | hallucinated | no_citation_required | unverified. */
+  citation_status?: string | null;
   status: string;
   model_version: string | null;
   /** Signed URL of the cited sheet image, attached by the ground_citations stage. */
