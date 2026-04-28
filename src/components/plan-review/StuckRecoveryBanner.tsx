@@ -14,8 +14,17 @@
  * a page refresh.
  */
 import { useEffect, useState } from "react";
-import { CheckCircle2, X, AlertTriangle, AlertCircle, Wand2, Loader2 } from "lucide-react";
+import { CheckCircle2, X, AlertTriangle, AlertCircle, Wand2, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { startPipeline } from "@/lib/pipeline-run";
+import { toast } from "sonner";
+
+interface QualityBreakdown {
+  unverified_pct?: number;
+  has_hallucinated_citations?: boolean;
+  total_live_findings?: number;
+  blocker_reason?: string | null;
+}
 
 interface Props {
   planReviewId: string;
@@ -24,6 +33,9 @@ interface Props {
   recoveryCount: number | undefined;
   aiCheckStatus?: string | null;
   failureReason?: string | null;
+  /** Quality breakdown from ai_run_progress so the banner can summarise the
+   *  unverified / hallucinated counts and offer targeted re-runs. */
+  qualityBreakdown?: QualityBreakdown | null;
   /** True when file_urls.length > 0 but page_assets count === 0. */
   needsPreparation?: boolean;
   onPrepareNow?: () => void;
