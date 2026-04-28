@@ -17,6 +17,7 @@ export type PipelineStage =
   | "cross_check"
   | "verify"
   | "ground_citations"
+  | "challenger"
   | "dedupe"
   | "deferred_scope"
   | "prioritize"
@@ -32,6 +33,7 @@ export const CORE_STAGES: PipelineStage[] = [
   "critic",
   "dedupe",
   "ground_citations",
+  "challenger",
   "complete",
 ];
 
