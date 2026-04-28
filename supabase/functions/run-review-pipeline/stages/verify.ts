@@ -282,10 +282,17 @@ export async function stageVerify(
       continue;
     }
 
+    const successMeta = {
+      verifier_attempts: attempts,
+      verifier_last_error: null as string | null,
+      verifier_succeeded_at: new Date().toISOString(),
+    };
+    const handled = new Set<string>();
     const byId = new Map(slice.map((t) => [t.id, t] as const));
     for (const v of result.verifications ?? []) {
       const target = byId.get(v.deficiency_id);
       if (!target) continue;
+      handled.add(target.id);
       const reasoning = (v.reasoning ?? "").slice(0, 1000);
 
       if (v.verdict === "overturned") {
@@ -297,6 +304,7 @@ export async function stageVerify(
             status: "waived",
             reviewer_disposition: "reject",
             reviewer_notes: `Overturned in adversarial verification: ${reasoning}`,
+            verification_meta: successMeta,
           })
           .eq("id", target.id);
         overturned++;
@@ -309,6 +317,7 @@ export async function stageVerify(
             target.confidence_score !== null && target.confidence_score < 0.7
               ? "Modified during adversarial verification — please confirm before sending."
               : "Verification AI modified this finding — please confirm.",
+          verification_meta: successMeta,
         };
         if (v.corrected_finding) patch.finding = v.corrected_finding.slice(0, 1000);
         if (v.corrected_required_action) {
@@ -328,6 +337,7 @@ export async function stageVerify(
             human_review_method:
               "Open the cited sheet at full resolution and confirm presence/absence of the element described.",
             human_review_verify: reasoning.slice(0, 500),
+            verification_meta: successMeta,
           })
           .eq("id", target.id);
         cannotLocate++;
@@ -342,10 +352,34 @@ export async function stageVerify(
             verification_status: "verified",
             verification_notes: reasoning,
             confidence_score: newConf,
+            verification_meta: successMeta,
           })
           .eq("id", target.id);
         upheld++;
       }
+    }
+
+    // Findings the AI silently dropped from its response — route to human
+    // review instead of leaving them stuck at `unverified`.
+    for (const target of slice) {
+      if (handled.has(target.id)) continue;
+      await admin
+        .from("deficiencies_v2")
+        .update({
+          verification_status: "needs_human",
+          verification_notes:
+            "Verifier returned a response but omitted this finding from its verdicts.",
+          requires_human_review: true,
+          human_review_reason:
+            "Verifier did not return a verdict for this finding — please confirm manually before sending.",
+          verification_meta: {
+            verifier_attempts: attempts,
+            verifier_last_error: "omitted_from_response",
+            verifier_failed_at: new Date().toISOString(),
+          },
+        })
+        .eq("id", target.id);
+      skipped++;
     }
   }
 
