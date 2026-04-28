@@ -74,6 +74,9 @@ interface DisciplineRunCtx {
   dna: Record<string, unknown> | null;
   jurisdiction: Record<string, unknown> | null;
   useType: string | null;
+  /** Disciplines absent from the submittal — passed through to the expert
+   * prompt so it doesn't fabricate findings against missing trades. */
+  missingDisciplines?: string[];
 }
 
 // Per-worker cache so we don't refetch the active prompt id once per chunk.
