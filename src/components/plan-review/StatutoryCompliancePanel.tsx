@@ -61,7 +61,13 @@ export default function StatutoryCompliancePanel({
   const [editingSi, setEditingSi] = useState(false);
 
   const update = useMutation({
-    mutationFn: async (patch: Record<string, unknown>) => {
+    mutationFn: async (patch: {
+      notice_to_building_official_filed_at?: string | null;
+      compliance_affidavit_signed_at?: string | null;
+      special_inspector_designated?: boolean;
+      special_inspector_name?: string | null;
+      special_inspector_license?: string | null;
+    }) => {
       const { error } = await supabase
         .from("plan_reviews")
         .update(patch)
