@@ -108,6 +108,7 @@ export function useFindingFilters(
       filtered,
       filteredGrouped,
       confidenceCounts,
+      qualityCounts,
       disciplinesPresent,
       sheetsPresent,
       visibleIndices,
@@ -120,7 +121,7 @@ export function useFindingFilters(
       deferredCount,
       globalIndexMap,
     };
-  }, [findings, findingStatuses, filters.status, filters.confidence, filters.discipline, filters.sheet]);
+  }, [findings, findingStatuses, filters.status, filters.confidence, filters.discipline, filters.sheet, filters.quality]);
 }
 
 /**
