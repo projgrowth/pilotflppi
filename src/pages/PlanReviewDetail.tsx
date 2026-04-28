@@ -142,6 +142,7 @@ export default function PlanReviewDetail() {
   const [confidenceFilter, setConfidenceFilter] = useState<ConfidenceFilter>("all");
   const [disciplineFilter, setDisciplineFilter] = useState<string | "all">("all");
   const [sheetFilter, setSheetFilter] = useState<string | "all">("all");
+  const [qualityFilter, setQualityFilter] = useState<QualityFilter>("all");
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [repositioningIndex, setRepositioningIndex] = useState<number | null>(null);
