@@ -32,7 +32,8 @@ import { toast } from "sonner";
 import { ReviewTopBar } from "@/components/plan-review/ReviewTopBar";
 import { CountyPanel } from "@/components/plan-review/CountyPanel";
 import { LetterPanel } from "@/components/plan-review/LetterPanel";
-import { RightPanelTabs } from "@/components/plan-review/RightPanelTabs";
+import { RightPanelTabs, type RightPanelMode } from "@/components/plan-review/RightPanelTabs";
+import { ActivityPanel } from "@/components/plan-review/ActivityPanel";
 import { LetterLintDialog } from "@/components/plan-review/LetterLintDialog";
 import { FindingsListPanel } from "@/components/plan-review/FindingsListPanel";
 import { PlanViewerPanel } from "@/components/plan-review/PlanViewerPanel";
@@ -72,7 +73,7 @@ import { cancelPipelineForReview } from "@/lib/pipeline-cancel";
 
 import { Wand2, AlertTriangle, Loader2 } from "lucide-react";
 
-type RightPanelMode = "findings" | "checklist" | "completeness" | "letter" | "county";
+// RightPanelMode now imported from RightPanelTabs to keep the union in one place.
 
 export default function PlanReviewDetail() {
   const isMobile = useIsMobile();
@@ -994,6 +995,7 @@ export default function PlanReviewDetail() {
                 )}
                 {rightPanel === "letter" && <LetterPanel {...letterPanelProps} />}
                 {rightPanel === "county" && <CountyPanel county={county} />}
+                {rightPanel === "activity" && <ActivityPanel projectId={review.project_id} />}
               </div>
             </div>
           )}
@@ -1102,6 +1104,7 @@ export default function PlanReviewDetail() {
                   )}
                   {rightPanel === "letter" && <LetterPanel {...letterPanelProps} />}
                   {rightPanel === "county" && <CountyPanel county={county} />}
+                  {rightPanel === "activity" && <ActivityPanel projectId={review.project_id} />}
                 </div>
               </div>
             </ResizablePanel>
