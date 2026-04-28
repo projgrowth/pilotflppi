@@ -72,3 +72,51 @@ No DB migration required — `citation_status` is a free-text column.
 - Current review's "mismatch" count drops from 21 → ~3, and the lone "hallucinated" reclassifies as procedural.
 - Letter readiness gate stops blocking on noise.
 - Future runs: the AI is constrained to either cite cleanly or declare procedural — the noisy middle disappears.
+
+---
+
+# Tier 1 Accuracy Upgrade (shipped)
+
+Foundational improvements to attack the three root causes of finding/citation noise: missing canonical text, single-pass overconfidence, evidence quotes that don't anchor to the plan.
+
+## 1.1 Canonical text seeding (`fbc_code_sections`)
+
+- New edge function `seed-canonical-section` — accepts `{ section, edition, title, requirement_text, keywords, source_url }` and upserts into `fbc_code_sections`. AI-assist mode lets admins paste raw code text and Gemini 2.5 Pro normalizes it into the structured row.
+- New admin UI `src/components/CanonicalCodeLibrary.tsx` exposed under **Settings → Code Library** (admin-only). Lists stub rows first so they can be replaced; supports manual edit and AI-assisted bulk seed.
+- Grounder already tolerates stubs (Tier 0); each real seed monotonically improves grounding without code changes.
+
+## 1.2 Critic pass
+
+- New pipeline stage `supabase/functions/run-review-pipeline/stages/critic.ts` — runs after `discipline-review`, before `ground-citations`. Uses `google/gemini-2.5-flash` to audit each finding for internal coherence (does the finding text, required action, sheet refs, and code reference agree?).
+- Critic emits one of `{ keep, weak, junk }` per finding:
+  - `junk` → auto-status set to `waived` with `human_review_reason = 'critic_rejected:<reason>'`
+  - `weak` → `requires_human_review = true` with reason surfaced in the dashboard
+  - `keep` → unchanged
+- Wired into `pipeline-stages.ts`, `_shared/types.ts`, and `index.ts`. Stage timing recorded in `stage_checkpoints` like all others, so the watchdog/resume logic covers it automatically.
+
+## 1.3 Evidence-shape verification
+
+- New helper `verifyEvidenceShape` in `discipline-review.ts` runs as findings are persisted. Heuristics:
+  - No quoted evidence → `suspicious: 'no quoted evidence'`
+  - Quote restates the finding text (>0.6 token overlap with `finding`) → `suspicious: 'quote restates finding'`
+  - Quote contains no plan-specific anchor (sheet ref like `A-101`, detail callout `1/A5.2`, dimension, note number) → `suspicious: 'no plan-specific anchor'`
+- Suspicious findings get `requires_human_review = true` and `human_review_reason = 'evidence_shape:<reason>'`. The reviewer dashboard already surfaces `requires_human_review`, so no UI change needed.
+
+## Files added/changed
+
+- **New:** `supabase/functions/seed-canonical-section/index.ts`
+- **New:** `supabase/functions/run-review-pipeline/stages/critic.ts`
+- **New:** `src/components/CanonicalCodeLibrary.tsx`
+- **Edited:** `supabase/functions/run-review-pipeline/stages/discipline-review.ts` (evidence-shape verifier)
+- **Edited:** `supabase/functions/run-review-pipeline/index.ts` (critic stage wiring)
+- **Edited:** `supabase/functions/run-review-pipeline/_shared/types.ts` (critic stage type)
+- **Edited:** `src/lib/pipeline-stages.ts` (display order for critic)
+- **Edited:** `src/pages/Settings.tsx` (Code Library tab)
+
+Edge functions `seed-canonical-section` and `run-review-pipeline` redeployed.
+
+## Tiers 2 & 3 (queued)
+
+After Tier 1 is verified on a real review, the next batches are:
+- **Tier 2:** vision-anchored evidence verification (crop the cited sheet region and re-ask the model whether the quote actually appears), reviewer feedback loop into the critic prompt, per-discipline confidence calibration.
+- **Tier 3:** vector-similarity grounder (replace Jaccard once canonical library is dense), cross-discipline conflict detector, automatic re-verify of all open findings when canonical rows are updated.
