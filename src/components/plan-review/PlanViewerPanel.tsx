@@ -6,9 +6,13 @@
  * upload status, repositioning index) lives in the parent and is forwarded
  * here as props.
  */
-import { Loader2, Upload, Check } from "lucide-react";
+import { Loader2, Upload, Check, X } from "lucide-react";
+import { useState } from "react";
 import { Progress } from "@/components/ui/progress";
 import { PlanMarkupViewer } from "@/components/PlanMarkupViewer";
+import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
+import { deletePlanReviewFile } from "@/lib/delete-plan-review-file";
+import { toast } from "sonner";
 import type { PDFPageImage } from "@/lib/pdf-utils";
 import type { Finding } from "@/components/FindingCard";
 
@@ -36,6 +40,10 @@ interface Props {
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileUpload: (files: FileList | null) => void;
   showFileTabs?: boolean;
+  /** Plan review id — when present, file chips become deletable. */
+  planReviewId?: string;
+  /** Refresh callback after a file is deleted. */
+  onFileDeleted?: () => void;
 }
 
 export function PlanViewerPanel(props: Props) {
