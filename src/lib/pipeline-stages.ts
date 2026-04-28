@@ -42,23 +42,6 @@ export const DEEP_STAGES: PipelineStage[] = [
   "prioritize",
 ];
 
-export const PIPELINE_STAGES: { key: PipelineStage; label: string }[] = [
-  { key: "upload", label: "Upload" },
-  { key: "prepare_pages", label: "Prepare Pages" },
-  { key: "sheet_map", label: "Sheet Map" },
-  { key: "submittal_check", label: "Submittal Check" },
-  { key: "dna_extract", label: "DNA Extract" },
-  { key: "discipline_review", label: "Discipline Review" },
-  { key: "critic", label: "Critic Pass" },
-  { key: "cross_check", label: "Cross-Check" },
-  { key: "verify", label: "Verify" },
-  { key: "ground_citations", label: "Ground Citations" },
-  { key: "dedupe", label: "Dedupe" },
-  { key: "deferred_scope", label: "Deferred Scope" },
-  { key: "prioritize", label: "Prioritize" },
-  { key: "complete", label: "Complete" },
-];
-
 export function shortStageLabel(stage: string): string {
   return stage.replace(/_/g, " ");
 }

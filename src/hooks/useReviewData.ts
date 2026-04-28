@@ -58,19 +58,6 @@ export function useDeficiencies() {
   });
 }
 
-export function useAIOutputs(projectId?: string) {
-  return useQuery({
-    queryKey: ["ai_outputs", projectId],
-    queryFn: async () => {
-      let query = supabase.from("ai_outputs").select("*").order("created_at", { ascending: false });
-      if (projectId) query = query.eq("project_id", projectId);
-      const { data, error } = await query;
-      if (error) throw error;
-      return data;
-    },
-  });
-}
-
 export function useReviewFlagCounts() {
   return useQuery({
     queryKey: ["review_flag_counts"],
