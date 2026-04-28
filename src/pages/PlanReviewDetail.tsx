@@ -45,7 +45,7 @@ import { isTypingTarget } from "@/lib/review-shortcuts";
 import { type Finding } from "@/components/FindingCard";
 import { SeverityDonut } from "@/components/SeverityDonut";
 import { FindingStatusFilter, type FindingStatus } from "@/components/FindingStatusFilter";
-import { type ConfidenceFilter } from "@/components/BulkTriageFilters";
+import { type ConfidenceFilter, type QualityFilter } from "@/components/BulkTriageFilters";
 import { DisciplineChecklist } from "@/components/DisciplineChecklist";
 import { SitePlanChecklist } from "@/components/SitePlanChecklist";
 import { isHVHZ } from "@/lib/county-utils";
