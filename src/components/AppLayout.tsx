@@ -8,10 +8,12 @@ import { SessionExpiryWatcher } from "@/components/SessionExpiryWatcher";
 import { CommandPalette } from "@/components/CommandPalette";
 import { AIDrawer } from "@/components/AIDrawer";
 import { BetaFeedbackButton } from "@/components/BetaFeedbackButton";
+import { usePipelineCompleteNotifications } from "@/hooks/usePipelineCompleteNotifications";
 
 export function AppLayout() {
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
   const location = useLocation();
+  usePipelineCompleteNotifications();
 
   return (
     <div className="flex min-h-screen w-full">
