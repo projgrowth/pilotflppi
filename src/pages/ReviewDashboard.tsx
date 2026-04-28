@@ -46,6 +46,7 @@ import {
   usePipelineStatus,
 } from "@/hooks/useReviewDashboard";
 import { useFirmSettings } from "@/hooks/useFirmSettings";
+import { useReviewCoveragePct } from "@/hooks/useReviewCoverage";
 import { generateCountyReport } from "@/lib/county-report";
 import { determineReviewStatus } from "@/lib/review-status";
 import { cancelPipelineForReview } from "@/lib/pipeline-cancel";
