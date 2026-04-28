@@ -681,7 +681,7 @@ export async function stageDisciplineReview(
   planReviewId: string,
   firmId: string | null,
 ) {
-  const [sheets, signedUrls, dnaRow, jurisdictionRow, reviewMetaRow] = await Promise.all([
+  const [sheets, signedUrls, dnaRow, jurisdictionRow, reviewMetaRow, progressRow] = await Promise.all([
     admin
       .from("sheet_coverage")
       .select("sheet_ref, sheet_title, discipline, page_index")
@@ -703,7 +703,20 @@ export async function stageDisciplineReview(
       .select("round, previous_findings, checklist_state, stage_checkpoints")
       .eq("id", planReviewId)
       .maybeSingle(),
+    admin
+      .from("plan_reviews")
+      .select("ai_run_progress")
+      .eq("id", planReviewId)
+      .maybeSingle(),
   ]);
+
+  // Pull the missing-disciplines list written by the submittal-check stage
+  // so each discipline expert can avoid fabricating findings against trades
+  // that aren't in the submittal.
+  const _runProgress = ((progressRow?.data as { ai_run_progress?: Record<string, unknown> | null } | null)?.ai_run_progress ?? {}) as Record<string, unknown>;
+  const missingDisciplines: string[] = Array.isArray(_runProgress.submittal_missing_disciplines)
+    ? (_runProgress.submittal_missing_disciplines as unknown[]).filter((x): x is string => typeof x === "string")
+    : [];
 
   // Stage start timestamp for the soft mid-stage timeout safety net.
   // Tightened from 120s → 90s now that chunks run in parallel batches of 3 —
