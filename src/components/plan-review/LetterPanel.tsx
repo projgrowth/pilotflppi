@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Sparkles, Loader2, Send, Check, Copy, X, Save, Cloud, AlertCircle } from "lucide-react";
@@ -18,6 +19,8 @@ interface LetterPanelProps {
   round: number;
   aiCheckStatus: string;
   qcStatus: string;
+  /** Reviewer-supplied audit notes captured at QC sign-off (persisted in plan_reviews.qc_notes). */
+  qcNotes?: string;
   hasFindings: boolean;
   findings: Finding[];
   findingStatuses: Record<string, FindingStatus>;
@@ -33,8 +36,8 @@ interface LetterPanelProps {
   onCancelLetter?: () => void;
   onCopyLetter: () => void;
   onLetterChange: (value: string) => void;
-  onQcApprove: () => void;
-  onQcReject: () => void;
+  onQcApprove: (notes?: string) => void;
+  onQcReject: (notes?: string) => void;
   onDocumentGenerated: () => void;
   /** Validate then trigger send. Parent owns the linter dialog. */
   onSendToContractor?: () => void;
@@ -50,12 +53,13 @@ function formatRelative(date: Date): string {
 }
 
 export function LetterPanel({
-  qcStatus, hasFindings, findings, findingStatuses, firmSettings,
+  qcStatus, qcNotes, hasFindings, findings, findingStatuses, firmSettings,
   commentLetter, generatingLetter, copied, county, jurisdiction,
   tradeType, round, projectId, projectName, address, aiCheckStatus,
   autosaveState, autosaveLastSavedAt,
   onGenerateLetter, onCancelLetter, onCopyLetter, onLetterChange, onQcApprove, onQcReject, onDocumentGenerated, onSendToContractor,
 }: LetterPanelProps) {
+  const [notesDraft, setNotesDraft] = useState<string>(qcNotes ?? "");
   return (
     <div className="p-3 space-y-3">
       {/* QC Status Bar */}
