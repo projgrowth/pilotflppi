@@ -27,7 +27,10 @@ export interface ReadinessCheck {
     | "citations"
     | "sheet_refs"
     | "qc"
-    | "project_dna";
+    | "project_dna"
+    | "notice_filed"
+    | "affidavit_signed"
+    | "reviewer_licensed";
   severity: ReadinessSeverity;
   /** Required vs advisory — only required checks gate the export button. */
   required: boolean;
@@ -54,6 +57,17 @@ export interface ReadinessInput {
    *  surface qc as a warn instead of a block. */
   reviewerIsSoleSigner: boolean;
   projectDnaMissingFields: string[] | null | undefined;
+  /** F.S. 553.791(4)(a): Notice to Building Official must be filed before
+   *  the private provider's review for this round can be sent to the AHJ. */
+  noticeToBuildingOfficialFiledAt: string | null | undefined;
+  /** F.S. 553.791(7)(b): a signed Plan Compliance Affidavit must accompany
+   *  every plan submittal — round-scoped. */
+  complianceAffidavitSignedAt: string | null | undefined;
+  /** Disciplines present on live findings (lowercase, e.g. "structural"). */
+  disciplinesInLetter: string[];
+  /** Disciplines the signing reviewer is licensed for (lowercase keys
+   *  from profiles.discipline_licenses). Empty array = no licenses on file. */
+  reviewerLicensedDisciplines: string[];
 }
 
 export interface ReadinessResult {
