@@ -486,6 +486,11 @@ export default function ReviewDashboard() {
           round={review.round}
           noticeFiledAt={review.notice_to_building_official_filed_at}
           affidavitSignedAt={review.compliance_affidavit_signed_at}
+          isThresholdBuilding={detectThresholdBuilding(dna).isThresholdBuilding}
+          thresholdTriggers={detectThresholdBuilding(dna).triggers}
+          specialInspectorDesignated={!!review.special_inspector_designated}
+          specialInspectorName={review.special_inspector_name}
+          specialInspectorLicense={review.special_inspector_license}
         />
       )}
 
@@ -507,6 +512,9 @@ export default function ReviewDashboard() {
             ),
           )}
           reviewerLicensedDisciplines={reviewerLicensedDisciplines}
+          isThresholdBuilding={detectThresholdBuilding(dna).isThresholdBuilding}
+          thresholdTriggers={detectThresholdBuilding(dna).triggers}
+          specialInspectorDesignated={!!review?.special_inspector_designated}
           onJumpToFinding={() => setActiveTab("triage")}
         />
       )}
