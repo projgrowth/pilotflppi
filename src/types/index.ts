@@ -73,6 +73,12 @@ export interface Finding {
    *  client-side via useSimilarCorrections, NOT persisted. Drives the
    *  "Corrected N× before" badge that surfaces the learning loop to reviewers. */
   similar_corrections_count?: number;
+  /** Verifier verdict from deficiencies_v2.verification_status. Used by the
+   *  Quality filter chip to surface findings the AI couldn't self-verify. */
+  verification_status?: string | null;
+  /** FBC citation grounding result. "hallucinated" / "mismatch" mean the
+   *  AI's cited section couldn't be matched to the canonical FBC library. */
+  citation_status?: string | null;
 }
 
 export type FindingStatus = "open" | "resolved" | "deferred";
