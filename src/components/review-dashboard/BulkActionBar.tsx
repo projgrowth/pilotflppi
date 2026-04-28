@@ -1,4 +1,4 @@
-import { Check, X, Loader2 } from "lucide-react";
+import { Check, X, Loader2, Flag, Tag } from "lucide-react";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -28,12 +28,53 @@ const REJECTION_REASONS = Object.entries(REJECTION_REASON_LABELS).map(
   ([value, label]) => ({ value: value as RejectionReason, label }),
 );
 
+const DISCIPLINE_OPTIONS = [
+  "architectural",
+  "structural",
+  "mechanical",
+  "electrical",
+  "plumbing",
+  "fire_protection",
+  "civil",
+  "energy",
+  "accessibility",
+  "life_safety",
+] as const;
+
+const PRIORITY_OPTIONS: Array<{ value: "high" | "medium" | "low"; label: string }> = [
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
+];
+
 export default function BulkActionBar({ planReviewId, selected, onClear }: Props) {
   const qc = useQueryClient();
-  const [busy, setBusy] = useState<"confirm" | "reject" | null>(null);
+  const [busy, setBusy] = useState<"confirm" | "reject" | "priority" | "discipline" | null>(null);
   const [reason, setReason] = useState<RejectionReason>(REJECTION_REASONS[0].value);
 
   if (selected.length === 0) return null;
+
+  async function bulkUpdate(
+    patch: { priority?: "high" | "medium" | "low"; discipline?: string },
+    busyTag: "priority" | "discipline",
+    successMsg: string,
+  ) {
+    setBusy(busyTag);
+    try {
+      const ids = selected.map((d) => d.id);
+      const { error } = await supabase
+        .from("deficiencies_v2")
+        .update(patch)
+        .in("id", ids);
+      if (error) throw error;
+      qc.invalidateQueries({ queryKey: ["deficiencies_v2", planReviewId] });
+      toast.success(`${successMsg} (${ids.length})`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Bulk update failed");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function confirmAll() {
     setBusy("confirm");
@@ -152,6 +193,49 @@ export default function BulkActionBar({ planReviewId, selected, onClear }: Props
           Reject all
         </Button>
       </div>
+
+      <div className="flex items-center gap-1">
+        <Flag className="h-3 w-3 text-muted-foreground" />
+        <Select
+          onValueChange={(v) =>
+            bulkUpdate({ priority: v as "high" | "medium" | "low" }, "priority", "Priority updated")
+          }
+          disabled={!!busy}
+        >
+          <SelectTrigger className="h-7 w-28 text-xs">
+            <SelectValue placeholder="Priority…" />
+          </SelectTrigger>
+          <SelectContent>
+            {PRIORITY_OPTIONS.map((p) => (
+              <SelectItem key={p.value} value={p.value}>
+                {p.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {busy === "priority" && <Loader2 className="h-3 w-3 animate-spin" />}
+      </div>
+
+      <div className="flex items-center gap-1">
+        <Tag className="h-3 w-3 text-muted-foreground" />
+        <Select
+          onValueChange={(v) => bulkUpdate({ discipline: v }, "discipline", "Discipline reassigned")}
+          disabled={!!busy}
+        >
+          <SelectTrigger className="h-7 w-36 text-xs">
+            <SelectValue placeholder="Discipline…" />
+          </SelectTrigger>
+          <SelectContent>
+            {DISCIPLINE_OPTIONS.map((d) => (
+              <SelectItem key={d} value={d}>
+                {d.replace(/_/g, " ")}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {busy === "discipline" && <Loader2 className="h-3 w-3 animate-spin" />}
+      </div>
+
       <Button
         size="sm"
         variant="ghost"
