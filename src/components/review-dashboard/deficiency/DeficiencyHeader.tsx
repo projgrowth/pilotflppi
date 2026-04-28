@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ExternalLink, ShieldCheck, ShieldX, ShieldAlert } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { ExternalLink, ShieldCheck, ShieldX, ShieldAlert, GitMerge } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -37,6 +38,32 @@ export default function DeficiencyHeader({ planReviewId, def }: Props) {
       : { sheet: firstSheet, page: null };
   }, [coverage, def.sheet_refs]);
 
+  // Tier 4: surface cross-discipline conflict link on the SOURCE finding.
+  // The XD conflict row stores both source IDs in evidence_crop_meta. We
+  // scan the cached deficiency list and look for any DEF-XD* row that
+  // names this finding's id in its conflict_with array.
+  const qc = useQueryClient();
+  const conflictLink = useMemo(() => {
+    const all =
+      qc.getQueryData<DeficiencyV2Row[]>(["deficiencies_v2", planReviewId]) ??
+      [];
+    for (const row of all) {
+      if (!row.def_number?.startsWith("DEF-XD")) continue;
+      const meta = (row.evidence_crop_meta ?? {}) as {
+        cross_discipline_conflict_with?: string[];
+      };
+      const linked = meta.cross_discipline_conflict_with ?? [];
+      if (linked.includes(def.id)) {
+        const otherId = linked.find((id) => id !== def.id) ?? null;
+        const otherDef = otherId
+          ? all.find((d) => d.id === otherId) ?? null
+          : null;
+        return { conflictRow: row, otherDef };
+      }
+    }
+    return null;
+  }, [qc, planReviewId, def.id]);
+
   const codeRef = def.code_reference;
   const codeRefStr = codeRef
     ? [codeRef.code, codeRef.section, codeRef.edition && `(${codeRef.edition})`]
@@ -68,6 +95,41 @@ export default function DeficiencyHeader({ planReviewId, def }: Props) {
           {def.permit_blocker && <Tag tone="warn">PERMIT BLOCKER</Tag>}
           {def.liability_flag && <Tag tone="caution">LIABILITY</Tag>}
           {def.requires_human_review && <Tag tone="accent">NEEDS HUMAN EYES</Tag>}
+          {conflictLink && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className="inline-flex cursor-help items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-400"
+                  aria-label={`Cross-discipline conflict with ${conflictLink.otherDef?.def_number ?? "another finding"}`}
+                >
+                  <GitMerge className="h-3 w-3" />
+                  XD CONFLICT
+                  {conflictLink.otherDef?.def_number && (
+                    <span className="font-mono opacity-80">
+                      ↔ {conflictLink.otherDef.def_number}
+                    </span>
+                  )}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs space-y-1 text-xs">
+                <div className="font-semibold">Cross-discipline conflict</div>
+                <div className="opacity-90">
+                  This finding is contradicted by{" "}
+                  <span className="font-mono">
+                    {conflictLink.otherDef?.def_number ?? "another finding"}
+                  </span>
+                  {conflictLink.otherDef?.discipline && (
+                    <> ({conflictLink.otherDef.discipline})</>
+                  )}
+                  . See{" "}
+                  <span className="font-mono">
+                    {conflictLink.conflictRow.def_number}
+                  </span>{" "}
+                  to reconcile.
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </div>
 

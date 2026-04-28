@@ -186,8 +186,30 @@ DB trigger `clear_fbc_embedding_on_text_change` fires BEFORE UPDATE on `fbc_code
 
 `run-review-pipeline` redeployed.
 
-## Tier 4 (queued)
+## Tier 4 Accuracy Upgrade (shipped)
 
-- UI: surface cross-discipline conflict badges on linked findings (currently the conflict row exists; the source findings don't show a chip linking back).
-- Auto-trigger embedding refresh job (right now an admin still has to click "Embed N").
-- Pattern decay: down-weight `correction_patterns` that haven't been seen in 180+ days so the critic isn't dragged by stale firm preferences.
+### 4.1 Cross-discipline conflict chips on linked findings *(shipped)*
+
+`DeficiencyHeader` now reads the cached `deficiencies_v2` query data and looks for any `DEF-XD*` row whose `evidence_crop_meta.cross_discipline_conflict_with` array contains the current finding's id. When found, an amber **XD CONFLICT ↔ DEF-X##** chip renders next to the existing flag tags, with a tooltip naming the contradicting finding's def number, discipline, and the parent reconciliation row. No new query — purely derived from the data the dashboard already loads.
+
+### 4.2 Auto-trigger embedding refresh *(shipped)*
+
+`seed-canonical-section` now fires a non-awaited `embed-fbc-sections` invocation (limit 25) after every successful upsert. The pre-existing `clear_fbc_embedding_on_text_change` trigger has already nulled the row's vector by the time the embed call runs, so the refresh picks it up automatically. Admins no longer need to click "Embed N" after editing canonical text.
+
+### 4.3 Correction-pattern decay *(shipped)*
+
+`loadFirmRejectPatterns` in `critic.ts` now considers `last_seen_at`:
+
+- Patterns older than **180 days** are dropped entirely (no longer bias the critic).
+- Patterns older than **60 days** are kept but tagged `[stale, advisory]` in the prompt block, with explicit instructions telling the model to weigh them less than fresh patterns.
+- Pulls 40 candidates from the DB, filters by age, takes the top 12 by `rejection_count`.
+
+Result: the critic stops being dragged by ancient firm preferences while still respecting recent reviewer corrections.
+
+## Files added/changed (Tier 4)
+
+- **Edited:** `src/components/review-dashboard/deficiency/DeficiencyHeader.tsx` (XD conflict chip)
+- **Edited:** `supabase/functions/seed-canonical-section/index.ts` (auto-invoke embed refresh)
+- **Edited:** `supabase/functions/run-review-pipeline/stages/critic.ts` (pattern decay)
+
+`run-review-pipeline` and `seed-canonical-section` redeployed.

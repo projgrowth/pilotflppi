@@ -151,6 +151,16 @@ Deno.serve(async (req) => {
       metadata: { code, section, edition, mode, ai_note: confidenceNote },
     });
 
+    // Tier 4: fire-and-forget refresh of embeddings. The clear_fbc_embedding
+    // BEFORE-UPDATE trigger has already nulled this row's vector, so the
+    // embed function will re-vectorize it (and any other unembedded rows it
+    // can fit in one batch). We do not await — admins shouldn't wait on it.
+    void admin.functions
+      .invoke("embed-fbc-sections", { body: { limit: 25 } })
+      .catch((e) =>
+        console.warn("[seed-canonical-section] embed refresh skipped:", e),
+      );
+
     return json({
       ok: true,
       code,

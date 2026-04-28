@@ -83,28 +83,52 @@ async function loadFirmRejectPatterns(
   if (!firmId || disciplines.length === 0) return "";
   const { data, error } = await admin
     .from("correction_patterns")
-    .select("discipline, pattern_summary, rejection_reason, reason_notes, rejection_count")
+    .select("discipline, pattern_summary, rejection_reason, reason_notes, rejection_count, last_seen_at")
     .eq("firm_id", firmId)
     .eq("is_active", true)
     .in("discipline", disciplines)
     .order("rejection_count", { ascending: false })
-    .limit(12);
+    .limit(40);
   if (error || !data || data.length === 0) return "";
-  const lines = (data as Array<{
+
+  // Tier 4.3: pattern decay. Anything not re-confirmed in 180+ days gets
+  // dropped entirely; anything 60-180 days old is kept but tagged "stale"
+  // so the critic treats it as advisory rather than authoritative.
+  const now = Date.now();
+  const STALE_MS = 60 * 24 * 60 * 60 * 1000;
+  const DROP_MS = 180 * 24 * 60 * 60 * 1000;
+
+  type Row = {
     discipline: string;
     pattern_summary: string;
     rejection_reason: string;
     reason_notes: string | null;
     rejection_count: number;
-  }>).map(
-    (p) =>
-      `- [${p.discipline}] ${p.pattern_summary} — rejected ${p.rejection_count}× because: ${p.rejection_reason}${
-        p.reason_notes ? ` (${p.reason_notes.slice(0, 120)})` : ""
-      }`,
-  );
+    last_seen_at: string | null;
+  };
+  const fresh = (data as Row[])
+    .map((p) => {
+      const ageMs = p.last_seen_at
+        ? now - new Date(p.last_seen_at).getTime()
+        : 0;
+      return { p, ageMs };
+    })
+    .filter(({ ageMs }) => ageMs < DROP_MS)
+    .slice(0, 12);
+
+  if (fresh.length === 0) return "";
+
+  const lines = fresh.map(({ p, ageMs }) => {
+    const stale = ageMs > STALE_MS ? " [stale, advisory]" : "";
+    return `- [${p.discipline}]${stale} ${p.pattern_summary} — rejected ${p.rejection_count}× because: ${p.rejection_reason}${
+      p.reason_notes ? ` (${p.reason_notes.slice(0, 120)})` : ""
+    }`;
+  });
   return (
     "\n\nThis firm has previously REJECTED findings matching these shapes. " +
-    "If a finding below resembles any of these, downgrade it (weak or junk):\n" +
+    "If a finding below resembles any of these, downgrade it (weak or junk). " +
+    "Patterns tagged [stale, advisory] are older than 60 days — weigh them less " +
+    "heavily than fresh patterns:\n" +
     lines.join("\n")
   );
 }
