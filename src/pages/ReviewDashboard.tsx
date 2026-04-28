@@ -105,6 +105,7 @@ export default function ReviewDashboard() {
   const { data: deferredItems = [] } = useDeferredScope(id);
   const { data: pipeRows = [] } = usePipelineStatus(id);
   const { firmSettings } = useFirmSettings();
+  const { data: coveragePct = null } = useReviewCoveragePct(id);
   const { data: citationCount } = useQuery({
     queryKey: ["fbc_code_sections_count"],
     queryFn: async () => {
