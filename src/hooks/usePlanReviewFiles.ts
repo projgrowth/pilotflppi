@@ -28,6 +28,7 @@ export function usePlanReviewFilesByProject(projectId: string | undefined) {
         .from("plan_review_files")
         .select("*")
         .in("plan_review_id", reviewIds)
+        .is("deleted_at", null)
         .order("round")
         .order("uploaded_at");
       if (error) throw error;

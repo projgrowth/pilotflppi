@@ -74,7 +74,8 @@ export function useAllActivePipelines() {
         .select(
           "id, round, ai_run_progress, project_id, project:projects(name, address, county)",
         )
-        .in("id", reviewIds);
+        .in("id", reviewIds)
+        .is("deleted_at", null);
 
       const metaById = new Map<string, PlanReviewMeta>();
       for (const r of (reviews ?? []) as unknown as PlanReviewMeta[]) {

@@ -32,6 +32,31 @@ function elapsed(from: string | null): string {
   return `${m}m ${r}s`;
 }
 
+function relTime(iso: string | null): string {
+  if (!iso) return "—";
+  const ms = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function wallClock(rows: { started_at: string | null; completed_at: string | null }[]): string | null {
+  const starts = rows.map((r) => r.started_at).filter(Boolean) as string[];
+  const ends = rows.map((r) => r.completed_at).filter(Boolean) as string[];
+  if (starts.length === 0 || ends.length === 0) return null;
+  const first = Math.min(...starts.map((s) => new Date(s).getTime()));
+  const last = Math.max(...ends.map((s) => new Date(s).getTime()));
+  const ms = last - first;
+  if (ms <= 0) return null;
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  return m > 0 ? `${m}m ${s % 60}s total` : `${s}s total`;
+}
+
 function MiniStepper({ activity }: { activity: ReviewActivity }) {
   const stages = activity.mode === "deep" ? DEEP_STAGES : CORE_STAGES;
   const statusByStage = new Map<string, string>();
@@ -266,6 +291,24 @@ function ActivityRow({
             )}
           </div>
           <HealthSummary health={health} />
+        </div>
+
+        <div className="flex items-center gap-3 text-[11px] text-muted-foreground/80 tabular-nums">
+          {activity.rows[0]?.started_at && (
+            <span>Started {relTime(activity.rows[0].started_at)}</span>
+          )}
+          {current?.updated_at && (
+            <>
+              <span className="text-border">·</span>
+              <span>Last update {relTime(current.updated_at)}</span>
+            </>
+          )}
+          {!activity.hasActive && wallClock(activity.rows) && (
+            <>
+              <span className="text-border">·</span>
+              <span>{wallClock(activity.rows)}</span>
+            </>
+          )}
         </div>
 
         {activity.isStuck && (
