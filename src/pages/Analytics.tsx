@@ -350,6 +350,44 @@ export default function Analytics() {
         </Card>
       </div>
 
+      {/* Pipeline Quality Trend — average quality_score per day across all
+          completed pipeline runs in the period. Surfaces the impact of the
+          hardening work (verifier retries, citation recovery, trade-aware
+          prompts). Higher = healthier; rising trend = AI improving. */}
+      <Card className="shadow-subtle">
+        <CardContent className="p-5">
+          <div className="flex items-baseline justify-between mb-1">
+            <h3 className="text-sm font-semibold">Pipeline Quality Trend</h3>
+            <span className="text-[10px] text-fpp-gray-400 font-mono">
+              {qualityTrend && qualityTrend.length > 0
+                ? `latest score ${qualityTrend[qualityTrend.length - 1].quality}/100`
+                : ""}
+            </span>
+          </div>
+          <p className="text-[10px] text-fpp-gray-400 mb-4">
+            Daily average pipeline quality (0–100) and % of unverified findings.
+            Rising quality / falling unverified = hardening is working.
+          </p>
+          {!qualityTrend || qualityTrend.length === 0 ? (
+            <p className="text-sm text-fpp-gray-400 text-center py-12">
+              No completed pipeline runs in this period yet
+            </p>
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={qualityTrend}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--fpp-gray-100))" />
+                <XAxis dataKey="day" tick={{ fontSize: 11 }} />
+                <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Line type="monotone" dataKey="quality" name="Quality score" stroke="#0E7C7B" strokeWidth={2} dot />
+                <Line type="monotone" dataKey="unverified" name="Unverified %" stroke="#D63230" strokeWidth={2} dot />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
+
       {/* HCR Table — now from real data */}
       <Card className="shadow-subtle">
         <CardContent className="p-5">
