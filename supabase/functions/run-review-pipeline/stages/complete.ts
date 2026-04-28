@@ -23,7 +23,7 @@ export async function stageComplete(
   // whether this AI run is trustworthy or needs heavy spot-checking.
   const { data: defs } = await admin
     .from("deficiencies_v2")
-    .select("citation_status, verification_status, evidence_crop_url")
+    .select("citation_status, verification_status, evidence_crop_url, reviewer_disposition")
     .eq("plan_review_id", planReviewId)
     .neq("status", "waived")
     .neq("status", "resolved");
@@ -31,6 +31,7 @@ export async function stageComplete(
     citation_status: string | null;
     verification_status: string | null;
     evidence_crop_url: string | null;
+    reviewer_disposition: string | null;
   }>;
   const total = live.length || 1;
   const verifiedCit = live.filter((d) => d.citation_status === "verified").length / total;
@@ -39,11 +40,24 @@ export async function stageComplete(
   ).length / total;
   const withCrop = live.filter((d) => !!d.evidence_crop_url).length / total;
   const hasHallucinated = live.some((d) => d.citation_status === "hallucinated");
+  const unverifiedCount = live.filter(
+    (d) => (d.verification_status ?? "unverified") === "unverified",
+  ).length;
+  const unverifiedPct = unverifiedCount / total;
   let qualityScore = 0;
   if (verifiedCit >= 0.8) qualityScore += 30;
   if (verifiedVer >= 0.8) qualityScore += 30;
   if (withCrop >= 0.8) qualityScore += 20;
   if (!hasHallucinated) qualityScore += 20;
+
+  // Defensibility gate — verifier stalled or hallucinated citations remain.
+  const needsHumanReview = unverifiedPct > 0.25 || hasHallucinated;
+  const aiCheckStatus = needsHumanReview ? "needs_human_review" : "complete";
+  const blockerReason = needsHumanReview
+    ? unverifiedPct > 0.25
+      ? `Verifier stalled — ${unverifiedCount} of ${live.length} findings never reached a verdict.`
+      : "Hallucinated FBC citations remain. Triage before this can be marked complete."
+    : null;
 
   const { data: existing } = await admin
     .from("plan_reviews")
@@ -56,7 +70,7 @@ export async function stageComplete(
   await admin
     .from("plan_reviews")
     .update({
-      ai_check_status: "complete",
+      ai_check_status: aiCheckStatus,
       pipeline_version: "v2",
       checklist_state: {
         ...prevState,
@@ -71,11 +85,19 @@ export async function stageComplete(
           verified_findings_pct: Math.round(verifiedVer * 100),
           with_evidence_crop_pct: Math.round(withCrop * 100),
           has_hallucinated_citations: hasHallucinated,
+          unverified_pct: Math.round(unverifiedPct * 100),
           total_live_findings: live.length,
+          blocker_reason: blockerReason,
         },
       },
       updated_at: new Date().toISOString(),
     })
     .eq("id", planReviewId);
-  return { ok: true, snapshot_size: snapshot.length, quality_score: qualityScore };
+  return {
+    ok: true,
+    snapshot_size: snapshot.length,
+    quality_score: qualityScore,
+    ai_check_status: aiCheckStatus,
+    blocker_reason: blockerReason,
+  };
 }

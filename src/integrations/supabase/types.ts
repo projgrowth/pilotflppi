@@ -1631,6 +1631,8 @@ export type Database = {
           pipeline_version: string
           previous_findings: Json | null
           project_id: string
+          qc_approved_at: string | null
+          qc_approved_by: string | null
           qc_notes: string | null
           qc_reviewer_id: string | null
           qc_status: string
@@ -1658,6 +1660,8 @@ export type Database = {
           pipeline_version?: string
           previous_findings?: Json | null
           project_id: string
+          qc_approved_at?: string | null
+          qc_approved_by?: string | null
           qc_notes?: string | null
           qc_reviewer_id?: string | null
           qc_status?: string
@@ -1685,6 +1689,8 @@ export type Database = {
           pipeline_version?: string
           previous_findings?: Json | null
           project_id?: string
+          qc_approved_at?: string | null
+          qc_approved_by?: string | null
           qc_notes?: string | null
           qc_reviewer_id?: string | null
           qc_status?: string
@@ -2326,6 +2332,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_fl_state_holiday: { Args: { d: string }; Returns: boolean }
       match_correction_embeddings: {
         Args: {
           match_count?: number
