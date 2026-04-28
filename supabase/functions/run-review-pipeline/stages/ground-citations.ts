@@ -82,10 +82,28 @@ type GroundingRow = {
   id: string;
   finding: string;
   required_action: string;
+  discipline: string | null;
   code_reference:
     | { code?: string | null; section?: string | null; edition?: string | null }
     | null;
 };
+
+/** Disciplines that should bias toward fire-family canonical sections (NFPA/FFPC) when present. */
+const FIRE_FAMILY_DISCIPLINES = new Set([
+  "life safety",
+  "lifesafety",
+  "fire protection",
+  "fireprotection",
+]);
+
+function preferredFamiliesFor(discipline: string | null | undefined): string[] {
+  const d = (discipline ?? "").toLowerCase().trim();
+  if (FIRE_FAMILY_DISCIPLINES.has(d)) return ["fire", "building"];
+  if (d === "accessibility") return ["accessibility", "building"];
+  if (d === "energy") return ["energy", "building"];
+  if (d === "mep") return ["mechanical", "plumbing", "electrical", "building"];
+  return ["building"];
+}
 
 export async function stageGroundCitations(
   admin: ReturnType<typeof createClient>,
@@ -93,7 +111,7 @@ export async function stageGroundCitations(
 ) {
   const { data: defsRaw, error } = await admin
     .from("deficiencies_v2")
-    .select("id, finding, required_action, code_reference")
+    .select("id, finding, required_action, code_reference, discipline")
     .eq("plan_review_id", planReviewId)
     .neq("status", "resolved")
     .neq("status", "waived")
