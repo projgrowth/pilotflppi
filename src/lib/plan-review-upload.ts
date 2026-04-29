@@ -26,6 +26,13 @@ import { sha256OfFile } from "@/lib/file-hash";
 
 export interface UploadPlanReviewArgs {
   reviewId: string;
+  /**
+   * Owning firm — REQUIRED. All storage objects are written under
+   * `firms/<firmId>/plan-reviews/<reviewId>/...` to satisfy the firm-scoped
+   * RLS policy on `storage.objects` and the CHECK constraint on
+   * `plan_review_files.file_path`. Resolve via `useFirmId()` in the caller.
+   */
+  firmId: string;
   round: number;
   existingFileUrls: string[];
   existingPageCount: number | null;
