@@ -50,7 +50,7 @@ import { DisciplineChecklist } from "@/components/DisciplineChecklist";
 import { SitePlanChecklist } from "@/components/SitePlanChecklist";
 import { isHVHZ } from "@/lib/county-utils";
 import { getStatutoryStatus } from "@/lib/statutory-deadlines";
-import type { PlanReviewRow } from "@/types";
+import type { PlanReviewRow, ProjectInfo } from "@/types";
 import { usePlanReviewData } from "@/hooks/plan-review/usePlanReviewData";
 import { useFindingFilters, useRoundDiff } from "@/hooks/plan-review/useFindingFilters";
 import { useFindingStatuses } from "@/hooks/plan-review/useFindingStatuses";
