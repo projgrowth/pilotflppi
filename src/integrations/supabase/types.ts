@@ -1834,6 +1834,7 @@ export type Database = {
       plan_reviews: {
         Row: {
           ai_check_status: string
+          ai_run_mode: string | null
           ai_run_progress: Json | null
           checklist_state: Json | null
           comment_letter_draft: string
@@ -1866,6 +1867,7 @@ export type Database = {
         }
         Insert: {
           ai_check_status?: string
+          ai_run_mode?: string | null
           ai_run_progress?: Json | null
           checklist_state?: Json | null
           comment_letter_draft?: string
@@ -1898,6 +1900,7 @@ export type Database = {
         }
         Update: {
           ai_check_status?: string
+          ai_run_mode?: string | null
           ai_run_progress?: Json | null
           checklist_state?: Json | null
           comment_letter_draft?: string
@@ -2410,6 +2413,7 @@ export type Database = {
           completed_at: string | null
           error_message: string | null
           firm_id: string | null
+          heartbeat_at: string | null
           id: string
           metadata: Json | null
           plan_review_id: string
@@ -2422,6 +2426,7 @@ export type Database = {
           completed_at?: string | null
           error_message?: string | null
           firm_id?: string | null
+          heartbeat_at?: string | null
           id?: string
           metadata?: Json | null
           plan_review_id: string
@@ -2434,6 +2439,7 @@ export type Database = {
           completed_at?: string | null
           error_message?: string | null
           firm_id?: string | null
+          heartbeat_at?: string | null
           id?: string
           metadata?: Json | null
           plan_review_id?: string
