@@ -1984,11 +1984,13 @@ export type Database = {
           has_mezzanine: boolean | null
           hvhz: boolean | null
           id: string
+          is_coastal: boolean | null
           is_high_rise: boolean | null
           jurisdiction: string | null
           missing_fields: string[] | null
           mixed_occupancy: boolean | null
           occupancy_classification: string | null
+          occupant_load: number | null
           plan_review_id: string
           raw_extraction: Json | null
           risk_category: string | null
@@ -2010,11 +2012,13 @@ export type Database = {
           has_mezzanine?: boolean | null
           hvhz?: boolean | null
           id?: string
+          is_coastal?: boolean | null
           is_high_rise?: boolean | null
           jurisdiction?: string | null
           missing_fields?: string[] | null
           mixed_occupancy?: boolean | null
           occupancy_classification?: string | null
+          occupant_load?: number | null
           plan_review_id: string
           raw_extraction?: Json | null
           risk_category?: string | null
@@ -2036,11 +2040,13 @@ export type Database = {
           has_mezzanine?: boolean | null
           hvhz?: boolean | null
           id?: string
+          is_coastal?: boolean | null
           is_high_rise?: boolean | null
           jurisdiction?: string | null
           missing_fields?: string[] | null
           mixed_occupancy?: boolean | null
           occupancy_classification?: string | null
+          occupant_load?: number | null
           plan_review_id?: string
           raw_extraction?: Json | null
           risk_category?: string | null
