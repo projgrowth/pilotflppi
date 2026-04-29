@@ -2633,6 +2633,10 @@ export type Database = {
           title: string
         }[]
       }
+      merge_review_progress: {
+        Args: { _patch: Json; _plan_review_id: string }
+        Returns: undefined
+      }
       user_firm_id: { Args: { _user: string }; Returns: string }
     }
     Enums: {
