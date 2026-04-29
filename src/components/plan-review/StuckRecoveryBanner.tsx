@@ -13,10 +13,11 @@
  * Dismissed state lives in localStorage so the banner doesn't reappear after
  * a page refresh.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, X, AlertTriangle, AlertCircle, Wand2, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { startPipeline } from "@/lib/pipeline-run";
+import { useDeficienciesV2 } from "@/hooks/useReviewDashboard";
 import { toast } from "sonner";
 
 interface QualityBreakdown {
