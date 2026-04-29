@@ -243,11 +243,21 @@ export function PipelineProgressStepper({
           const hint = FRIENDLY_HINTS[s.key];
 
           // Stuck detection: status='running' with started_at older than threshold.
+          // BUT — if this is the discipline_review row and we have a recent
+          // heartbeat from `disciplineProgress.last_chunk_at` (<60s old), the
+          // worker is healthy and just slow. Suppressing the stuck UI here
+          // prevents the auto-retry loop from fighting a legitimate Gemini
+          // chunk that takes 2-3 minutes on a large set.
           const startedAt = row?.started_at ? new Date(row.started_at).getTime() : 0;
+          const heartbeatFresh =
+            s.key === "discipline_review" &&
+            disciplineProgress?.last_chunk_at &&
+            Date.now() - new Date(disciplineProgress.last_chunk_at).getTime() < 60_000;
           const isStuck =
             status === "running" &&
             startedAt > 0 &&
-            Date.now() - startedAt > STUCK_THRESHOLD_MS;
+            Date.now() - startedAt > STUCK_THRESHOLD_MS &&
+            !heartbeatFresh;
 
           return (
             <li
