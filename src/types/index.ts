@@ -87,6 +87,8 @@ export type FindingStatus = "open" | "resolved" | "deferred";
 export interface PlanReviewRow {
   id: string;
   project_id: string;
+  /** Owning firm — required for firm-scoped storage paths and RLS. */
+  firm_id: string | null;
   ai_check_status: string;
   file_urls: string[];
   round: number;
