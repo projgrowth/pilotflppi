@@ -54,6 +54,7 @@ interface StuckRow {
   firm_id: string | null;
   ai_check_status: string;
   ai_run_progress: Record<string, unknown> | null;
+  ai_run_mode: string | null;
   updated_at: string;
 }
 
@@ -236,7 +237,7 @@ async function reconcileOne(admin: AdminLike, row: StuckRow, nowMs: number) {
     })
     .eq("id", row.id);
 
-  const kick = await startPipeline(row.id);
+  const kick = await startPipeline(row.id, row.ai_run_mode ?? "core");
   await logRecovery(admin, {
     planReviewId: row.id,
     firmId: row.firm_id,
@@ -263,7 +264,7 @@ Deno.serve(async (req) => {
     // Reviews that LOOK active but haven't moved in 15+ min.
     const { data: stuck, error } = await admin
       .from("plan_reviews")
-      .select("id, firm_id, ai_check_status, ai_run_progress, updated_at")
+      .select("id, firm_id, ai_check_status, ai_run_progress, ai_run_mode, updated_at")
       .in("ai_check_status", ["pending", "running"])
       .lt("updated_at", cutoff)
       .order("updated_at", { ascending: true })
