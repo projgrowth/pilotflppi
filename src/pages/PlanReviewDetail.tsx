@@ -457,7 +457,7 @@ export default function PlanReviewDetail() {
     aiRunProgress,
     aiCheckStatus: review.ai_check_status,
     qcStatus: review.qc_status,
-    hasCommentLetterDraft: !!review.comment_letter_draft,
+    hasCommentLetterDraft: !!(review as unknown as { comment_letter_draft?: string | null }).comment_letter_draft,
     letterSentAt: (review as unknown as { last_sent_at?: string | null }).last_sent_at ?? null,
     findings,
   });
