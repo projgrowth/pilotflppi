@@ -205,13 +205,23 @@ export function adaptV2ToFindings(
       }
     }
 
+    // When the adversarial verifier returned `cannot_locate` and the
+    // reviewer kept the finding (didn't reject it), prefix the description so
+    // the AHJ-facing letter signals "the second-pass model couldn't find this
+    // — the human reviewer is the sole attestor". letter-readiness gates the
+    // unreviewed case; this handles the kept case.
+    const cannotLocate = d.verification_status === "cannot_locate";
+    const description = cannotLocate
+      ? `[Reviewer to confirm location] ${d.finding}`
+      : d.finding;
+
     return {
       finding_id: d.id,
       severity: severityFromV2(d),
       discipline: normalizeDiscipline(d.discipline),
       code_ref: codeRefFromV2(d),
       page: firstSheet,
-      description: d.finding,
+      description,
       recommendation: d.required_action,
       confidence:
         d.confidence_score === null
