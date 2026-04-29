@@ -96,6 +96,7 @@ export function getBusinessDaysElapsed(startDate: string | null, asOf?: Date): n
   if (!startDate) return 0;
   const start = new Date(startDate);
   const now = asOf ?? new Date();
+  if (now <= start) return 0;
   let count = 0;
   const current = new Date(start);
   current.setDate(current.getDate() + 1); // Start counting from next day
@@ -105,6 +106,95 @@ export function getBusinessDaysElapsed(startDate: string | null, asOf?: Date): n
     current.setDate(current.getDate() + 1);
   }
   return count;
+}
+
+/**
+ * A single entry in projects.clock_pause_history.
+ * Written by the log_clock_state_changes() trigger.
+ */
+export interface ClockPauseEvent {
+  event: "pause" | "resume";
+  at: string; // ISO timestamp
+  reason?: string | null;
+  status?: string | null;
+}
+
+/**
+ * Convert pause/resume event log into closed [pausedAt, resumedAt] intervals.
+ * If currentPausedAt is set and the last event was a pause without a matching
+ * resume, the open interval is included with end = currentPausedAt (i.e. it
+ * stays paused indefinitely; today's elapsed should still freeze at pause).
+ */
+function buildPausedIntervals(
+  history: ClockPauseEvent[] | null | undefined,
+  currentPausedAt: string | null | undefined,
+): Array<{ start: Date; end: Date }> {
+  const events = (history ?? [])
+    .filter((e) => e && (e.event === "pause" || e.event === "resume") && e.at)
+    .slice()
+    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+
+  const intervals: Array<{ start: Date; end: Date }> = [];
+  let openStart: Date | null = null;
+
+  for (const ev of events) {
+    if (ev.event === "pause") {
+      if (!openStart) openStart = new Date(ev.at);
+    } else if (ev.event === "resume") {
+      if (openStart) {
+        intervals.push({ start: openStart, end: new Date(ev.at) });
+        openStart = null;
+      }
+    }
+  }
+  // Dangling pause without resume — currently still paused.
+  if (openStart && currentPausedAt) {
+    // already represented by freezing asOf at currentPausedAt; skip to avoid double counting
+  } else if (openStart) {
+    // unusual: history says paused but column is null — treat as ongoing to "now"
+    intervals.push({ start: openStart, end: new Date() });
+  }
+  return intervals;
+}
+
+/**
+ * Sum business days that fell inside paused intervals between start and asOf.
+ * Used to subtract banked days from gross elapsed.
+ */
+export function getPausedBusinessDays(
+  startDate: string | null,
+  asOf: Date,
+  history: ClockPauseEvent[] | null | undefined,
+  currentPausedAt: string | null | undefined,
+): number {
+  if (!startDate) return 0;
+  const start = new Date(startDate);
+  const intervals = buildPausedIntervals(history, currentPausedAt);
+  let total = 0;
+  for (const { start: pStart, end: pEnd } of intervals) {
+    const lo = pStart < start ? start : pStart;
+    const hi = pEnd > asOf ? asOf : pEnd;
+    if (hi <= lo) continue;
+    total += getBusinessDaysElapsed(lo.toISOString(), hi);
+  }
+  return total;
+}
+
+/**
+ * Net business days the clock has actually been running between start and asOf,
+ * subtracting any banked paused intervals.
+ */
+export function getNetBusinessDaysElapsed(
+  startDate: string | null,
+  asOf: Date | undefined,
+  history: ClockPauseEvent[] | null | undefined,
+  currentPausedAt: string | null | undefined,
+): number {
+  if (!startDate) return 0;
+  const now = asOf ?? new Date();
+  const gross = getBusinessDaysElapsed(startDate, now);
+  const paused = getPausedBusinessDays(startDate, now, history, currentPausedAt);
+  return Math.max(0, gross - paused);
 }
 
 export function getStatutoryDeadlineDate(
