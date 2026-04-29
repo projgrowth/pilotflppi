@@ -434,9 +434,16 @@ serve(async (req) => {
     }
 
     // Model selection.
-    // - Multimodal (vision) → gemini-2.5-pro for higher fidelity on plan sheets.
-    // - Text-only → gemini-2.5-flash for speed/cost (matches the pipeline; see audit M-05/C-01).
-    const model = isMultimodal ? "google/gemini-2.5-pro" : "google/gemini-2.5-flash";
+    // - Title-block / zoning extraction → gemini-2.5-flash (multimodal, fast).
+    //   The title block is a small, structured region; pro-tier latency (~18s)
+    //   was tripping the 20s client timeout in NewReviewDialog with no fidelity
+    //   benefit for this task.
+    // - Other multimodal (full sheet vision) → gemini-2.5-pro for fidelity.
+    // - Text-only → gemini-2.5-flash for speed/cost.
+    const FAST_MULTIMODAL_ACTIONS = new Set(["extract_project_info", "extract_zoning_data"]);
+    const model = isMultimodal
+      ? (FAST_MULTIMODAL_ACTIONS.has(action) ? "google/gemini-2.5-flash" : "google/gemini-2.5-pro")
+      : "google/gemini-2.5-flash";
 
     // Temperature policy (audit C-04). Determinism matters for legal output:
     // letters and code answers run at 0; outreach/marketing copy runs warmer
