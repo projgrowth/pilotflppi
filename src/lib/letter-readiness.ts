@@ -191,11 +191,20 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
   );
   const undecidedTotal =
     undecidedMismatch.length + undecidedNotFound.length;
+  // Unverified % — exclude findings whose citation is hallucinated (those
+  // are auto-waived by the pipeline; if any slip through, the human can't
+  // meaningfully verify them so they shouldn't trigger the "verifier stalled"
+  // gate). Also exclude `needs_human` (the verifier DID return — it just
+  // bounced to a human review).
   const unverified = live.filter(
-    (f) => (f.verification_status ?? "unverified") === "unverified",
+    (f) =>
+      (f.verification_status ?? "unverified") === "unverified" &&
+      f.citation_status !== "hallucinated",
   );
   const unverifiedPct = live.length === 0 ? 0 : unverified.length / live.length;
-  const verifierStalled = unverifiedPct > 0.25;
+  // Stall threshold: >25% truly unverified, AND at least 4 findings to avoid
+  // tiny-review false positives (1/3 = 33% wouldn't trigger).
+  const verifierStalled = unverifiedPct > 0.25 && live.length >= 4;
 
   const citationProblems =
     hallucinated.length + weakCitations.length + stubCitations.length + undecidedTotal;
