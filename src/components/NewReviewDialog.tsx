@@ -454,18 +454,28 @@ export function NewReviewDialog({
           {/* Existing project chip */}
           {matchedProject && !preselectedProjectId && (
             <Card className={cn("border-2", useExisting ? "border-accent" : "border-border")}>
-              <CardContent className="p-3 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Building2 className="h-4 w-4 text-accent" />
-                  <div>
-                    <p className="text-sm font-medium">Existing project found</p>
-                    <p className="text-xs text-muted-foreground">{matchedProject.name}</p>
+              <CardContent className="p-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Building2 className="h-4 w-4 text-accent shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">Existing project found</p>
+                    <p className="text-xs text-muted-foreground truncate">{matchedProject.name}</p>
+                    {useExisting && (
+                      <button
+                        type="button"
+                        onClick={() => { setUseExisting(false); setMatchedProject(null); }}
+                        className="text-2xs text-muted-foreground hover:text-foreground underline mt-0.5"
+                      >
+                        Not this project — create new
+                      </button>
+                    )}
                   </div>
                 </div>
                 <Button
                   size="sm"
                   variant={useExisting ? "default" : "outline"}
                   onClick={() => setUseExisting((v) => !v)}
+                  className="shrink-0"
                 >
                   {useExisting ? <><Check className="h-3 w-3 mr-1" /> Linked</> : "Link"}
                 </Button>
@@ -476,41 +486,33 @@ export function NewReviewDialog({
           {/* Project form (hidden when linking to existing) */}
           {!useExisting && (
             <>
-              {/* Use type */}
-              <div className="space-y-2">
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
-                  Use type *
-                </Label>
-                <div className="grid grid-cols-2 gap-3">
+              {/* Use type — compact segmented control */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Use type *</Label>
+                <div className="grid grid-cols-2 gap-2 rounded-lg bg-muted/40 p-1">
                   <button
                     type="button"
                     onClick={() => setUseType("commercial")}
                     className={cn(
-                      "flex flex-col items-start gap-1 rounded-lg border-2 p-3 text-left transition-all hover:border-accent/60",
-                      useType === "commercial" ? "border-accent bg-accent/5" : "border-border bg-card",
+                      "flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
+                      useType === "commercial"
+                        ? "bg-card text-foreground shadow-sm ring-1 ring-accent/40"
+                        : "text-muted-foreground hover:text-foreground",
                     )}
                   >
-                    <div className="flex w-full items-center justify-between">
-                      <Building2 className={cn("h-4 w-4", useType === "commercial" ? "text-accent" : "text-muted-foreground")} />
-                      {useType === "commercial" && <Check className="h-4 w-4 text-accent" />}
-                    </div>
-                    <p className="text-sm font-semibold">Commercial</p>
-                    <p className="text-[10px] text-muted-foreground">FBC Building, accessibility</p>
+                    <Building2 className="h-3.5 w-3.5" /> Commercial
                   </button>
                   <button
                     type="button"
                     onClick={() => setUseType("residential")}
                     className={cn(
-                      "flex flex-col items-start gap-1 rounded-lg border-2 p-3 text-left transition-all hover:border-accent/60",
-                      useType === "residential" ? "border-accent bg-accent/5" : "border-border bg-card",
+                      "flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
+                      useType === "residential"
+                        ? "bg-card text-foreground shadow-sm ring-1 ring-accent/40"
+                        : "text-muted-foreground hover:text-foreground",
                     )}
                   >
-                    <div className="flex w-full items-center justify-between">
-                      <Home className={cn("h-4 w-4", useType === "residential" ? "text-accent" : "text-muted-foreground")} />
-                      {useType === "residential" && <Check className="h-4 w-4 text-accent" />}
-                    </div>
-                    <p className="text-sm font-semibold">Residential</p>
-                    <p className="text-[10px] text-muted-foreground">FBCR — 1 & 2 family</p>
+                    <Home className="h-3.5 w-3.5" /> Residential
                   </button>
                 </div>
               </div>
@@ -601,11 +603,11 @@ export function NewReviewDialog({
               </div>
 
               {hvhz && (
-                <div className="flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-                  <Wind className="h-4 w-4 text-destructive shrink-0" />
+                <div className="flex items-center gap-3 rounded-lg border border-warning/40 bg-warning/10 p-3">
+                  <Wind className="h-4 w-4 text-warning shrink-0" />
                   <div>
-                    <p className="text-sm font-semibold text-destructive">HVHZ — High Velocity Hurricane Zone</p>
-                    <p className="text-xs text-destructive/80">TAS 201/202/203, Miami-Dade NOA, ASCE 7 ≥170 mph.</p>
+                    <p className="text-sm font-semibold text-warning-foreground">HVHZ — High Velocity Hurricane Zone</p>
+                    <p className="text-xs text-muted-foreground">TAS 201/202/203, Miami-Dade NOA, ASCE 7 ≥170 mph.</p>
                   </div>
                 </div>
               )}
@@ -618,13 +620,13 @@ export function NewReviewDialog({
             className="w-full h-11"
           >
             {saving ? (
-              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Creating…</>
+              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Starting…</>
             ) : (
-              <><Sparkles className="h-4 w-4 mr-2" /> Create & Open <ArrowRight className="h-4 w-4 ml-2" /></>
+              <><Sparkles className="h-4 w-4 mr-2" /> Start review <ArrowRight className="h-4 w-4 ml-2" /></>
             )}
           </Button>
-          <p className="text-[10px] text-center text-muted-foreground">
-            Pipeline analysis starts automatically and runs in the workspace.
+          <p className="text-[11px] text-center text-muted-foreground leading-relaxed">
+            We'll keep uploading in the workspace — keep this browser open for ~30 sec, then it's safe to leave.
           </p>
         </div>
       </DialogContent>
