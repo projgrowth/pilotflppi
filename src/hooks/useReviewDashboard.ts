@@ -201,6 +201,13 @@ export interface DeficiencyV2Row {
   evidence_crop_url?: string | null;
   /** Metadata describing the crop: { sheet_ref, page_in_file, evidence_text, bbox, generated_at }. */
   evidence_crop_meta?: Record<string, unknown> | null;
+  /** Wave 6: timestamp at which the reviewer last set `reviewer_disposition`.
+   *  Auto-stamped by `tr_stamp_reviewer_disposition_at`. When `updated_at` is
+   *  later than this, the human's decision is stale (the finding changed
+   *  after they decided) and the readiness gate flags `stale_disposition`. */
+  reviewer_disposition_at?: string | null;
+  /** Last-modified timestamp on the row (used to detect stale dispositions). */
+  updated_at?: string | null;
 }
 
 export function usePipelineStatus(planReviewId?: string) {
