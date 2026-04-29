@@ -97,7 +97,7 @@ async function logRecovery(admin: AdminLike, args: {
   }
 }
 
-async function startPipeline(planReviewId: string): Promise<{ ok: boolean; message?: string }> {
+async function startPipeline(planReviewId: string, mode: string): Promise<{ ok: boolean; message?: string }> {
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/run-review-pipeline`, {
       method: "POST",
@@ -108,7 +108,8 @@ async function startPipeline(planReviewId: string): Promise<{ ok: boolean; messa
       },
       body: JSON.stringify({
         plan_review_id: planReviewId,
-        mode: "core",
+        // Persisted mode wins so a deep run isn't silently downgraded.
+        mode: mode === "deep" || mode === "full" ? mode : "core",
         _internal: true,
       }),
     });
