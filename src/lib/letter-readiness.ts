@@ -84,8 +84,21 @@ export interface ReadinessInput {
   coveragePct?: number | null;
   /** Firm setting: block the letter when coverage_pct < 100. */
   blockLetterOnLowCoverage?: boolean;
-  /** Firm setting: block the letter when any live finding has a stub
-   *  citation (canonical text shorter than ~60 chars). */
+  /**
+   * Firm setting: block the letter when any live finding has a
+   * `verified_stub` citation (real FBC section, but no canonical text seeded
+   * yet — so the AI can't prove the citation actually supports the finding).
+   *
+   * **Default behavior is BLOCKING.** The check uses `!== false` so that a
+   * `null`/`undefined`/missing firm setting (every brand-new firm row) keeps
+   * the conservative gate in place. Pass an explicit `false` to opt out.
+   *
+   * Audit H-02 noted the flag name is ambiguous (the boolean value `true`
+   * means "DO block"). Renaming the column requires a coordinated migration
+   * + value-flip; until then, do NOT toggle this in the UI without copy
+   * that explicitly says "block the letter when…" so reviewers don't
+   * accidentally let stub citations through.
+   */
   blockLetterOnUngrounded?: boolean;
 }
 

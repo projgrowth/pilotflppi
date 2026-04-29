@@ -36,6 +36,16 @@ const DNA_SCHEMA = {
       is_high_rise: { type: ["boolean", "null"] },
       has_mezzanine: { type: ["boolean", "null"] },
       seismic_design_category: { type: ["string", "null"] },
+      // Audit C-07 / M-01: read occupant_load when the code-summary block
+      // states it. Threshold-building logic (F.S. 553.79(5)) needs OL to
+      // turn an "Assembly + >5,000 sf" advisory into a definitive
+      // classification (>500 occupants = threshold; ≤500 = not threshold).
+      occupant_load: { type: ["integer", "null"] },
+      // Audit M-04: true when the project sits on a barrier island, within
+      // the wind-borne debris region, or otherwise on the coast — even if
+      // the county is generally classified inland (e.g. Hillsborough's
+      // Tampa Bay frontage). Drives WBDR + flood callouts.
+      is_coastal: { type: ["boolean", "null"] },
       missing_fields: { type: "array", items: { type: "string" } },
       ambiguous_fields: { type: "array", items: { type: "string" } },
       evidence_notes: {
@@ -261,6 +271,8 @@ export async function stageDnaExtract(
     has_mezzanine: (extracted.has_mezzanine as boolean | null) ?? null,
     seismic_design_category:
       (extracted.seismic_design_category as string | null) ?? null,
+    occupant_load: (extracted.occupant_load as number | null) ?? null,
+    is_coastal: (extracted.is_coastal as boolean | null) ?? null,
     missing_fields:
       (extracted.missing_fields as string[] | undefined) ?? [],
     ambiguous_fields:

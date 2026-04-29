@@ -194,9 +194,20 @@ export const COUNTY_REGISTRY: Record<string, Partial<CountyRequirements>> = {
   }),
 
   // ─── TAMPA BAY ──────────────────────────────────────────────
-  hillsborough: inland("hillsborough", "Hillsborough", "140-150 mph (Ultimate) per ASCE 7-22", {
+  // Hillsborough is mostly inland but the Tampa Bay frontage (Apollo Beach,
+  // Davis Islands, Bayshore, MacDill, Westshore) sits in the wind-borne
+  // debris region and Coastal A / VE flood zones. Audit M-04: classify as
+  // coastal so WBDR + flood-zone callouts are surfaced; submissionNotes
+  // tell the reviewer to confirm whether the parcel is actually on the bay
+  // before applying the stricter requirements.
+  hillsborough: coastal("hillsborough", "Hillsborough", "140-150 mph (Ultimate) per ASCE 7-22", {
     name: "Hillsborough County Building Services",
     address: "601 E. Kennedy Blvd, Tampa, FL 33602",
+  }, {
+    submissionNotes: [
+      "Tampa Bay frontage (e.g. Apollo Beach, Davis Islands, Bayshore, MacDill, Westshore) is in the wind-borne debris region — confirm parcel location before relaxing impact-protection requirements",
+      "Florida Product Approval (FL#) accepted; NOA optional",
+    ],
   }),
 
   pinellas: coastal("pinellas", "Pinellas", "140-150 mph (Ultimate) per ASCE 7-22", {
