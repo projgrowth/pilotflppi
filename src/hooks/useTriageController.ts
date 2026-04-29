@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+// react-query state is owned by useOptimisticDisposition
 import { toast } from "sonner";
 import {
   type DeficiencyV2Row,
-  updateDeficiencyDisposition,
+  useOptimisticDisposition,
 } from "@/hooks/useReviewDashboard";
 import { scrollToFinding } from "@/lib/finding-jump";
 import { isRejectShortcut, isTypingTarget } from "@/lib/review-shortcuts";
@@ -29,7 +29,7 @@ export function useTriageController({
   onRequestReject,
   enabled,
 }: Args) {
-  const qc = useQueryClient();
+  const optimisticUpdate = useOptimisticDisposition(planReviewId);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -96,17 +96,17 @@ export function useTriageController({
 
   const apply = useCallback(
     async (id: string, disposition: Exclude<Disposition, "reject">) => {
+      // Optimistic — advance the cursor immediately so power-users can chain
+      // C/M/J without waiting on round-trips. Errors roll back via the helper.
+      const idx = itemsRef.current.findIndex((i) => i.id === id);
+      if (idx >= 0) advanceToNextUnreviewed(idx);
       try {
-        await updateDeficiencyDisposition(id, { reviewer_disposition: disposition });
-        qc.invalidateQueries({ queryKey: ["deficiencies_v2", planReviewId] });
-        toast.success(`Marked ${disposition}`);
-        const idx = itemsRef.current.findIndex((i) => i.id === id);
-        if (idx >= 0) advanceToNextUnreviewed(idx);
+        await optimisticUpdate(id, { reviewer_disposition: disposition });
       } catch {
         toast.error("Could not save disposition");
       }
     },
-    [planReviewId, qc, advanceToNextUnreviewed],
+    [optimisticUpdate, advanceToNextUnreviewed],
   );
 
   const toggleSelect = useCallback((id: string) => {

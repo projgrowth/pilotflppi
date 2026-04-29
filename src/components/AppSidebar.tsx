@@ -273,7 +273,7 @@ function MobileBottomBar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const location = useLocation();
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-card border-t safe-bottom">
+    <div className="fixed bottom-0 left-0 right-0 z-nav md:hidden bg-card border-t safe-bottom">
       <div className="flex items-stretch">
         {bottomTabs.map((tab) => {
           const active = location.pathname.startsWith(tab.path);

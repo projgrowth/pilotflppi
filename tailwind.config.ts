@@ -104,6 +104,20 @@ export default {
         card: "var(--shadow-card)",
         elevated: "var(--shadow-elevated)",
       },
+      // Semantic z-index scale. Shadcn/Radix primitives (dialog, popover,
+      // dropdown, tooltip) keep their built-in z-50 — those tokens above
+      // intentionally sit beneath the modal layer to prevent topbars or
+      // sticky bars from punching through dialogs.
+      zIndex: {
+        base: "0",
+        raised: "10",   // in-flow elevated content (cards on hover, resizable handles)
+        sticky: "20",   // page-internal sticky headers/footers
+        floating: "30", // floating action bars (BulkActionBar)
+        nav: "40",      // app chrome (sidebar, topbar)
+        overlay: "45",  // full-page overlays / processing screens
+        modal: "50",    // dialogs, popovers, dropdowns (Radix default)
+        toast: "60",    // toasts must sit above modals for error feedback
+      },
       keyframes: {
         "accordion-down": {
           from: { height: "0" },

@@ -34,7 +34,7 @@ export function AppLayout() {
       <CommandPalette onOpenAI={() => setAiDrawerOpen(true)} />
       <AIDrawer open={aiDrawerOpen} onOpenChange={setAiDrawerOpen} />
       {/* Floating beta-feedback button — every page, every route. */}
-      <div className="fixed bottom-4 right-4 z-40 rounded-full border bg-card/95 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
+      <div className="fixed bottom-4 right-4 z-floating rounded-full border bg-card/95 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-card/80">
         <BetaFeedbackButton />
       </div>
     </div>
