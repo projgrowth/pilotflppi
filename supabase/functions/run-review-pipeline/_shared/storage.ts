@@ -7,6 +7,7 @@
 // was already defined and was the obvious intent.
 
 import type { Admin } from "./supabase.ts";
+import { normalizeStorageKey } from "./storage-paths.ts";
 
 // Page assets are produced by the BROWSER (pdf.js in the wizard / inline
 // upload). Server-side rasterization was removed — Supabase edge workers'
@@ -155,7 +156,7 @@ export async function signedSheetUrls(
   let globalPageIndex = 0;
 
   for (const f of (files ?? []) as Array<{ file_path: string }>) {
-    const filePath = f.file_path;
+    const filePath = normalizeStorageKey(f.file_path);
     const isPdf = filePath.toLowerCase().endsWith(".pdf");
     if (!isPdf) {
       const { data: signed } = await admin.storage
