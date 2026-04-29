@@ -6,6 +6,19 @@
 
 import type { Admin } from "../_shared/supabase.ts";
 
+// Sentinel error class — the dispatcher in index.ts catches this by name and
+// flips the review to `needs_user_action` immediately instead of waiting for
+// the 15-min watchdog. Throwing a plain Error here would just trigger 3
+// retries and a generic error log.
+export class NoFilesUploadedError extends Error {
+  constructor() {
+    super(
+      "No files have been uploaded for this plan review yet. Re-upload the PDF to continue.",
+    );
+    this.name = "NoFilesUploadedError";
+  }
+}
+
 export async function stageUpload(admin: Admin, planReviewId: string) {
   const { data, error } = await admin
     .from("plan_review_files")
@@ -13,7 +26,10 @@ export async function stageUpload(admin: Admin, planReviewId: string) {
     .eq("plan_review_id", planReviewId);
   if (error) throw error;
   if (!data || data.length === 0) {
-    throw new Error("No files uploaded for this plan review");
+    // Fast-fail: no point retrying — the user has to re-upload. The dispatcher
+    // (index.ts) catches NoFilesUploadedError and flips ai_check_status to
+    // 'needs_user_action' so StuckRecoveryBanner surfaces the CTA in seconds.
+    throw new NoFilesUploadedError();
   }
 
   // Lightweight validation only — confirm files are reachable in storage.
