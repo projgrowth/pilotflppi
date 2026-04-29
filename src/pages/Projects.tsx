@@ -149,6 +149,20 @@ export default function Projects() {
     }
   };
 
+  const handleRestore = async (project: Project) => {
+    if (!user) return;
+    try {
+      const res = await restoreProject(project.id, user.id);
+      toast.success(
+        `Restored "${project.name}"` +
+        (res.reviewsRestored > 0 ? ` (${res.reviewsRestored} review${res.reviewsRestored === 1 ? "" : "s"} restored)` : ""),
+      );
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not restore project");
+    }
+  };
+
   const handleBulkDelete = async () => {
     if (!user || selectedCount === 0) return;
     setBulkDeleting(true);
