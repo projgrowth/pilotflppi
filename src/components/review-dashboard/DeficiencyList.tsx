@@ -4,7 +4,6 @@ import { useFilteredDeficiencies } from "@/hooks/useFilteredDeficiencies";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { useTriageController } from "@/hooks/useTriageController";
 import { type DeficiencyV2Row } from "@/hooks/useReviewDashboard";
 import DeficiencyCard from "./DeficiencyCard";
@@ -118,8 +117,32 @@ export default function DeficiencyList({ planReviewId, chipFilter }: Props) {
   }
 
   const supersededCount = counts.total - counts.visible;
-  const progressPct =
-    triage.totalCount > 0 ? Math.round((triage.reviewedCount / triage.totalCount) * 100) : 0;
+
+  // Split disposition breakdown — gives reviewers a real signal vs. a single
+  // "X reviewed" bar that hid whether findings were accepted, modified, or
+  // tossed out.
+  const dispoBreakdown = useMemo(() => {
+    let confirmed = 0;
+    let modified = 0;
+    let rejected = 0;
+    for (const d of items) {
+      if (d.reviewer_disposition === "confirm") confirmed += 1;
+      else if (d.reviewer_disposition === "modify") modified += 1;
+      else if (d.reviewer_disposition === "reject") rejected += 1;
+    }
+    const total = triage.totalCount;
+    const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
+    return {
+      confirmed,
+      modified,
+      rejected,
+      pending: Math.max(0, total - confirmed - modified - rejected),
+      confirmedPct: pct(confirmed),
+      modifiedPct: pct(modified),
+      rejectedPct: pct(rejected),
+      reviewedPct: total > 0 ? Math.round(((confirmed + modified + rejected) / total) * 100) : 0,
+    };
+  }, [items, triage.totalCount]);
 
   return (
     <div className="space-y-4">
@@ -127,13 +150,37 @@ export default function DeficiencyList({ planReviewId, chipFilter }: Props) {
       <div className="rounded-md border bg-card p-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex-1">
-            <div className="mb-1 flex items-center justify-between text-xs">
+            <div className="mb-1.5 flex items-center justify-between text-xs">
               <span className="font-medium">
                 Reviewed · {triage.reviewedCount} of {triage.totalCount}
               </span>
-              <span className="font-mono text-muted-foreground">{progressPct}%</span>
+              <span className="font-mono text-muted-foreground">{dispoBreakdown.reviewedPct}%</span>
             </div>
-            <Progress value={progressPct} className="h-1.5" />
+            {/* Segmented progress: confirmed | modified | rejected | pending */}
+            <div
+              className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted"
+              role="progressbar"
+              aria-valuenow={dispoBreakdown.reviewedPct}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label={`${dispoBreakdown.confirmed} confirmed, ${dispoBreakdown.modified} modified, ${dispoBreakdown.rejected} rejected`}
+            >
+              {dispoBreakdown.confirmedPct > 0 && (
+                <div className="h-full bg-success transition-all" style={{ width: `${dispoBreakdown.confirmedPct}%` }} />
+              )}
+              {dispoBreakdown.modifiedPct > 0 && (
+                <div className="h-full bg-warning transition-all" style={{ width: `${dispoBreakdown.modifiedPct}%` }} />
+              )}
+              {dispoBreakdown.rejectedPct > 0 && (
+                <div className="h-full bg-destructive transition-all" style={{ width: `${dispoBreakdown.rejectedPct}%` }} />
+              )}
+            </div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-2xs text-muted-foreground">
+              <DispoLegend swatch="bg-success" label="Confirmed" count={dispoBreakdown.confirmed} />
+              <DispoLegend swatch="bg-warning" label="Modified" count={dispoBreakdown.modified} />
+              <DispoLegend swatch="bg-destructive" label="Rejected" count={dispoBreakdown.rejected} />
+              <DispoLegend swatch="bg-muted-foreground/40" label="Pending" count={dispoBreakdown.pending} />
+            </div>
           </div>
           <Button
             type="button"
