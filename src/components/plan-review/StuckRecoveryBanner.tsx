@@ -148,10 +148,14 @@ export function StuckRecoveryBanner({
 
   // ---- needs_human_review variant (not dismissible — needs disposition) ----
   if (aiCheckStatus === "needs_human_review") {
-    const unverified = qualityBreakdown?.unverified_pct ?? 0;
-    const total = qualityBreakdown?.total_live_findings ?? 0;
+    // Prefer the LIVE breakdown over the snapshot in ai_run_progress —
+    // otherwise the banner shows "11 of 11 unverified" forever even after
+    // the verifier finishes (stale snapshot bug).
+    const total = liveBreakdown.total || (qualityBreakdown?.total_live_findings ?? 0);
+    const unverifiedCount = liveBreakdown.unverified;
+    const unverifiedPct = total > 0 ? Math.round((unverifiedCount / total) * 100) : 0;
     const hasHallucinated = !!qualityBreakdown?.has_hallucinated_citations;
-    const showRerun = unverified > 0;
+    const showRerun = unverifiedCount > 0;
     return (
       <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs">
         <AlertCircle className="h-4 w-4 flex-shrink-0 text-destructive" />
@@ -161,12 +165,16 @@ export function StuckRecoveryBanner({
             {qualityBreakdown?.blocker_reason ?? failureReason ??
               "The automated pipeline finished but produced unusually low results. Please review manually before sending."}
           </div>
-          {(unverified > 0 || hasHallucinated) && (
+          {total > 0 && (
             <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-2xs text-muted-foreground">
-              {unverified > 0 && (
-                <span>{unverified}% unverified{total ? ` of ${total}` : ""}</span>
+              <span>{liveBreakdown.verified} verified by adversarial AI</span>
+              {liveBreakdown.needsHuman > 0 && (
+                <span>· {liveBreakdown.needsHuman} need your eyes</span>
               )}
-              {hasHallucinated && <span>· hallucinated citation present</span>}
+              {unverifiedCount > 0 && (
+                <span>· {unverifiedCount} awaiting verifier ({unverifiedPct}%)</span>
+              )}
+              {hasHallucinated && <span>· hallucinated citations auto-hidden</span>}
             </div>
           )}
         </div>
