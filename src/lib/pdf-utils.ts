@@ -246,6 +246,8 @@ export async function rasterizeAndUploadPages(
     startGlobalIndex?: number;
     /** Render in chunks of this many pages, releasing memory between chunks. */
     batchSize?: number;
+    /** Firm-scoped pages prefix; see `rasterizeAndUploadPagesResilient`. */
+    pagesPrefix?: string;
   } = {},
 ): Promise<PreparedPageAsset[]> {
   const result = await rasterizeAndUploadPagesResilient(reviewId, files, uploadFn, opts);
