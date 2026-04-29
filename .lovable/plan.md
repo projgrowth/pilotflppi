@@ -74,18 +74,20 @@ Goal: lock the wins in and clean up the long tail.
 
 ---
 
-### What we're explicitly NOT doing now
+### Wave status
+
+- **Wave 1 — Letter integrity:** ✅ Done. Dynamic firm/edition/deadline injection, temperature pinning, duplicate `citations` id renamed.
+- **Wave 2 — Statutory clock:** ✅ Done. `clock_pause_history` JSONB, net-elapsed math, 3 new pause tests.
+- **Wave 3 — Multi-tenant safety:** ✅ Done. Removed cross-firm `firm_settings` fallback; pipeline returns 409 on concurrent kickoff.
+- **Wave 4 — Tests & hygiene:** ✅ Done. 23-case `letter-readiness.test.ts`, Broward placeholder fixed, correction models standardized to `gemini-2.5-flash`, README rewritten, vitest env switched to `node` (no DOM tests in suite).
+
+### What's still NOT done (intentionally deferred)
 
 - **H-03** (gateway SPOF / fallback to direct Google AI). Real concern but adds significant complexity and a second secret. Track separately; revisit if we hit a Lovable gateway incident.
-- **H-06** (DBPR live verification). Deferred per above.
-
----
+- **H-06** (DBPR live license verification). Multi-day integration; documented as a known limitation in the README and surfaced as self-attested in the UI.
+- **C-07 / M-01 / M-04 / H-02 rename** — DNA schema add for `occupant_load`, threshold-building advisory tightening, Hillsborough coastal classification, and the `blockLetterOnUngrounded` → `allowStubCitations` flag rename. These three are smaller follow-ups that didn't make this pass; track as Wave 5 if requested.
 
 ### Technical notes
 
-- Wave 1 + Wave 2 + Wave 3 step 9 (DNA schema) are the only items that touch AI prompts or schemas. Test on one project end-to-end after each.
-- Wave 2 needs a SQL migration; everything else is code-only.
-- After Wave 1, every existing draft letter in the system was generated under the old prompt. They keep their snapshot (immutability triggers protect them) — only new letters get the corrected prompt. Document this in the release notes.
-- After approval, I'll create a tracked task per wave so progress is visible and we don't lose state across sessions.
-
-Approve to proceed; tell me if you want to reorder, drop a wave, or pull H-03/H-06 forward.
+- Existing draft letters keep their snapshot under the old prompt (immutability triggers protect them). Only new letters get the corrected prompt + dynamic context.
+- Vitest now runs under the `node` environment because none of the current suites touch the DOM. If a component test is added later, mark it with `// @vitest-environment jsdom` per file.
