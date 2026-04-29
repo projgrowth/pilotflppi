@@ -16,11 +16,14 @@ import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { useProjects, getDaysElapsed, getDaysRemaining, type Project } from "@/hooks/useProjects";
 import { useAuth } from "@/contexts/AuthContext";
 import { deleteProject } from "@/lib/delete-project";
+import { restoreProject } from "@/lib/restore-project";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
-import { Search, ChevronRight, FolderKanban, Plus, Trash2, X } from "lucide-react";
+import { Search, ChevronRight, FolderKanban, Plus, Trash2, X, Undo2 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 const filters = ["All", "Plan Review", "Inspection", "Pending", "Complete"] as const;
@@ -47,7 +50,8 @@ export default function Projects() {
   const [search, setSearch] = useState("");
   const [countyFilter, setCountyFilter] = useState("all");
   const [sortBy, setSortBy] = useState<"newest" | "deadline" | "activity">("activity");
-  const { data: projects, isLoading } = useProjects();
+  const [showDeleted, setShowDeleted] = useState(false);
+  const { data: projects, isLoading } = useProjects({ includeDeleted: showDeleted });
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -145,6 +149,20 @@ export default function Projects() {
     }
   };
 
+  const handleRestore = async (project: Project) => {
+    if (!user) return;
+    try {
+      const res = await restoreProject(project.id, user.id);
+      toast.success(
+        `Restored "${project.name}"` +
+        (res.reviewsRestored > 0 ? ` (${res.reviewsRestored} review${res.reviewsRestored === 1 ? "" : "s"} restored)` : ""),
+      );
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not restore project");
+    }
+  };
+
   const handleBulkDelete = async () => {
     if (!user || selectedCount === 0) return;
     setBulkDeleting(true);
@@ -223,9 +241,21 @@ export default function Projects() {
               <SelectItem value="deadline">Deadline soonest</SelectItem>
             </SelectContent>
           </Select>
-          <div className="relative ml-auto">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input placeholder="Search projects..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 w-64" />
+          <div className="flex items-center gap-2 ml-auto">
+            <div className="flex items-center gap-2 px-2 py-1 rounded-md border bg-muted/30">
+              <Switch
+                id="show-deleted"
+                checked={showDeleted}
+                onCheckedChange={(v) => { setShowDeleted(v); clearSelection(); }}
+              />
+              <Label htmlFor="show-deleted" className="text-xs cursor-pointer select-none">
+                Show deleted
+              </Label>
+            </div>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input placeholder="Search projects..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 w-64" />
+            </div>
           </div>
         </div>
 
@@ -281,6 +311,7 @@ export default function Projects() {
                     className={cn(
                       "group grid grid-cols-[28px_40px_1fr_100px_70px_90px_110px_70px_90px_28px_20px] gap-3 items-center px-5 py-3 hover:bg-muted/40 cursor-pointer transition-colors",
                       isSelected && "bg-primary/5 hover:bg-primary/10",
+                      project.deleted_at && "opacity-60",
                     )}
                   >
                     <div
@@ -332,19 +363,35 @@ export default function Projects() {
                     )}>
                       {remaining <= 0 ? "Overdue" : `${remaining}d left`}
                     </span>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); setPendingDelete(project); }}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                          aria-label={`Delete ${project.name}`}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="text-xs">Delete project</TooltipContent>
-                    </Tooltip>
+                    {project.deleted_at ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleRestore(project); }}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                            aria-label={`Restore ${project.name}`}
+                          >
+                            <Undo2 className="h-3.5 w-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs">Restore project</TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setPendingDelete(project); }}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            aria-label={`Delete ${project.name}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs">Delete project</TooltipContent>
+                      </Tooltip>
+                    )}
                     <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0" />
                   </div>
                 );

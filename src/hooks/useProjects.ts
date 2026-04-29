@@ -32,17 +32,23 @@ export interface Project {
   first_uploaded_at?: string | null;
   /** Latest of plan_reviews.updated_at across all reviews. */
   last_activity_at?: string | null;
+  /** Soft-delete timestamp; only populated when includeDeleted=true. */
+  deleted_at?: string | null;
 }
 
-export function useProjects() {
+export function useProjects(opts?: { includeDeleted?: boolean }) {
+  const includeDeleted = !!opts?.includeDeleted;
   return useQuery({
-    queryKey: ["projects"],
+    queryKey: ["projects", { includeDeleted }],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from("projects")
         .select("*, contractor:contractors(id, name)")
-        .is("deleted_at", null)
         .order("created_at", { ascending: false });
+      if (!includeDeleted) {
+        query = query.is("deleted_at", null);
+      }
+      const { data, error } = await query;
       if (error) throw error;
       const projects = ((data ?? []) as unknown) as Project[];
       if (projects.length === 0) return projects;
