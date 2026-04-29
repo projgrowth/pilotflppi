@@ -26,6 +26,13 @@ import { sha256OfFile } from "@/lib/file-hash";
 
 export interface UploadPlanReviewArgs {
   reviewId: string;
+  /**
+   * Owning firm — REQUIRED. All storage objects are written under
+   * `firms/<firmId>/plan-reviews/<reviewId>/...` to satisfy the firm-scoped
+   * RLS policy on `storage.objects` and the CHECK constraint on
+   * `plan_review_files.file_path`. Resolve via `useFirmId()` in the caller.
+   */
+  firmId: string;
   round: number;
   existingFileUrls: string[];
   existingPageCount: number | null;
@@ -51,9 +58,15 @@ const MIN_RASTERIZE_RATIO = 0.8;
 export async function uploadPlanReviewFiles(
   args: UploadPlanReviewArgs,
 ): Promise<UploadPlanReviewResult> {
-  const { reviewId, round, existingFileUrls, existingPageCount, files, userId, onProgress } =
+  const { reviewId, firmId, round, existingFileUrls, existingPageCount, files, userId, onProgress } =
     args;
   const warnings: string[] = [];
+
+  if (!firmId) {
+    throw new Error("Cannot upload: missing firm context. Reload and try again.");
+  }
+
+  const prefix = `firms/${firmId}/plan-reviews/${reviewId}`;
 
   onProgress?.({ phase: "Validating PDFs…", prepared: 0, expected: 0 });
 
@@ -84,7 +97,7 @@ export async function uploadPlanReviewFiles(
   const newFilePaths: string[] = [];
   const fileHashes = new Map<string, { sha256: string; size: number }>();
   for (const file of acceptedFiles) {
-    const path = `plan-reviews/${reviewId}/round-${round}/${file.name}`;
+    const path = `${prefix}/round-${round}/${file.name}`;
     let sha256: string | null = null;
     try {
       sha256 = await sha256OfFile(file);
@@ -150,7 +163,11 @@ export async function uploadPlanReviewFiles(
             .upload(path, blob, { upsert: true, contentType: "image/jpeg" });
           return { error: res.error ? { message: res.error.message } : null };
         },
-        { startGlobalIndex: existingPageCount ?? 0, batchSize: 4 },
+        {
+          startGlobalIndex: existingPageCount ?? 0,
+          batchSize: 4,
+          pagesPrefix: `${prefix}/pages`,
+        },
       );
       pageAssetRows = succeeded;
       allFailures = failures.map((f) => ({

@@ -246,6 +246,8 @@ export async function rasterizeAndUploadPages(
     startGlobalIndex?: number;
     /** Render in chunks of this many pages, releasing memory between chunks. */
     batchSize?: number;
+    /** Firm-scoped pages prefix; see `rasterizeAndUploadPagesResilient`. */
+    pagesPrefix?: string;
   } = {},
 ): Promise<PreparedPageAsset[]> {
   const result = await rasterizeAndUploadPagesResilient(reviewId, files, uploadFn, opts);
@@ -276,6 +278,13 @@ export async function rasterizeAndUploadPagesResilient(
     onProgress?: (done: number, total: number) => void;
     /** Called after each successfully uploaded page so callers can persist incrementally. */
     onPageReady?: (asset: PreparedPageAsset) => void | Promise<void>;
+    /**
+     * Required for firm-scoped storage: page JPEGs are written to
+     * `<pagesPrefix>/<basename>/p-NNN.jpg`. Callers should pass
+     * `firms/<firmId>/plan-reviews/<reviewId>/pages` so the new
+     * storage RLS + CHECK constraint accept the path.
+     */
+    pagesPrefix?: string;
   } = {},
 ): Promise<RasterizeResult & { aborted?: boolean }> {
   const dpi = opts.dpi ?? 96;
@@ -284,6 +293,9 @@ export async function rasterizeAndUploadPagesResilient(
   const chunkTimeoutMs = opts.chunkTimeoutMs ?? 30_000;
   const totalTimeoutMs = opts.totalTimeoutMs ?? 5 * 60_000;
   const abortFailureRatio = opts.abortFailureRatio ?? 0.4;
+  // Legacy `plan-reviews/<id>/pages` path is no longer accepted by storage RLS
+  // or the CHECK constraint. Callers must pass a firm-scoped `pagesPrefix`.
+  const pagesPrefix = opts.pagesPrefix ?? `plan-reviews/${reviewId}/pages`;
   const startedAt = Date.now();
   let nextGlobalPageIndex = opts.startGlobalIndex ?? 0;
   const succeeded: PreparedPageAsset[] = [];
@@ -351,7 +363,7 @@ export async function rasterizeAndUploadPagesResilient(
       const baseName = uf.name.replace(/\.pdf$/i, "");
       const settled = await Promise.allSettled(
         pageJpegs.map(async (page) => {
-          const pagePath = `plan-reviews/${reviewId}/pages/${baseName}/p-${String(page.pageIndex).padStart(3, "0")}.jpg`;
+          const pagePath = `${pagesPrefix}/${baseName}/p-${String(page.pageIndex).padStart(3, "0")}.jpg`;
           const { error: pageUploadError } = await uploadFn(pagePath, page.blob);
           if (pageUploadError) throw new Error(pageUploadError.message);
           return { page, pagePath };

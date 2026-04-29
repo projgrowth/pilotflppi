@@ -141,10 +141,21 @@ export async function reprepareInBrowser(reviewId: string): Promise<ReprepareRes
       .eq("plan_review_id", reviewId),
     supabase
       .from("plan_reviews")
-      .select("ai_run_progress")
+      .select("ai_run_progress, firm_id")
       .eq("id", reviewId)
       .maybeSingle(),
   ]);
+  const firmId = reviewRow?.firm_id ?? null;
+  if (!firmId) {
+    return {
+      ok: false,
+      message: "Cannot reprepare: review is missing firm context.",
+      pageAssetCount: 0,
+      pipelineStarted: false,
+      warnings,
+    };
+  }
+  const pagesPrefix = `firms/${firmId}/plan-reviews/${reviewId}/pages`;
   const existingIndices = new Set<number>(
     ((existingAssets ?? []) as Array<{ page_index: number }>).map((r) => r.page_index),
   );
@@ -226,7 +237,7 @@ export async function reprepareInBrowser(reviewId: string): Promise<ReprepareRes
         const baseName = src.name.replace(/\.pdf$/i, "");
         for (const r of rendered) {
           const globalIdx = src.globalStart + (r.pageInFile - 1);
-          const pagePath = `plan-reviews/${reviewId}/pages/${baseName}/p-${String(globalIdx).padStart(3, "0")}.jpg`;
+          const pagePath = `${pagesPrefix}/${baseName}/p-${String(globalIdx).padStart(3, "0")}.jpg`;
           const { error: upErr } = await supabase.storage
             .from("documents")
             .upload(pagePath, r.blob, { upsert: true, contentType: "image/jpeg" });
@@ -318,7 +329,7 @@ export async function reprepareInBrowser(reviewId: string): Promise<ReprepareRes
         .upload(path, blob, { upsert: true, contentType: "image/jpeg" });
       return { error: res.error ? { message: res.error.message } : null };
     },
-    { startGlobalIndex: 0 },
+    { startGlobalIndex: 0, pagesPrefix },
   );
 
   if (pageAssetRows.length === 0) {

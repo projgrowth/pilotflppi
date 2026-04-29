@@ -373,9 +373,14 @@ export function NewReviewDialog({
       const { data: review, error: revErr } = await supabase
         .from("plan_reviews")
         .insert({ project_id: projectId })
-        .select("id, round")
+        .select("id, round, firm_id")
         .single();
       if (revErr) throw revErr;
+      if (!review.firm_id) {
+        throw new Error(
+          "Could not resolve your firm. Reload the page and try again.",
+        );
+      }
 
       // AWAIT the upload before navigating. Previously this was fire-and-
       // forget (`void uploadPlanReviewFiles(...).then(...)`), which meant the
@@ -390,6 +395,7 @@ export function NewReviewDialog({
       try {
         const result = await uploadPlanReviewFiles({
           reviewId: review.id,
+          firmId: review.firm_id,
           round: review.round ?? 1,
           existingFileUrls: [],
           existingPageCount: 0,
