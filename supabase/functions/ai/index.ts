@@ -261,6 +261,8 @@ const TOOL_CALL_ACTIONS: Record<string, any> = {
 };
 
 serve(async (req) => {
+  const corsHeaders = corsFor(req);
+
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -302,9 +304,9 @@ serve(async (req) => {
 
   try {
 
-    if (!action || !SYSTEM_PROMPTS[action]) {
+    if (!action || !VALID_ACTIONS.has(action)) {
       return new Response(
-        JSON.stringify({ error: `Invalid action. Valid actions: ${Object.keys(SYSTEM_PROMPTS).join(", ")}` }),
+        JSON.stringify({ error: `Invalid action. Valid actions: ${Array.from(VALID_ACTIONS).join(", ")}` }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -317,7 +319,15 @@ serve(async (req) => {
       );
     }
 
-    const systemPrompt = SYSTEM_PROMPTS[action];
+    // Build the per-request system prompt with firm/code/deadline injected
+    // dynamically. See PromptContext for the contract — callers pass these
+    // via payload.{firm_name, license_number, fbc_edition, resubmission_days}.
+    const systemPrompt = buildSystemPrompt(action, {
+      firm_name: payload?.firm_name ?? null,
+      license_number: payload?.license_number ?? null,
+      fbc_edition: payload?.fbc_edition ?? null,
+      resubmission_days: typeof payload?.resubmission_days === "number" ? payload.resubmission_days : null,
+    });
     const stream = payload?.stream === true;
     const isMultimodal = MULTIMODAL_ACTIONS.has(action);
     const toolDef = TOOL_CALL_ACTIONS[action];
@@ -348,6 +358,10 @@ serve(async (req) => {
       const textPayload = { ...payload };
       delete textPayload.images;
       delete textPayload.stream;
+      delete textPayload.firm_name;
+      delete textPayload.license_number;
+      delete textPayload.fbc_edition;
+      delete textPayload.resubmission_days;
       if (Object.keys(textPayload).length > 0) {
         contentParts.push({ type: "text", text: JSON.stringify(textPayload) });
       }
@@ -363,18 +377,46 @@ serve(async (req) => {
 
       messages.push({ role: "user", content: contentParts });
     } else {
-      // Text-only
-      const userMessage = typeof payload === "string" ? payload : JSON.stringify(payload);
-      messages.push({ role: "user", content: userMessage });
+      // Text-only — strip prompt-context fields before sending the user payload
+      // so they don't bloat the user message (they're already in the system prompt).
+      const userPayload = (() => {
+        if (typeof payload === "string") return payload;
+        if (!payload || typeof payload !== "object") return JSON.stringify(payload);
+        const clone = { ...payload };
+        delete clone.firm_name;
+        delete clone.license_number;
+        delete clone.fbc_edition;
+        delete clone.resubmission_days;
+        delete clone.stream;
+        return JSON.stringify(clone);
+      })();
+      messages.push({ role: "user", content: userPayload });
     }
 
-    // Select model: use gemini-2.5-pro for multimodal, gemini-3-flash-preview for text
-    const model = isMultimodal ? "google/gemini-2.5-pro" : "google/gemini-3-flash-preview";
+    // Model selection.
+    // - Multimodal (vision) → gemini-2.5-pro for higher fidelity on plan sheets.
+    // - Text-only → gemini-2.5-flash for speed/cost (matches the pipeline; see audit M-05/C-01).
+    const model = isMultimodal ? "google/gemini-2.5-pro" : "google/gemini-2.5-flash";
+
+    // Temperature policy (audit C-04). Determinism matters for legal output:
+    // letters and code answers run at 0; outreach/marketing copy runs warmer
+    // for variety. Multimodal extraction is deterministic (parse, not write).
+    const TEMPERATURE_BY_ACTION: Record<string, number> = {
+      generate_comment_letter: 0,
+      answer_code_question: 0,
+      fbc_county_chat: 0,
+      extract_project_info: 0,
+      extract_zoning_data: 0,
+      generate_outreach_email: 0.7,
+      generate_milestone_outreach: 0.7,
+    };
+    const temperature = TEMPERATURE_BY_ACTION[action] ?? 0;
 
     const requestBody: Record<string, unknown> = {
       model,
       messages,
       stream,
+      temperature,
     };
 
     if (useToolCalling) {
