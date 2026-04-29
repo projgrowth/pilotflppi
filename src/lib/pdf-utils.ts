@@ -291,6 +291,9 @@ export async function rasterizeAndUploadPagesResilient(
   const chunkTimeoutMs = opts.chunkTimeoutMs ?? 30_000;
   const totalTimeoutMs = opts.totalTimeoutMs ?? 5 * 60_000;
   const abortFailureRatio = opts.abortFailureRatio ?? 0.4;
+  // Legacy `plan-reviews/<id>/pages` path is no longer accepted by storage RLS
+  // or the CHECK constraint. Callers must pass a firm-scoped `pagesPrefix`.
+  const pagesPrefix = opts.pagesPrefix ?? `plan-reviews/${reviewId}/pages`;
   const startedAt = Date.now();
   let nextGlobalPageIndex = opts.startGlobalIndex ?? 0;
   const succeeded: PreparedPageAsset[] = [];
