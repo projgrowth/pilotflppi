@@ -41,7 +41,30 @@ export async function startPipeline(
     const { error } = await supabase.functions.invoke("run-review-pipeline", {
       body,
     });
-    if (error) return { ok: false, message: error.message };
+    if (error) {
+      // Concurrency guard (H-04): the edge function returns 409 with
+      // { error: "pipeline_already_running", message } when another live
+      // run is in flight on this plan_review. Surface a precise message
+      // instead of the generic "Edge Function returned a non-2xx status".
+      const ctx = (error as { context?: { json?: () => Promise<unknown> } }).context;
+      if (ctx?.json) {
+        try {
+          const payload = (await ctx.json()) as {
+            error?: string;
+            message?: string;
+          };
+          if (payload?.error === "pipeline_already_running") {
+            return {
+              ok: false,
+              message: payload.message ?? "Pipeline already running for this review.",
+            };
+          }
+        } catch {
+          // fall through to generic error
+        }
+      }
+      return { ok: false, message: error.message };
+    }
     return { ok: true };
   } catch (err) {
     return {
