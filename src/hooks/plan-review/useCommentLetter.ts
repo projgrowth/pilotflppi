@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { streamAI } from "@/lib/ai";
 import { useLetterAutosave } from "@/hooks/useLetterAutosave";
+import { getCountyRequirements } from "@/lib/county-requirements";
 import type { Finding } from "@/components/FindingCard";
 import type { PlanReviewRow } from "@/types";
 
@@ -27,10 +28,18 @@ interface FirmContext {
   license_number?: string | null;
 }
 
+interface ProjectDnaContext {
+  fbc_edition?: string | null;
+}
+
 interface Args {
   review: PlanReviewRow | undefined | null;
   findings: Finding[];
   firmSettings: FirmContext | null | undefined;
+  /** Project DNA (post-extraction). Used to inject the correct FBC edition
+   *  into the letter prompt so we don't cite "FBC 2023" on a project that's
+   *  actually under FBC 7th Edition (audit C-06). */
+  projectDna?: ProjectDnaContext | null | undefined;
 }
 
 export function useCommentLetter({ review, findings, firmSettings }: Args) {
