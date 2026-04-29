@@ -257,6 +257,7 @@ export default function Projects() {
               <Input placeholder="Search projects..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 w-64" />
             </div>
           </div>
+        </div>
 
         <Card className="shadow-subtle relative">
           {isLoading ? (
