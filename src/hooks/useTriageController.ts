@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+// react-query state is owned by useOptimisticDisposition
 import { toast } from "sonner";
 import {
   type DeficiencyV2Row,
