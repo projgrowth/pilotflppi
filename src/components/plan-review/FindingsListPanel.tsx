@@ -9,7 +9,7 @@
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Sparkles, Upload } from "lucide-react";
+import { Sparkles, Upload, FileText, X } from "lucide-react";
 import { FindingCard, type Finding } from "@/components/FindingCard";
 import { BulkTriageFilters, type ConfidenceFilter, type QualityFilter } from "@/components/BulkTriageFilters";
 import { ConfidenceMeter } from "@/components/shared/ConfidenceMeter";
@@ -105,6 +105,12 @@ interface Props {
    *  locked "Analyzing…" state instead of the partial findings list so
    *  reviewers don't mistake an in-flight result set for the final output. */
   pipelineProcessing?: boolean;
+  /** When set (count of findings just produced), shows a celebratory
+   *  completion banner above the list with a one-click "Generate letter"
+   *  CTA. Parent clears it after ~3s. */
+  completionFlash?: number | null;
+  onDismissCompletionFlash?: () => void;
+  onGenerateLetterClick?: () => void;
 }
 
 export function FindingsListPanel(props: Props) {
@@ -166,7 +172,42 @@ export function FindingsListPanel(props: Props) {
   }
 
   return (
-    <>
+    <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
+      {props.completionFlash !== null && props.completionFlash !== undefined && (
+        <div className="mb-2 rounded-md border border-success/30 bg-success/5 px-3 py-2 flex items-center gap-2 text-xs animate-in fade-in slide-in-from-top-1 duration-300">
+          <div className="h-6 w-6 rounded-full bg-success/15 flex items-center justify-center shrink-0">
+            <Sparkles className="h-3.5 w-3.5 text-success" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-foreground">
+              Review complete — {props.completionFlash} finding
+              {props.completionFlash === 1 ? "" : "s"}
+            </p>
+            <p className="text-2xs text-muted-foreground">
+              Triage below or jump straight to drafting the letter.
+            </p>
+          </div>
+          {props.onGenerateLetterClick && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-2xs border-success/40 hover:bg-success/10"
+              onClick={props.onGenerateLetterClick}
+            >
+              <FileText className="h-3 w-3 mr-1" /> Generate letter
+            </Button>
+          )}
+          {props.onDismissCompletionFlash && (
+            <button
+              onClick={props.onDismissCompletionFlash}
+              className="h-6 w-6 rounded-md hover:bg-muted/50 flex items-center justify-center text-muted-foreground"
+              aria-label="Dismiss completion banner"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      )}
       <ConfidenceMeter
         score={averageConfidence(props.findings)}
         sampleLabel={`across ${props.findings.length} finding${props.findings.length === 1 ? "" : "s"}`}
@@ -289,6 +330,6 @@ export function FindingsListPanel(props: Props) {
           );
         })}
       </Accordion>
-    </>
+    </div>
   );
 }
