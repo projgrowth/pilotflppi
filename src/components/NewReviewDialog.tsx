@@ -375,37 +375,51 @@ export function NewReviewDialog({
         .single();
       if (revErr) throw revErr;
 
-      // Hand off to the shared upload helper. We DO NOT await heavy
-      // rasterization before navigating — the workspace polls page assets and
-      // pipeline status itself, so the user gets there immediately.
-      void uploadPlanReviewFiles({
-        reviewId: review.id,
-        round: review.round ?? 1,
-        existingFileUrls: [],
-        existingPageCount: 0,
-        files: files.map((f) => f.file),
-        userId: user?.id ?? null,
-      })
-        .then((result) => {
-          for (const w of result.warnings) toast.warning(w);
-          if (result.partialRasterize) {
-            toast.error(
-              `Only ${result.pageAssetCount}/${result.expectedPages} pages prepared. Use "Prepare pages now" in the workspace.`,
-              { duration: 8000 },
-            );
-          } else if (result.pipelineStarted) {
-            toast.success("Analysis started");
-          }
-          queryClient.invalidateQueries({ queryKey: ["plan-review", review.id] });
-          queryClient.invalidateQueries({ queryKey: ["plan-review-page-asset-count", review.id] });
-        })
-        .catch((err) => {
-          toast.error(err instanceof Error ? err.message : "Upload failed in background");
+      // AWAIT the upload before navigating. Previously this was fire-and-
+      // forget (`void uploadPlanReviewFiles(...).then(...)`), which meant the
+      // promise was orphaned the moment we navigated. If the user reloaded,
+      // hit back, or React unmounted the dialog quickly, the upload was
+      // killed mid-flight and the workspace landed on an empty drop zone
+      // with no error.
+      //
+      // Blocking the dialog feels slower (~30s for typical sets) but it's
+      // 100% reliable AND the user still has their file picker contents in
+      // memory, so a failure here is recoverable without re-selecting.
+      try {
+        const result = await uploadPlanReviewFiles({
+          reviewId: review.id,
+          round: review.round ?? 1,
+          existingFileUrls: [],
+          existingPageCount: 0,
+          files: files.map((f) => f.file),
+          userId: user?.id ?? null,
+          onProgress: (p) => setSubmitProgress(p),
         });
+        for (const w of result.warnings) toast.warning(w);
+        if (result.partialRasterize) {
+          toast.error(
+            `Only ${result.pageAssetCount}/${result.expectedPages} pages prepared. Use "Prepare pages now" in the workspace.`,
+            { duration: 8000 },
+          );
+        } else if (result.pipelineStarted) {
+          toast.success("Analysis started");
+        }
+      } catch (uploadErr) {
+        // Upload failed — keep the dialog open so the user can retry without
+        // losing their selection. The plan_review row will be cleaned up by
+        // the reconcile-stuck-reviews cron if the user closes the dialog.
+        toast.error(uploadErr instanceof Error ? uploadErr.message : "Upload failed");
+        setSubmitProgress(null);
+        setSaving(false);
+        return;
+      }
 
+      queryClient.invalidateQueries({ queryKey: ["plan-review", review.id] });
+      queryClient.invalidateQueries({ queryKey: ["plan-review-page-asset-count", review.id] });
       queryClient.invalidateQueries({ queryKey: ["plan-reviews"] });
       queryClient.invalidateQueries({ queryKey: ["projects"] });
 
+      setSubmitProgress(null);
       onComplete?.(review.id, projectId);
       close();
       navigate(`/plan-review/${review.id}`, {
@@ -417,6 +431,7 @@ export function NewReviewDialog({
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create review");
+      setSubmitProgress(null);
       setSaving(false);
     }
   };
