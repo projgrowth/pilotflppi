@@ -311,6 +311,7 @@ export default function Projects() {
                     className={cn(
                       "group grid grid-cols-[28px_40px_1fr_100px_70px_90px_110px_70px_90px_28px_20px] gap-3 items-center px-5 py-3 hover:bg-muted/40 cursor-pointer transition-colors",
                       isSelected && "bg-primary/5 hover:bg-primary/10",
+                      project.deleted_at && "opacity-60",
                     )}
                   >
                     <div
