@@ -26,6 +26,7 @@ export interface ReadinessCheck {
     | "triage"
     | "citations"
     | "verifier_completion"
+    | "verifier_cannot_locate"
     | "sheet_refs"
     | "qc"
     | "project_dna"
