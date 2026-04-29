@@ -238,21 +238,7 @@ export default function PlanReviewDetail() {
       setReprepping(false);
     }
   }, [id, reprepping, queryClient]);
-  const letterHydratedRef = useRef<string | null>(null);
-
-  // Autosave the comment letter to the review row, debounced.
-  const { state: autosaveState, lastSavedAt } = useLetterAutosave(review?.id, commentLetter, !generatingLetter);
-
-  // Hydrate the letter draft once per review id (don't clobber in-flight stream).
-  useEffect(() => {
-    if (!review) return;
-    if (letterHydratedRef.current === review.id) return;
-    letterHydratedRef.current = review.id;
-    const draft = (review as { comment_letter_draft?: string }).comment_letter_draft;
-    if (typeof draft === "string" && draft.length > 0) {
-      setCommentLetter(draft);
-    }
-  }, [review?.id]);
+  // (Letter hydration + autosave moved to useCommentLetter.)
 
   const handleRepositionConfirm = useCallback(
     async (
