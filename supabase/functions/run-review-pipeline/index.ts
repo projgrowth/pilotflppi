@@ -298,6 +298,7 @@ Deno.serve(async (req) => {
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        const errName = err instanceof Error ? err.name : "";
 
         // LOW_YIELD_REVIEW: pipeline already wrote ai_check_status='needs_human_review'.
         if (message.includes("LOW_YIELD_REVIEW")) {
@@ -307,6 +308,41 @@ Deno.serve(async (req) => {
             metadata: { error_class: "LOW_YIELD_REVIEW" },
           });
           return;
+        }
+
+        // No-files-uploaded is a user error, not a transient pipeline failure.
+        // Skip the 3× retry loop and flip the review to needs_user_action so
+        // the upload re-prompt surfaces immediately.
+        if (errName === "NoFilesUploadedError" || stageToRun === "upload") {
+          if (errName === "NoFilesUploadedError" || message.toLowerCase().includes("no files uploaded")) {
+            await recordPipelineError(admin, {
+              planReviewId: plan_review_id,
+              firmId,
+              stage: "upload",
+              errorClass: "no_files_uploaded",
+              errorMessage: message,
+              severity: "warn",
+            });
+            await setStage(admin, plan_review_id, firmId, "upload", {
+              status: "error",
+              error_message:
+                "No PDF files have been uploaded yet. Re-upload the plan set to start the review.",
+              metadata: { error_class: "no_files_uploaded" },
+            });
+            await mergeProgress(admin, plan_review_id, {
+              failure_reason: "No PDF files have been uploaded for this plan review yet.",
+              needs_user_action_stage: "upload",
+              needs_user_action_at: new Date().toISOString(),
+            });
+            await admin
+              .from("plan_reviews")
+              .update({
+                ai_check_status: "needs_user_action",
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", plan_review_id);
+            return;
+          }
         }
 
         // prepare_pages is verify-only here. A throw means the manifest is
