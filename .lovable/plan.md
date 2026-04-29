@@ -1,38 +1,69 @@
-# Fix "Failed to create review" — grant EXECUTE on `user_firm_id`
+# Fix "Auto-fill timed out" — speed up title-block extraction
 
-## Root cause (confirmed in DB logs)
+## Root cause (confirmed in edge function logs)
 
-Every attempt to create a new plan review is failing with:
+The AI extraction call from `NewReviewDialog` is succeeding, but it's slow. Recent runs against `/functions/v1/ai`:
 
+| run | duration | status |
+|---|---|---|
+| 1 | 6.8 s | 200 |
+| 2 | 8.4 s | 200 |
+| 3 | **17.8 s** | 200 |
+| 4 | **18.7 s** | 200 |
+
+The client (`NewReviewDialog`) has a hard `EXTRACTION_TIMEOUT_MS = 20_000` race. Pro-tier multimodal latency is regularly bumping into that ceiling, so the toast "Auto-fill timed out — please fill the fields manually" fires even though the AI would have answered a second or two later.
+
+In `supabase/functions/ai/index.ts` the model selection is:
+```ts
+const model = isMultimodal ? "google/gemini-2.5-pro" : "google/gemini-2.5-flash";
 ```
-ERROR: permission denied for function user_firm_id
-```
-
-The helper function `public.user_firm_id(uuid)` is called by the RLS policies on `projects`, `plan_reviews`, and ~30 other firm-scoped tables. It exists and is `SECURITY DEFINER`, but EXECUTE was only granted to `postgres`, `service_role`, and `sandbox_exec` — **not to `authenticated`**. The sibling helper `has_role` was granted correctly; `user_firm_id` was missed.
-
-Result: as soon as Postgres evaluates the RLS `WITH CHECK` on `INSERT INTO projects`, it can't call the function, the insert aborts, and the dialog shows "Failed to create review".
+So `extract_project_info` (vision) gets routed to **Gemini 2.5 Pro**. Pro is the right call for full-sheet markup, but it's overkill for parsing a tiny rectangular title block — and it's the cause of the timeouts.
 
 ## Fix
 
-One migration, no schema change:
+Two small, surgical changes. No schema change, no new infra, no async job queue.
 
-```sql
-GRANT EXECUTE ON FUNCTION public.user_firm_id(uuid) TO authenticated, anon;
+### 1. Route the lightweight extractions to Flash (multimodal-capable)
+
+In `supabase/functions/ai/index.ts`, split the multimodal model choice:
+
+```ts
+// Title-block / zoning extraction → Flash (still vision-capable, ~3× faster).
+// Other multimodal (full sheet review) → Pro for fidelity.
+const FAST_MULTIMODAL_ACTIONS = new Set(["extract_project_info", "extract_zoning_data"]);
+const model = isMultimodal
+  ? (FAST_MULTIMODAL_ACTIONS.has(action) ? "google/gemini-2.5-flash" : "google/gemini-2.5-pro")
+  : "google/gemini-2.5-flash";
 ```
 
-That's it. No policy edits, no table changes, no app code changes.
+Why Flash is fine here:
+- The input is a single small cropped image (the title block), not a full plan sheet.
+- The output is a strict JSON tool call with ~5 short string fields.
+- We've already pinned `temperature = 0` for these actions, so determinism is preserved.
+- The downstream pipeline (where Pro fidelity actually matters — full sheet markup, finding extraction) is unchanged.
 
-## Why this is safe
+Expected p95 latency drops from ~18s to ~5–7s.
 
-- `user_firm_id` is `SECURITY DEFINER` and only returns the caller's own `firm_id` from `firm_members` — it does not expose anyone else's data.
-- `has_role` is already granted to `authenticated` with the same pattern; this brings `user_firm_id` in line.
-- All existing RLS rules continue to enforce firm scoping; we're only allowing the policy machinery to *call* its helper.
+### 2. Give the client a little more headroom
 
-## Verification after apply
+In `src/components/NewReviewDialog.tsx`, raise the timeout from 20s to 35s:
 
-1. Open New Plan Review, drop a PDF, click **Start review** → review should be created and the workspace should open.
-2. Re-run the DB error log query; the `permission denied for function user_firm_id` errors should stop.
+```ts
+const EXTRACTION_TIMEOUT_MS = 35_000;
+```
 
-## Files
+Even after the model swap, an occasional cold start or upstream hiccup can still push past 20s. 35s is comfortably under the edge function wall-clock cap and well within what users will tolerate while the visible "Reading your plans…" banner is showing. The banner copy already says "Usually 5–15 seconds" so the perceived experience doesn't change for happy-path runs; only timeouts get rarer.
 
-- One new migration in `supabase/migrations/` containing the GRANT above. No client code changes.
+## Why not async / job queue
+
+The Lovable Stack Overflow snippet suggests a polling job pattern. We don't need it here:
+- The work is sub-30 seconds, not minutes.
+- The user is staring at a modal with a live progress banner — polling would add complexity and a new `autofill_jobs` table for no UX win.
+- The edge function already returns synchronously and successfully; the only failure mode is the **client-side** timeout being too tight for the **model** we chose.
+
+## Files touched
+
+- `supabase/functions/ai/index.ts` — 4-line model-selection change.
+- `src/components/NewReviewDialog.tsx` — 1-line constant change.
+
+No migrations, no new packages, no other components affected.
