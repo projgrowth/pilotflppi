@@ -131,7 +131,17 @@ async function startPipeline(planReviewId: string, mode: string): Promise<{ ok: 
 async function reconcileOne(admin: AdminLike, row: StuckRow, nowMs: number) {
   const idleMs = nowMs - new Date(row.updated_at).getTime();
   const minutesIdle = Math.round(idleMs / 60000);
-  const lastStage = await findLastStage(admin, row.id);
+  const { stage: lastStage, heartbeatAt } = await findLastStage(admin, row.id);
+
+  // HEARTBEAT BYPASS: if the active stage emitted a heartbeat in the last
+  // 5 minutes, it's still alive (likely a long AI chunk). Don't reset it
+  // just because plan_reviews.updated_at is older than 15 min.
+  if (heartbeatAt) {
+    const heartbeatAgeMs = nowMs - new Date(heartbeatAt).getTime();
+    if (heartbeatAgeMs < 5 * 60 * 1000) {
+      return { id: row.id, action: "alive" as const, lastStage, minutesIdle: Math.round(heartbeatAgeMs / 60000) };
+    }
+  }
 
   const progress = row.ai_run_progress ?? {};
   const recoveryCount =
