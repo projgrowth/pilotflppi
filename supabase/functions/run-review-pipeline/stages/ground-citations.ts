@@ -118,6 +118,14 @@ export async function stageGroundCitations(
     .neq("verification_status", "superseded");
   if (error) throw error;
 
+  // Fetch firm_id once for audit logging in citation_corrections.
+  const { data: prRow } = await admin
+    .from("plan_reviews")
+    .select("firm_id")
+    .eq("id", planReviewId)
+    .maybeSingle();
+  const firmId = (prRow?.firm_id as string | null) ?? null;
+
   const defs = (defsRaw ?? []) as GroundingRow[];
   if (defs.length === 0) {
     return {
