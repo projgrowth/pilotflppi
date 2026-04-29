@@ -440,6 +440,71 @@ export default function PlanReviewDetail() {
   const hasFindings = findings.length > 0;
   const openDashboard = () => navigate(`/plan-review/${review.id}/dashboard`);
 
+  // ── Single "what's next" CTA ──────────────────────────────────────────
+  // Replaces the previous stack of competing banners (inline prepare strip,
+  // SubmittalIncompleteBanner, StuckRecoveryBanner's prepare CTA, the
+  // 3-second completion flash). Priority ladder lives in
+  // `src/lib/review-next-step.ts` so it's testable.
+  const aiRunProgress =
+    ((review as unknown as { ai_run_progress?: Record<string, unknown> | null }).ai_run_progress ?? null);
+  const nextStep = selectNextStep({
+    hasDocuments,
+    pipelineProcessing,
+    pageAssetCount,
+    expectedPages: typeof aiRunProgress?.expected_pages === "number" ? aiRunProgress.expected_pages : null,
+    preparePagesErrored,
+    hasFatalPipelineError: hasFatalError,
+    aiRunProgress,
+    aiCheckStatus: review.ai_check_status,
+    qcStatus: review.qc_status,
+    hasCommentLetterDraft: !!review.comment_letter_draft,
+    letterSentAt: (review as unknown as { last_sent_at?: string | null }).last_sent_at ?? null,
+    findings,
+  });
+  const handleNextStepPrimary = () => {
+    switch (nextStep.kind) {
+      case "upload_failed":
+        fileInputRef.current?.click();
+        break;
+      case "needs_preparation":
+      case "partial_rasterize":
+        handleReprepareInBrowser();
+        break;
+      case "pipeline_error":
+        runAICheck();
+        break;
+      case "needs_human_review":
+        openDashboard();
+        break;
+      case "submittal_incomplete": {
+        const idx = findings.findIndex((fnd) => /SUB001/.test(fnd.code_ref || ""));
+        if (idx >= 0) {
+          setActiveFindingIndex(idx);
+          setRightPanel("findings");
+          findingRefs.current.get(idx)?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+        break;
+      }
+      case "dna_unconfirmed":
+        openDashboard();
+        break;
+      case "findings_ready_no_letter":
+      case "complete":
+        setRightPanel("letter");
+        if (!commentLetter && !generatingLetter) generateCommentLetter(review);
+        break;
+      case "letter_ready_to_send":
+        setRightPanel("letter");
+        break;
+      case "sent_awaiting_resub":
+        createNewRound();
+        break;
+    }
+  };
+  const handleNextStepSecondary = () => {
+    if (nextStep.secondaryLabel === "Open dashboard") openDashboard();
+  };
+
   const projectName = review.project?.name || "this review";
   const handleDeleteReview = async () => {
     if (!user || !review) return;
