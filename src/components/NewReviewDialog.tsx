@@ -62,7 +62,7 @@ const SERVICES = [
 
 const MAX_TOTAL_UPLOAD_MB = 80;
 const MAX_TOTAL_PAGES = 120;
-const EXTRACTION_TIMEOUT_MS = 20_000;
+const EXTRACTION_TIMEOUT_MS = 35_000;
 
 type UseType = "commercial" | "residential";
 
