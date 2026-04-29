@@ -50,7 +50,8 @@ export default function Projects() {
   const [search, setSearch] = useState("");
   const [countyFilter, setCountyFilter] = useState("all");
   const [sortBy, setSortBy] = useState<"newest" | "deadline" | "activity">("activity");
-  const { data: projects, isLoading } = useProjects();
+  const [showDeleted, setShowDeleted] = useState(false);
+  const { data: projects, isLoading } = useProjects({ includeDeleted: showDeleted });
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
