@@ -81,7 +81,12 @@ export function PlanViewerPanel(props: Props) {
     }
   };
 
-  if (!props.hasDocuments) {
+  // Bootstrapping: review was just created, files are uploading via background
+  // task. Don't show the empty drop zone — show the processing overlay so the
+  // user sees continuous motion from the moment they hit Create Project.
+  const isBootstrapping = !!props.pipelineProcessing && !!props.planReviewId;
+
+  if (!props.hasDocuments && !isBootstrapping) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div
@@ -130,6 +135,10 @@ export function PlanViewerPanel(props: Props) {
       {showProcessing && (
         <ProcessingOverlay
           planReviewId={props.planReviewId!}
+          phase={props.processingPhase ?? "analyzing"}
+          preparedPages={props.preparedPages}
+          expectedPages={props.expectedPages}
+          fileCount={props.pendingFileCount}
           onComplete={props.onPipelineComplete}
           onOpenDashboard={props.onOpenDashboard}
         />
