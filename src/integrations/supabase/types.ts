@@ -1647,6 +1647,7 @@ export type Database = {
           id: string
           metadata: Json
           plan_review_id: string
+          severity: string
           stage: string
         }
         Insert: {
@@ -1658,6 +1659,7 @@ export type Database = {
           id?: string
           metadata?: Json
           plan_review_id: string
+          severity?: string
           stage: string
         }
         Update: {
@@ -1669,6 +1671,7 @@ export type Database = {
           id?: string
           metadata?: Json
           plan_review_id?: string
+          severity?: string
           stage?: string
         }
         Relationships: [
