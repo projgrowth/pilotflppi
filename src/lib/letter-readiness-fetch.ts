@@ -26,12 +26,15 @@ export async function fetchReadinessForSend(args: {
   specialInspectorDesignated: boolean;
   reviewerLicensedDisciplines: string[];
   projectDnaMissingFields: string[];
+  /** Wave 6: DNA coastal flag + whether the county registry already covers it. */
+  dnaIsCoastal?: boolean | null;
+  countyAlreadyCoastal?: boolean;
 }): Promise<ReadinessResult> {
   const [{ data: rows }, { data: cov }, { data: firmRow }] = await Promise.all([
     supabase
       .from("deficiencies_v2")
       .select(
-        "id,reviewer_disposition,status,verification_status,citation_status,confidence_score,evidence_crop_meta,discipline",
+        "id,reviewer_disposition,reviewer_disposition_at,updated_at,status,verification_status,citation_status,confidence_score,evidence_crop_meta,discipline",
       )
       .eq("plan_review_id", args.planReviewId)
       .limit(2000),
@@ -49,6 +52,8 @@ export async function fetchReadinessForSend(args: {
   const findings = (rows ?? []) as Array<{
     id: string;
     reviewer_disposition: string | null;
+    reviewer_disposition_at: string | null;
+    updated_at: string | null;
     status: string;
     verification_status: string;
     citation_status: string;
@@ -86,5 +91,7 @@ export async function fetchReadinessForSend(args: {
     coveragePct,
     blockLetterOnLowCoverage: firmRow?.block_letter_on_low_coverage ?? true,
     blockLetterOnUngrounded: firmRow?.block_letter_on_ungrounded ?? true,
+    dnaIsCoastal: args.dnaIsCoastal ?? null,
+    countyAlreadyCoastal: args.countyAlreadyCoastal ?? false,
   });
 }
