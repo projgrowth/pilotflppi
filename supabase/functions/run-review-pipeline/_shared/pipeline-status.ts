@@ -68,6 +68,23 @@ export async function setStage(
  * Best-effort — never throws (a failed insert can't be allowed to mask the
  * real stage error that triggered this call).
  */
+// Severity buckets so the dashboard can separate real failures from cost
+// telemetry / progress markers / advisory notes. Default mapping below; any
+// caller can pass `severity` explicitly to override.
+type Severity = "info" | "warn" | "error";
+
+const SEVERITY_BY_CLASS: Record<string, Severity> = {
+  cost_metric: "info",
+  chunk_summary: "info",
+  chunk_resume: "info",
+  storage_cleanup: "info",
+  rasterize_partial: "info",
+  soft_timeout: "warn",
+  stuck_no_progress: "warn",
+  dispatch_failed: "warn",
+  needs_browser_rasterization: "warn",
+};
+
 export async function recordPipelineError(
   admin: Admin,
   args: {
@@ -78,8 +95,11 @@ export async function recordPipelineError(
     errorMessage: string;
     attemptCount?: number;
     metadata?: Record<string, unknown>;
+    severity?: Severity;
   },
 ): Promise<void> {
+  const severity: Severity =
+    args.severity ?? SEVERITY_BY_CLASS[args.errorClass] ?? "error";
   try {
     await admin.from("pipeline_error_log").insert({
       plan_review_id: args.planReviewId,
@@ -89,6 +109,7 @@ export async function recordPipelineError(
       error_message: (args.errorMessage ?? "").slice(0, 4000),
       attempt_count: args.attemptCount ?? 1,
       metadata: args.metadata ?? {},
+      severity,
     });
   } catch (err) {
     console.error("[pipeline_error_log] insert failed:", err);
