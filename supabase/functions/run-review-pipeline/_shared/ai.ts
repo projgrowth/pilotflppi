@@ -10,8 +10,13 @@ export async function callAI(
   messages: ChatMessage[],
   toolSchema?: Record<string, unknown>,
   model = "google/gemini-2.5-flash",
+  // Audit C-04: every pipeline AI call (discipline_review, critic, challenger,
+  // cross_check, verify, dedupe, ground-citations) is a code-compliance
+  // judgment — must be deterministic. Default to 0; callers may override
+  // for narrative tasks if any are added later.
+  temperature = 0,
 ) {
-  const body: Record<string, unknown> = { model, messages };
+  const body: Record<string, unknown> = { model, messages, temperature };
   if (toolSchema) {
     body.tools = [{ type: "function", function: toolSchema }];
     body.tool_choice = {
