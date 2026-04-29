@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { callAI } from "@/lib/ai";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { Radar, Loader2 } from "lucide-react";
@@ -145,9 +145,10 @@ export default function LeadRadar() {
 
  <Dialog open={emailDialogOpen} onOpenChange={setEmailDialogOpen}>
  <DialogContent className="sm:max-w-xl">
- <DialogHeader>
- <DialogTitle>Outreach Email Preview</DialogTitle>
- </DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Outreach Email Preview</DialogTitle>
+            <DialogDescription>Review the draft outreach email before copying or sending.</DialogDescription>
+          </DialogHeader>
  <div className="rounded-lg border bg-muted/30 p-4 text-sm whitespace-pre-wrap max-h-96 overflow-y-auto">
  {emailContent}
  </div>

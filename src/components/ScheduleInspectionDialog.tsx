@@ -2,7 +2,7 @@ import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useProjects } from "@/hooks/useProjects";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -75,9 +75,10 @@ export function ScheduleInspectionDialog({ open, onOpenChange, projectId }: Prop
  return (
  <Dialog open={open} onOpenChange={handleOpenChange}>
  <DialogContent className="sm:max-w-md">
- <DialogHeader>
- <DialogTitle>Schedule Inspection</DialogTitle>
- </DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Schedule Inspection</DialogTitle>
+            <DialogDescription>Pick a date and inspection type to add to the project schedule.</DialogDescription>
+          </DialogHeader>
  <div className="space-y-4">
  {!projectId && (
  <div className="space-y-2">
