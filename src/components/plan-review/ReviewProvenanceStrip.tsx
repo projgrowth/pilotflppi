@@ -245,14 +245,14 @@ export function ReviewProvenanceStrip({ planReviewId, progress }: Props) {
           onClick={handleRegroup}
           disabled={regrouping}
           className="ml-auto h-6 px-2 text-2xs gap-1"
-          title="Re-run citation grounding + verification on all open findings"
+          title="Re-check FBC citation matches for every open finding"
         >
           {regrouping ? (
             <Loader2 className="h-3 w-3 animate-spin" />
           ) : (
             <RefreshCw className="h-3 w-3" />
           )}
-          {regrouping ? "Re-grounding…" : "Re-ground citations"}
+          {regrouping ? "Rechecking…" : "Recheck all citations"}
         </Button>
       )}
     </div>
