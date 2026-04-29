@@ -16,6 +16,7 @@
  * Hard-blocked when a comment_letter_snapshot has been sent (legal record).
  */
 import { supabase } from "@/integrations/supabase/client";
+import { normalizeStorageKey } from "@/lib/storage-paths";
 
 export interface DeletePlanReviewResult {
   filesRemoved: number;
@@ -49,7 +50,7 @@ export async function deletePlanReview(
     .eq("plan_review_id", planReviewId)
     .is("deleted_at", null);
   if (filesErr) throw filesErr;
-  const filePaths = (files ?? []).map((f) => f.file_path);
+  const filePaths = (files ?? []).map((f) => normalizeStorageKey(f.file_path));
   if (filePaths.length > 0) {
     const { error: rmErr } = await supabase.storage.from("documents").remove(filePaths);
     if (rmErr) console.warn("[delete-plan-review] file remove failed", rmErr.message);
@@ -126,10 +127,11 @@ export async function deletePlanReviewFile(
   filePath: string,
   userId: string,
 ): Promise<void> {
+  const key = normalizeStorageKey(filePath);
   // Remove storage object first so a partial failure leaves an orphan row,
   // not an orphan blob (the cleanup cron handles orphan rows; orphan blobs are
   // invisible).
-  const { error: rmErr } = await supabase.storage.from("documents").remove([filePath]);
+  const { error: rmErr } = await supabase.storage.from("documents").remove([key]);
   if (rmErr) console.warn("[delete-plan-review-file] storage remove failed", rmErr.message);
 
   const { error } = await supabase

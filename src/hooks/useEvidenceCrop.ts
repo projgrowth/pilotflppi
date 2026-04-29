@@ -16,6 +16,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { generateEvidenceCrop, type EvidenceCropResult } from "@/lib/evidence-crop";
+import { normalizeStorageKey } from "@/lib/storage-paths";
 
 interface ResolveOpts {
   planReviewId: string;
@@ -33,19 +34,20 @@ const fileCache = new Map<string, Promise<FetchedPdf>>();
 const cropCache = new Map<string, EvidenceCropResult>();
 
 async function fetchPdf(filePath: string): Promise<FetchedPdf> {
-  const cached = fileCache.get(filePath);
+  const key = normalizeStorageKey(filePath);
+  const cached = fileCache.get(key);
   if (cached) return cached;
   const promise = (async () => {
     const { data, error } = await supabase.storage
       .from("documents")
-      .createSignedUrl(filePath, 60 * 60);
+      .createSignedUrl(key, 60 * 60);
     if (error || !data?.signedUrl) {
       throw new Error(error?.message ?? "Could not sign PDF URL");
     }
     const res = await fetch(data.signedUrl);
     if (!res.ok) throw new Error(`Fetch PDF failed: ${res.status}`);
     const blob = await res.blob();
-    const file = new File([blob], filePath.split("/").pop() ?? "plan.pdf", {
+    const file = new File([blob], key.split("/").pop() ?? "plan.pdf", {
       type: "application/pdf",
     });
     // We need numPages for the upload-order page resolution. Use pdf.js header parse only.
@@ -54,7 +56,7 @@ async function fetchPdf(filePath: string): Promise<FetchedPdf> {
     const doc = await pdfjsLib.getDocument({ data: ab }).promise;
     return { file, numPages: doc.numPages };
   })();
-  fileCache.set(filePath, promise);
+  fileCache.set(key, promise);
   return promise;
 }
 

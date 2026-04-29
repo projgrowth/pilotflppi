@@ -7,6 +7,7 @@
  * the source file is part of the legal record at that point.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { normalizeStorageKey } from "@/lib/storage-paths";
 
 export interface DeleteFileArgs {
   planReviewId: string;
@@ -62,7 +63,7 @@ export async function deletePlanReviewFile(
     .is("deleted_at", null);
 
   // 4. Remove from storage (best-effort).
-  await supabase.storage.from("documents").remove([args.filePath]);
+  await supabase.storage.from("documents").remove([normalizeStorageKey(args.filePath)]);
 
   // 5. Rewrite plan_reviews.file_urls.
   const { error: updErr } = await supabase

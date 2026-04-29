@@ -156,11 +156,12 @@ export async function reprepareInBrowser(reviewId: string): Promise<ReprepareRes
   const sources: SourceFile[] = [];
   let runningStart = 0;
   for (const r of sourcePdfs) {
-    const ok = await downloadAndValidate(r.file_path, warnings);
+    const key = normalizeStorageKey(r.file_path);
+    const ok = await downloadAndValidate(key, warnings);
     if (!ok) continue;
     sources.push({
-      name: r.file_path.split("/").pop() ?? "plan.pdf",
-      storagePath: r.file_path,
+      name: key.split("/").pop() ?? "plan.pdf",
+      storagePath: key,
       file: ok.file,
       pageCount: ok.pageCount,
       globalStart: runningStart,
