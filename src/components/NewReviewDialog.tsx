@@ -453,12 +453,35 @@ export function NewReviewDialog({
               ))}
               <p className="text-[11px] text-muted-foreground">
                 {files.length} file(s) · {totalPages} pages
-                {extracting && (
-                  <span className="ml-2 inline-flex items-center gap-1 text-accent">
-                    <Sparkles className="h-3 w-3 animate-pulse" /> AI auto-filling…
-                  </span>
-                )}
               </p>
+            </div>
+          )}
+
+          {/* AI extraction banner — prominent so users know we're working */}
+          {extracting && (
+            <div className="rounded-lg border border-accent/40 bg-accent/5 p-3">
+              <div className="flex items-start gap-2.5">
+                <Sparkles className="h-4 w-4 text-accent shrink-0 mt-0.5 animate-pulse" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-foreground">Reading your plans…</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    AI is extracting the project name, address, county and trade from the title block. Usually 5–15 seconds — you can keep filling in fields while we work.
+                  </p>
+                  <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-accent/15">
+                    <div className="h-full w-1/3 rounded-full bg-accent/70 animate-[slide-in-right_1.6s_ease-in-out_infinite]" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          {!extracting && extractDoneCount !== null && extractDoneCount > 0 && (
+            <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 animate-fade-in">
+              <div className="flex items-center gap-2">
+                <Check className="h-4 w-4 text-accent shrink-0" />
+                <p className="text-sm font-medium text-foreground">
+                  Auto-filled {extractDoneCount} field{extractDoneCount === 1 ? "" : "s"} — please review before submitting.
+                </p>
+              </div>
             </div>
           )}
 
