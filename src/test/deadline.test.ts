@@ -89,3 +89,55 @@ describe("getStatutoryStatus", () => {
     expect(s.isDeemedApproved).toBe(true);
   });
 });
+
+describe("paused-clock math (F.S. 553.791 banked days)", () => {
+  // Use a fixed week: Mon Jan 6 → Fri Jan 10, 2025 (5 business days, no holidays).
+  it("subtracts a closed pause interval from gross elapsed", () => {
+    const start = "2025-01-06T09:00:00Z"; // Monday
+    const asOf = new Date("2025-01-13T09:00:00Z"); // following Monday → 5 BD gross
+    const history: ClockPauseEvent[] = [
+      { event: "pause", at: "2025-01-08T09:00:00Z" }, // Wed
+      { event: "resume", at: "2025-01-10T09:00:00Z" }, // Fri (2 BD banked: Wed, Thu)
+    ];
+    const gross = getBusinessDaysElapsed(start, asOf);
+    const paused = getPausedBusinessDays(start, asOf, history, null);
+    const net = getNetBusinessDaysElapsed(start, asOf, history, null);
+    expect(gross).toBe(5);
+    expect(paused).toBe(2);
+    expect(net).toBe(3);
+  });
+
+  it("ignores currently-open pause when current asOf is at the pause moment", () => {
+    // Currently paused: history has trailing 'pause' AND review_clock_paused_at is set.
+    // Caller passes asOf = pausedAt, so no double counting.
+    const start = "2025-01-06T09:00:00Z";
+    const pausedAt = "2025-01-08T09:00:00Z";
+    const history: ClockPauseEvent[] = [{ event: "pause", at: pausedAt }];
+    const net = getNetBusinessDaysElapsed(start, new Date(pausedAt), history, pausedAt);
+    // Tue (one BD elapsed before Wed pause)
+    expect(net).toBe(2);
+  });
+
+  it("getStatutoryStatus respects banked days when resumed", () => {
+    const start = "2025-01-06T09:00:00Z";
+    const history: ClockPauseEvent[] = [
+      { event: "pause", at: "2025-01-08T09:00:00Z" },
+      { event: "resume", at: "2025-01-10T09:00:00Z" },
+    ];
+    // Use a fixed asOf via clock_paused_at trick: pretend "now" by re-pausing.
+    const s = getStatutoryStatus({
+      status: "plan_review",
+      review_clock_started_at: start,
+      review_clock_paused_at: "2025-01-13T09:00:00Z",
+      clock_pause_history: [
+        ...history,
+        { event: "pause", at: "2025-01-13T09:00:00Z" },
+      ],
+      statutory_review_days: 30,
+    });
+    // Mon→Mon = 5 BD gross, minus Wed+Thu pause = 3 BD used.
+    expect(s.reviewDaysUsed).toBe(3);
+    expect(s.reviewDaysRemaining).toBe(27);
+    expect(s.clockRunning).toBe(false);
+  });
+});
