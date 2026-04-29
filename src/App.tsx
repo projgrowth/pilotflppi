@@ -27,7 +27,22 @@ import Analytics from "./pages/Analytics";
 import Jurisdictions from "./pages/Jurisdictions";
 import PipelineActivity from "./pages/PipelineActivity";
 
-const queryClient = new QueryClient();
+// Sane defaults so reviewers don't see findings flicker every time they alt-tab
+// to their PDF viewer and back. staleTime keeps results warm; refetchOnWindowFocus
+// off prevents the focus-thrash; bounded retry stops infinite back-off loops on
+// transient Supabase errors during a triage burst.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+      retry: 2,
+    },
+    mutations: {
+      retry: 1,
+    },
+  },
+});
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth();
