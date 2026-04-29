@@ -12,7 +12,7 @@ import { createClient } from "../_shared/supabase.ts";
 import { callAI } from "../_shared/ai.ts";
 import { embedText } from "../_shared/embedding.ts";
 import { signedSheetUrls } from "../_shared/storage.ts";
-import { recordPipelineError } from "../_shared/pipeline-status.ts";
+import { recordPipelineError, heartbeat } from "../_shared/pipeline-status.ts";
 import {
   DISCIPLINES,
   normalizeAIDiscipline,
@@ -774,6 +774,9 @@ export async function stageDisciplineReview(
         })
         .eq("id", planReviewId);
       lastBeaconAt = Date.now();
+      // Bump per-stage heartbeat so the watchdog sees this stage as alive
+      // even if a single chunk takes >5 minutes.
+      void heartbeat(admin, planReviewId, "discipline_review");
     } catch (err) {
       console.error("[discipline_review] progress write failed:", err);
     }
