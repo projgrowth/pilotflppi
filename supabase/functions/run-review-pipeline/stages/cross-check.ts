@@ -209,6 +209,8 @@ async function runCrossSheetConsistency(
         { role: "user", content },
       ],
       CROSS_SHEET_SCHEMA as unknown as Record<string, unknown>,
+      "google/gemini-2.5-flash",
+      0,
     )) as typeof result;
   } catch (err) {
     console.error("[cross_sheet_consistency] AI call failed:", err);
@@ -607,6 +609,7 @@ async function runCrossDisciplineConflicts(
       ],
       CROSS_DISC_SCHEMA as unknown as Record<string, unknown>,
       "google/gemini-2.5-flash",
+      0,
     )) as typeof result;
   } catch (err) {
     console.error("[cross_discipline] AI call failed:", err);
