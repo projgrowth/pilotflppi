@@ -1013,6 +1013,8 @@ export default function PlanReviewDetail() {
                 preparedPages={uploadProgress?.prepared ?? pageAssetCount}
                 expectedPages={uploadProgress?.expected ?? justCreatedState?.pendingPageCount ?? 0}
                 pendingFileCount={justCreatedState?.pendingFileCount ?? fileUrls.length}
+                projectName={review.project?.name}
+                pendingFileNames={fileUrls.map((u) => decodeURIComponent(u.split("/").pop() || ""))}
                 onPipelineComplete={handlePipelineComplete}
                 onOpenDashboard={openDashboard}
                 planReviewId={review.id}
@@ -1095,6 +1097,8 @@ export default function PlanReviewDetail() {
                 preparedPages={uploadProgress?.prepared ?? pageAssetCount}
                 expectedPages={uploadProgress?.expected ?? justCreatedState?.pendingPageCount ?? 0}
                 pendingFileCount={justCreatedState?.pendingFileCount ?? fileUrls.length}
+                projectName={review.project?.name}
+                pendingFileNames={fileUrls.map((u) => decodeURIComponent(u.split("/").pop() || ""))}
                 onPipelineComplete={handlePipelineComplete}
                 onOpenDashboard={openDashboard}
                 findings={findings}
