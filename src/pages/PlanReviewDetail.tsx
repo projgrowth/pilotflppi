@@ -804,38 +804,32 @@ export default function PlanReviewDetail() {
           phase={uploadProgress?.phase}
         />
       )}
-      {preparePagesErrored && (
-        <div className="shrink-0 border-b border-destructive/30 bg-destructive/5 px-4 py-2 flex items-center gap-3">
-          <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
-
-          <div className="flex-1 min-w-0">
-            <span className="text-2xs font-semibold text-destructive uppercase tracking-wide mr-2">
-              Pages not prepared
-            </span>
-            <span className="text-xs text-foreground/80">
-              The server can't rasterize PDFs — your browser will render them locally and restart the pipeline.
-            </span>
-          </div>
-          <Button
-            size="sm"
-            variant="default"
-            onClick={handleReprepareInBrowser}
-            disabled={reprepping}
-            className="h-7 text-xs"
-          >
-            {reprepping ? (
-              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Wand2 className="mr-1 h-3.5 w-3.5" />
-            )}
-            {reprepping ? "Re-preparing…" : "Re-prepare in browser"}
-          </Button>
+      {/* Single prioritized "next step" rail. Replaces the previous stack of
+          competing CTAs (inline prepare strip, SubmittalIncompleteBanner, and
+          StuckRecoveryBanner's prepare CTA). Selector lives in
+          src/lib/review-next-step.ts. */}
+      {nextStep.kind !== "idle" || nextStep.ctaLabel ? (
+        <div className="shrink-0 px-4 pt-2">
+          <ReviewNextStepRail
+            step={nextStep}
+            busy={reprepping || aiRunning}
+            onPrimary={handleNextStepPrimary}
+            onSecondary={handleNextStepSecondary}
+          />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf"
+            multiple
+            className="hidden"
+            onChange={(e) => handleFileUpload(e.target.files)}
+          />
         </div>
-      )}
+      ) : null}
 
-      {/* Auto-recovery notice — set by the reconcile-stuck-reviews cron when
-          this review was wedged and the cron resumed it. Pure presentation;
-          dismissible via localStorage. */}
+      {/* StuckRecoveryBanner now only carries the diagnostic / informational
+          variants (auto-recovery success, needs_human_review breakdown). The
+          prepare-pages CTA was folded into the rail above. */}
       {(() => {
         const progress = ((review as unknown as { ai_run_progress?: Record<string, unknown> }).ai_run_progress ?? {}) as Record<string, unknown>;
         const status = (review as unknown as { ai_check_status?: string }).ai_check_status ?? null;
@@ -858,27 +852,11 @@ export default function PlanReviewDetail() {
                     })
                   : null
               }
-              needsPreparation={fileUrls.length > 0 && pageAssetCount === 0 && !uploading}
-              onPrepareNow={handleReprepareInBrowser}
-              preparingNow={reprepping}
+              needsPreparation={false}
             />
           </div>
         );
       })()}
-
-      {/* Submittal completeness banner — surfaces the result of the new
-          `submittal_check` pipeline stage when required disciplines are
-          missing from the uploaded sheet set. */}
-      <SubmittalIncompleteBanner
-        progress={(review as unknown as { ai_run_progress?: Record<string, unknown> }).ai_run_progress ?? null}
-        onViewFinding={() => {
-          const idx = findings.findIndex((f) => f.code_ref === "DEF-SUB001" || /SUB001/.test(f.code_ref || ""));
-          if (idx >= 0) {
-            setActiveFindingIndex(idx);
-            findingRefs.current.get(idx)?.scrollIntoView({ behavior: "smooth", block: "center" });
-          }
-        }}
-      />
 
       {/* DNA confirm card — surfaces a 30-second human sanity check after
           dna_extract completes and before the reviewer dives into findings.
