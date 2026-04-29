@@ -18,7 +18,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 // streamAI now consumed by useCommentLetter
 import { useFirmSettings } from "@/hooks/useFirmSettings";
@@ -53,11 +53,12 @@ import { getStatutoryStatus } from "@/lib/statutory-deadlines";
 import type { PlanReviewRow, ProjectInfo } from "@/types";
 import { usePlanReviewData } from "@/hooks/plan-review/usePlanReviewData";
 import { useCommentLetter } from "@/hooks/plan-review/useCommentLetter";
+import { useUploadAndPrepare } from "@/hooks/plan-review/useUploadAndPrepare";
 import { useFindingFilters, useRoundDiff } from "@/hooks/plan-review/useFindingFilters";
 import { useFindingStatuses } from "@/hooks/plan-review/useFindingStatuses";
 import { usePdfPageRender } from "@/hooks/plan-review/usePdfPageRender";
 import { usePipelineStatus } from "@/hooks/useReviewDashboard";
-import { reprepareInBrowser } from "@/lib/reprepare-in-browser";
+// reprepareInBrowser now consumed by useUploadAndPrepare
 import { StuckRecoveryBanner } from "@/components/plan-review/StuckRecoveryBanner";
 import { RoundCarryoverPanel } from "@/components/plan-review/RoundCarryoverPanel";
 import { UploadProgressBar } from "@/components/plan-review/UploadProgressBar";
@@ -117,38 +118,35 @@ export default function PlanReviewDetail() {
   // failure (Edge can't rasterize PDFs reliably). Surface a banner so reviewers
   // can recover without leaving this page.
   const { data: pipeRows = [] } = usePipelineStatus(id);
-  const preparePagesErrored = (() => {
-    const row = pipeRows.find((r) => r.stage === "prepare_pages");
-    if (!row || row.status !== "error") return false;
-    const meta = (row as unknown as { metadata?: { error_class?: string } })?.metadata;
-    const msg = (row.error_message ?? "").toLowerCase();
-    return (
-      meta?.error_class === "needs_browser_rasterization" ||
-      msg.includes("re-prepare") ||
-      msg.includes("haven't been prepared")
-    );
-  })();
-
-  // Live page-asset count drives the "needs preparation" banner — when files
-  // are uploaded but no rasterized pages exist yet, the pipeline cannot run
-  // and we need to nudge the user to prepare before they hit "Re-Analyze".
-  const { data: pageAssetCount = 0 } = useQuery({
-    queryKey: ["plan-review-page-asset-count", id],
-    queryFn: async () => {
-      if (!id) return 0;
-      const { count } = await supabase
-        .from("plan_review_page_assets")
-        .select("id", { count: "exact", head: true })
-        .eq("plan_review_id", id);
-      return count ?? 0;
+  // Upload + prepare-pages flow lives in useUploadAndPrepare. The
+  // hasAutoRendered ref is declared up here so the upload-complete callback
+  // can reset it before resetPages() — keeps re-render of fresh uploads
+  // deterministic without bouncing through a ref-via-effect dance.
+  const hasAutoRendered = useRef(false);
+  const {
+    uploading,
+    uploadProgress,
+    uploadSuccess,
+    pageAssetCount,
+    preparePagesErrored,
+    reprepping,
+    handleFileUpload,
+    handleReprepareInBrowser,
+  } = useUploadAndPrepare({
+    reviewId: id,
+    review,
+    userId: user?.id,
+    pipeRows: pipeRows as Parameters<typeof useUploadAndPrepare>[0]["pipeRows"],
+    navigateToDashboard: (rid) => navigate(`/plan-review/${rid}/dashboard`),
+    onUploadComplete: () => {
+      hasAutoRendered.current = false;
+      resetPages();
     },
-    enabled: !!id,
-    refetchInterval: 5000,
   });
 
   // ── UI state ───────────────────────────────────────────────────────────
   // Comment-letter state lives in useCommentLetter — see below where review/findings are wired up.
-  const [uploading, setUploading] = useState(false);
+  // (uploading/uploadSuccess/reprepping/uploadProgress moved to useUploadAndPrepare.)
   const [rightPanel, setRightPanel] = useState<RightPanelMode>("findings");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeFindingIndex, setActiveFindingIndex] = useState<number | null>(null);
@@ -159,7 +157,6 @@ export default function PlanReviewDetail() {
   const [sheetFilter, setSheetFilter] = useState<string | "all">("all");
   const [qualityFilter, setQualityFilter] = useState<QualityFilter>("all");
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
-  const [uploadSuccess, setUploadSuccess] = useState(false);
   const [repositioningIndex, setRepositioningIndex] = useState<number | null>(null);
   // showShortcuts removed — workspace shortcuts surface via the dashboard's TriageShortcutsOverlay.
   const [lintIssues, setLintIssues] = useState<LintIssue[]>([]);
@@ -169,14 +166,8 @@ export default function PlanReviewDetail() {
   const { firmId } = useFirmId();
   const [aiRunning, setAiRunning] = useState(false);
   const [aiCompleteFlash, setAiCompleteFlash] = useState<number | null>(null);
-  const [reprepping, setReprepping] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<{
-    phase: string;
-    prepared: number;
-    expected: number;
-  } | null>(null);
 
   // Pipeline is "processing" when any stage row exists but the terminal
   // `complete` row hasn't landed yet — OR when the user explicitly kicked off
@@ -213,31 +204,7 @@ export default function PlanReviewDetail() {
       return "preparing";
     }, [pipeRows.length, uploading, review?.file_urls?.length]);
 
-  // Re-prepare pages in the browser using pdf.js — only path out of a
-  // needs_browser_rasterization failure since Edge can't reliably rasterize PDFs.
-  const handleReprepareInBrowser = useCallback(async () => {
-    if (!id || reprepping) return;
-    setReprepping(true);
-    const t = toast.loading("Re-preparing pages in your browser…");
-    try {
-      const result = await reprepareInBrowser(id);
-      toast.dismiss(t);
-      if (result.ok) {
-        toast.success(result.message);
-        queryClient.invalidateQueries({ queryKey: ["pipeline_status", id] });
-        queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
-        queryClient.invalidateQueries({ queryKey: ["plan-review-page-asset-count", id] });
-      } else {
-        toast.error(result.message);
-      }
-      for (const w of result.warnings) toast.warning(w);
-    } catch (e) {
-      toast.dismiss(t);
-      toast.error(e instanceof Error ? e.message : "Re-prepare failed");
-    } finally {
-      setReprepping(false);
-    }
-  }, [id, reprepping, queryClient]);
+  // (handleReprepareInBrowser moved to useUploadAndPrepare.)
   // (Letter hydration + autosave moved to useCommentLetter.)
 
   const handleRepositionConfirm = useCallback(
@@ -256,8 +223,8 @@ export default function PlanReviewDetail() {
     [],
   );
 
-  // Auto-render pages when review loads with files
-  const hasAutoRendered = useRef(false);
+  // Auto-render pages when review loads with files. (hasAutoRendered ref is
+  // declared earlier so the upload-complete callback can reset it.)
   useEffect(() => {
     if (
       review &&
@@ -271,79 +238,7 @@ export default function PlanReviewDetail() {
     }
   }, [review]);
 
-  const handleFileUpload = async (files: FileList | null) => {
-    if (!files || !review) return;
-    setUploading(true);
-    setUploadProgress({ phase: "Starting…", prepared: 0, expected: 0 });
-    try {
-      const { uploadPlanReviewFiles } = await import("@/lib/plan-review-upload");
-      const { count: existingPageCount } = await supabase
-        .from("plan_review_page_assets")
-        .select("id", { count: "exact", head: true })
-        .eq("plan_review_id", review.id);
-
-      const result = await uploadPlanReviewFiles({
-        reviewId: review.id,
-        round: review.round,
-        existingFileUrls: review.file_urls || [],
-        existingPageCount: existingPageCount ?? 0,
-        files: Array.from(files),
-        userId: user?.id ?? null,
-        onProgress: (p) => setUploadProgress(p),
-      });
-
-      // Surface every meaningful issue from the upload pipeline. The previous
-      // code swallowed pipeline-invoke failures with a console.warn, so the
-      // user thought the upload had succeeded when nothing was running.
-      for (const w of result.warnings) toast.warning(w);
-      if (result.partialRasterize) {
-        toast.error(
-          `Only ${result.pageAssetCount} of ${result.expectedPages} pages prepared. Click "Prepare pages now" to retry the gaps before analyzing.`,
-          { duration: 8000 },
-        );
-      } else if (!result.pipelineStarted) {
-        toast.error("Pipeline did not start — click Re-run on the dashboard.", {
-          action: {
-            label: "Open dashboard",
-            onClick: () => navigate(`/plan-review/${review.id}/dashboard`),
-          },
-        });
-      } else {
-        toast.success(
-          `Uploaded ${result.acceptedCount} file(s). Pipeline started — ${
-            result.pageAssetCount
-          } page(s) prepared in the browser.`,
-        );
-      }
-
-      queryClient.invalidateQueries({ queryKey: ["plan-review", id] });
-      queryClient.invalidateQueries({ queryKey: ["plan-review-page-asset-count", id] });
-      hasAutoRendered.current = false;
-      resetPages();
-      setUploadSuccess(true);
-      setTimeout(() => setUploadSuccess(false), 2500);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setUploading(false);
-      setUploadProgress(null);
-    }
-  };
-
-  // Block tab close while upload/rasterization is in flight — closing now
-  // would leave the server holding a PDF with no page assets, which used to
-  // require manual `reprepareInBrowser` recovery 20 minutes later.
-  useEffect(() => {
-    if (!uploading) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue =
-        "Pages are still being prepared. Closing now will require you to re-open the project to finish.";
-      return e.returnValue;
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [uploading]);
+  // (handleFileUpload + beforeunload guard moved to useUploadAndPrepare.)
 
   const createNewRound = () => {
     // New rounds belong on the v2 dashboard so deficiencies_v2 carries forward
