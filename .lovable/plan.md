@@ -1,69 +1,83 @@
-# Fix "Auto-fill timed out" — speed up title-block extraction
+# Why Old Projects "Came Back" + FL Private-Provider Readiness Audit
 
-## Root cause (confirmed in edge function logs)
+## 1. The "deleted projects came back" mystery — solved
 
-The AI extraction call from `NewReviewDialog` is succeeding, but it's slow. Recent runs against `/functions/v1/ai`:
+I queried the database directly. Here's what's actually true:
 
-| run | duration | status |
-|---|---|---|
-| 1 | 6.8 s | 200 |
-| 2 | 8.4 s | 200 |
-| 3 | **17.8 s** | 200 |
-| 4 | **18.7 s** | 200 |
+- The activity log shows **only 10 projects have ever been soft-deleted** (one on Apr 28, nine on Apr 29 at 12:23 UTC).
+- Every one of those 10 still has `deleted_at` set in the DB right now. None of them have been "restored."
+- The `useProjects`, `useProject`, `useAllActivePipelines`, `Dashboard`, `ProjectDetail`, and `PipelineHealthChip` queries all correctly filter `.is("deleted_at", null)`.
+- The `Projects.tsx` page invalidates the `["projects"]` cache after a delete, so the list refreshes.
 
-The client (`NewReviewDialog`) has a hard `EXTRACTION_TIMEOUT_MS = 20_000` race. Pro-tier multimodal latency is regularly bumping into that ceiling, so the toast "Auto-fill timed out — please fill the fields manually" fires even though the AI would have answered a second or two later.
+What you're seeing in the list are **~17 older projects from April 22–27 that were never actually deleted** (their `deleted_at` is `NULL` and there's no `project_deleted` activity log entry for them). They predate the soft-delete UI flow we built, or the delete attempt didn't actually fire (e.g., dialog closed before confirm). They've been sitting there the whole time — they didn't "come back."
 
-In `supabase/functions/ai/index.ts` the model selection is:
-```ts
-const model = isMultimodal ? "google/gemini-2.5-pro" : "google/gemini-2.5-flash";
-```
-So `extract_project_info` (vision) gets routed to **Gemini 2.5 Pro**. Pro is the right call for full-sheet markup, but it's overkill for parsing a tiny rectangular title block — and it's the cause of the timeouts.
+**Two small fixes worth doing:**
 
-## Fix
+1. **One-time cleanup migration**: soft-delete the obvious leftover test projects (the SUNCOAST PORSCHE / Proper Pizza & Pasta / NEW SINGLE FAMILY HOME duplicates from before Apr 28) so your project list starts clean for real testing. I'll list the exact IDs and let you confirm before running.
+2. **Add a "Deleted" filter toggle** on the Projects page so you can see soft-deleted items and restore them if needed — right now there's no way to tell from the UI whether something was ever deleted, which is exactly why this looked mysterious.
 
-Two small, surgical changes. No schema change, no new infra, no async job queue.
+## 2. What else can break before this is "legit FL Private-Provider start-to-finish" software
 
-### 1. Route the lightweight extractions to Flash (multimodal-capable)
+I went through the codebase against F.S. 553.791 (private provider) workflow requirements. Here are the real gaps, ranked by risk:
 
-In `supabase/functions/ai/index.ts`, split the multimodal model choice:
+### High risk (must-fix before live use)
 
-```ts
-// Title-block / zoning extraction → Flash (still vision-capable, ~3× faster).
-// Other multimodal (full sheet review) → Pro for fidelity.
-const FAST_MULTIMODAL_ACTIONS = new Set(["extract_project_info", "extract_zoning_data"]);
-const model = isMultimodal
-  ? (FAST_MULTIMODAL_ACTIONS.has(action) ? "google/gemini-2.5-flash" : "google/gemini-2.5-pro")
-  : "google/gemini-2.5-flash";
-```
+1. **Statutory clock pause/resume audit gaps**
+   - `auto_manage_statutory_clock` only fires on `comments_sent` → `resubmitted`. There's no handling for `on_hold` (manual hold), `cancelled`, or contractor-side delays. F.S. 553.791 lets the clock pause for "applicant-caused delay" — we need a `manual_pause` action with reason + activity_log entry, and the held time must be subtracted from `statutory_deadline_at`.
+   - `compute_statutory_deadline` recomputes from `start_date + business_days` but doesn't add back accumulated paused time on resume. Long pause → wrong deadline.
 
-Why Flash is fine here:
-- The input is a single small cropped image (the title block), not a full plan sheet.
-- The output is a strict JSON tool call with ~5 short string fields.
-- We've already pinned `temperature = 0` for these actions, so determinism is preserved.
-- The downstream pipeline (where Pro fidelity actually matters — full sheet markup, finding extraction) is unchanged.
+2. **Comment letter immutability is enforced but Round-2 chain isn't validated end-to-end**
+   - `protect_letter_snapshot_immutable` + `compute_letter_snapshot_chained_hash` are good. But there's no UI surface that shows the round chain, hash verification, or who signed each round. A reviewer needs to prove "this is round 2, here's round 1's hash" during an audit.
+   - No verification job confirms `letter_html_sha256` still matches stored `letter_html` (drift detection).
 
-Expected p95 latency drops from ~18s to ~5–7s.
+3. **Certificate of Compliance gating**
+   - `delete-project.ts` blocks delete when an active CoC exists — good. But I don't see code that prevents issuing a CoC when **required inspections are missing or failed**. Need a server-side check (edge function or DB trigger) that refuses CoC insert unless every required inspection has `result='pass'`.
+   - No CoC PDF storage path verification — the CoC should be immutable like comment letters (sha256 + chained hash).
 
-### 2. Give the client a little more headroom
+4. **Multi-tenant firm scoping**
+   - All reads use RLS via `user_firm_id`. Verified. But `set_firm_id_from_user` trigger only fires when `firm_id IS NULL` on insert. If a malicious/buggy client passes another firm's UUID, the trigger doesn't override it. Should `RAISE` on mismatch, or unconditionally set `firm_id := user_firm_id(auth.uid())`.
 
-In `src/components/NewReviewDialog.tsx`, raise the timeout from 20s to 35s:
+### Medium risk (will surface in real use)
 
-```ts
-const EXTRACTION_TIMEOUT_MS = 35_000;
-```
+5. **Deadline alerts cron isn't scheduled**
+   - `check_deadline_alerts()` exists but I don't see a `pg_cron` job that runs it. Without a schedule, no one gets the 7/3/1-day warnings or auto-hold on expiry. Need to add a cron (e.g., every 30 min).
 
-Even after the model swap, an occasional cold start or upstream hiccup can still push past 20s. 35s is comfortably under the edge function wall-clock cap and well within what users will tolerate while the visible "Reading your plans…" banner is showing. The banner copy already says "Usually 5–15 seconds" so the perceived experience doesn't change for happy-path runs; only timeouts get rarer.
+6. **Inspection clock starts on schedule, not on request**
+   - `set_inspection_clock_on_schedule` starts the 10-day clock when an inspection row is inserted. But statute counts from when the **applicant requests** the inspection, which can be before scheduling. Add an `inspection_requested_at` column distinct from `scheduled_at` and start the clock on request.
 
-## Why not async / job queue
+7. **Resubmission round detection is implicit**
+   - `reset_review_clock_on_resubmission` resets the clock on every new plan_review insert. If a user accidentally creates a second project for the same job, the clock resets. Need a confirmation step + UI distinction between "new project" vs "resubmittal of existing".
 
-The Lovable Stack Overflow snippet suggests a polling job pattern. We don't need it here:
-- The work is sub-30 seconds, not minutes.
-- The user is staring at a modal with a live progress banner — polling would add complexity and a new `autofill_jobs` table for no UX win.
-- The edge function already returns synchronously and successfully; the only failure mode is the **client-side** timeout being too tight for the **model** we chose.
+8. **AI-extracted project info has no human verification gate**
+   - `extract_project_info` populates fields, but there's no required "reviewer confirmed" checkbox before the project enters `plan_review`. For statutory work we should not start the clock on AI-only data.
 
-## Files touched
+### Low risk (polish, but visible)
 
-- `supabase/functions/ai/index.ts` — 4-line model-selection change.
-- `src/components/NewReviewDialog.tsx` — 1-line constant change.
+9. **No "Deleted" view / restore UI** (mentioned above).
+10. **No audit export** — for a real private-provider firm, you need a one-click export of the full project chain (notice → uploads → AI run → letters → resubmittals → inspections → CoC) as a single signed PDF/zip. Right now this is reconstructable from `activity_log` but not exportable.
+11. **No backup/restore guarantee documented to user** — letters and CoCs are legally binding; the user needs to know what's archived where (storage paths, retention).
+12. **Login error from logs**: `dan@projgrowth.com` had one failed login at 14:18 UTC followed by success — not a bug, just noting auth is working. No HIBP password check is enabled; recommend enabling for compliance.
 
-No migrations, no new packages, no other components affected.
+## 3. Proposed order of operations
+
+I'd tackle this in three waves once you approve:
+
+**Wave A — Data hygiene & visibility (small, immediate)**
+- One-time cleanup of the ~17 stale pre-Apr-28 test projects (you confirm the list first).
+- Add "Show deleted" toggle + restore button on Projects page.
+
+**Wave B — Statutory correctness (the legally-sensitive stuff)**
+- Manual pause/resume action with reason → adjusts deadline.
+- Schedule `check_deadline_alerts()` via pg_cron every 30 min.
+- Block CoC issuance until all required inspections pass.
+- Harden `firm_id` trigger to overwrite, not just default.
+- Add `inspection_requested_at` and start clock on request.
+
+**Wave C — Audit & UX polish**
+- Round-chain viewer with hash verification on PlanReviewDetail.
+- One-click full-project audit export (signed zip).
+- "Reviewer confirmed extraction" gate before clock starts.
+- Enable HIBP password check.
+
+Approving this plan switches me to build mode for **Wave A only**. I'll come back for confirmation before Waves B and C since they touch statutory math and legal records.
+
