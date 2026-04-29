@@ -346,6 +346,8 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
       { role: "user", content },
     ],
     FINDINGS_SCHEMA as unknown as Record<string, unknown>,
+    "google/gemini-2.5-flash",
+    0,
   )) as {
     findings: Array<{
       finding: string;
@@ -441,6 +443,7 @@ Every finding MUST cite an FBC section you are confident exists in the Florida B
         ],
         SELF_CRITIQUE_SCHEMA as unknown as Record<string, unknown>,
         "google/gemini-2.5-flash",
+        0.2,
       )) as {
         verdicts: Array<{ index: number; verdict: "keep" | "weak" | "junk"; reason: string }>;
       };

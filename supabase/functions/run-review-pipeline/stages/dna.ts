@@ -239,6 +239,8 @@ export async function stageDnaExtract(
         },
       ],
       DNA_SCHEMA as unknown as Record<string, unknown>,
+      "google/gemini-2.5-flash",
+      0,
     )) as Record<string, unknown>;
   } catch (err) {
     // Surface the real error instead of silently inserting an empty DNA row.
