@@ -58,15 +58,22 @@ interface StuckRow {
   updated_at: string;
 }
 
-async function findLastStage(admin: AdminLike, planReviewId: string): Promise<string | null> {
+async function findLastStage(admin: AdminLike, planReviewId: string): Promise<{
+  stage: string | null;
+  heartbeatAt: string | null;
+}> {
   const { data } = await admin
     .from("review_pipeline_status")
-    .select("stage, status, updated_at")
+    .select("stage, status, updated_at, heartbeat_at")
     .eq("plan_review_id", planReviewId)
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  return (data as { stage?: string } | null)?.stage ?? null;
+  const row = data as { stage?: string; heartbeat_at?: string | null } | null;
+  return {
+    stage: row?.stage ?? null,
+    heartbeatAt: row?.heartbeat_at ?? null,
+  };
 }
 
 async function logRecovery(admin: AdminLike, args: {
