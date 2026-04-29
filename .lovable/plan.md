@@ -80,14 +80,16 @@ Goal: lock the wins in and clean up the long tail.
 - **Wave 2 — Statutory clock:** ✅ Done. `clock_pause_history` JSONB, net-elapsed math, 3 new pause tests.
 - **Wave 3 — Multi-tenant safety:** ✅ Done. Removed cross-firm `firm_settings` fallback; pipeline returns 409 on concurrent kickoff.
 - **Wave 4 — Tests & hygiene:** ✅ Done. 23-case `letter-readiness.test.ts`, Broward placeholder fixed, correction models standardized to `gemini-2.5-flash`, README rewritten, vitest env switched to `node` (no DOM tests in suite).
+- **Wave 5 — DNA + coastal + flag clarity:** ✅ Done. `occupant_load` and `is_coastal` added to DNA extraction schema; threshold-building now definitively skips when OL ≤ 500 (M-01 false-positive fix); Hillsborough flipped to `coastal()` with submission notes for Tampa Bay frontage (M-04); `blockLetterOnUngrounded` JSDoc explicitly warns about the inverted-name trap (full rename deferred — see below).
 
 ### What's still NOT done (intentionally deferred)
 
 - **H-03** (gateway SPOF / fallback to direct Google AI). Real concern but adds significant complexity and a second secret. Track separately; revisit if we hit a Lovable gateway incident.
 - **H-06** (DBPR live license verification). Multi-day integration; documented as a known limitation in the README and surfaced as self-attested in the UI.
-- **C-07 / M-01 / M-04 / H-02 rename** — DNA schema add for `occupant_load`, threshold-building advisory tightening, Hillsborough coastal classification, and the `blockLetterOnUngrounded` → `allowStubCitations` flag rename. These three are smaller follow-ups that didn't make this pass; track as Wave 5 if requested.
+- **H-02 column rename** (`block_letter_on_ungrounded` → `allow_stub_citations`). Inverting the boolean stored on every existing `firm_settings` row is a coordinated migration (column rename + value flip + types regen + UI copy). Documented in the JSDoc; safe to do as a one-shot migration when we touch firm settings UI next.
 
 ### Technical notes
 
 - Existing draft letters keep their snapshot under the old prompt (immutability triggers protect them). Only new letters get the corrected prompt + dynamic context.
 - Vitest now runs under the `node` environment because none of the current suites touch the DOM. If a component test is added later, mark it with `// @vitest-environment jsdom` per file.
+- DNA schema gained two optional fields (`occupant_load`, `is_coastal`). They're stored under `project_dna.raw_extraction` automatically; no SQL migration needed unless we want them as first-class columns later.
