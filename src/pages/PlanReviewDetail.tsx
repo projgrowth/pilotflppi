@@ -133,10 +133,7 @@ export default function PlanReviewDetail() {
   });
 
   // ── UI state ───────────────────────────────────────────────────────────
-  const [commentLetter, setCommentLetter] = useState("");
-  const [generatingLetter, setGeneratingLetter] = useState(false);
-  const letterAbortRef = useRef<AbortController | null>(null);
-  const [copied, setCopied] = useState(false);
+  // Comment-letter state lives in useCommentLetter — see below where review/findings are wired up.
   const [uploading, setUploading] = useState(false);
   const [rightPanel, setRightPanel] = useState<RightPanelMode>("findings");
   const fileInputRef = useRef<HTMLInputElement>(null);
