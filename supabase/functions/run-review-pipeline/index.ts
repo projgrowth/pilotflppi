@@ -306,6 +306,32 @@ Deno.serve(async (req) => {
             error_message: userMessage,
             metadata: { error_class: isNeedsBrowser ? NEEDS_BROWSER_RASTERIZATION : "prepare_pages_failed" },
           });
+          // Don't make the user wait 15 minutes for the watchdog. Flip the
+          // review to needs_user_action immediately so StuckRecoveryBanner
+          // surfaces the "Re-prepare in browser" CTA on this very page load.
+          if (isNeedsBrowser) {
+            const { data: prRow } = await admin
+              .from("plan_reviews")
+              .select("ai_run_progress")
+              .eq("id", plan_review_id)
+              .maybeSingle();
+            const progress =
+              ((prRow as { ai_run_progress?: Record<string, unknown> | null } | null)
+                ?.ai_run_progress) ?? {};
+            await admin
+              .from("plan_reviews")
+              .update({
+                ai_check_status: "needs_user_action",
+                ai_run_progress: {
+                  ...(progress as Record<string, unknown>),
+                  failure_reason: userMessage,
+                  needs_user_action_stage: "prepare_pages",
+                  needs_user_action_at: new Date().toISOString(),
+                },
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", plan_review_id);
+          }
           return;
         }
 
