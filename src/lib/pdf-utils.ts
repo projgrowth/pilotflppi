@@ -361,7 +361,7 @@ export async function rasterizeAndUploadPagesResilient(
       const baseName = uf.name.replace(/\.pdf$/i, "");
       const settled = await Promise.allSettled(
         pageJpegs.map(async (page) => {
-          const pagePath = `plan-reviews/${reviewId}/pages/${baseName}/p-${String(page.pageIndex).padStart(3, "0")}.jpg`;
+          const pagePath = `${pagesPrefix}/${baseName}/p-${String(page.pageIndex).padStart(3, "0")}.jpg`;
           const { error: pageUploadError } = await uploadFn(pagePath, page.blob);
           if (pageUploadError) throw new Error(pageUploadError.message);
           return { page, pagePath };
