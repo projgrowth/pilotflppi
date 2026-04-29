@@ -1,11 +1,34 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.74.0";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+// CORS allowlist (audit A-02). Only origins we operate from may call this
+// function from a browser. Edge-to-edge / server requests bypass CORS by
+// not sending an Origin header, so this only restricts cross-site browsers.
+const ALLOWED_ORIGINS = new Set<string>([
+  "https://projgrowth.site",
+  "https://www.projgrowth.site",
+  "https://pilotflppi.lovable.app",
+]);
+const ALLOWED_ORIGIN_PATTERNS: RegExp[] = [
+  // Lovable preview/sandbox URLs (id-preview--<uuid>.lovable.app, *.sandbox.lovable.dev, lovableproject.com)
+  /^https:\/\/[a-z0-9-]+\.lovable\.app$/i,
+  /^https:\/\/[a-z0-9-]+\.sandbox\.lovable\.dev$/i,
+  /^https:\/\/[a-z0-9-]+\.lovableproject\.com$/i,
+  // Local dev
+  /^http:\/\/localhost(:\d+)?$/i,
+  /^http:\/\/127\.0\.0\.1(:\d+)?$/i,
+];
+
+function corsFor(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin") ?? "";
+  const allowed = ALLOWED_ORIGINS.has(origin) || ALLOWED_ORIGIN_PATTERNS.some((p) => p.test(origin));
+  return {
+    "Access-Control-Allow-Origin": allowed ? origin : "null",
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "Vary": "Origin",
+  };
+}
 
 /**
  * Build per-action system prompts. Firm identity, FBC edition, and
