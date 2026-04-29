@@ -110,7 +110,7 @@ Deno.serve(async (req) => {
 
     const { data: pr, error: prErr } = await admin
       .from("plan_reviews")
-      .select("id, firm_id")
+      .select("id, firm_id, ai_run_mode")
       .eq("id", plan_review_id)
       .maybeSingle();
     if (prErr || !pr) {
@@ -120,6 +120,27 @@ Deno.serve(async (req) => {
       });
     }
     const firmId = (pr as { firm_id: string | null }).firm_id;
+    const persistedMode = (pr as { ai_run_mode?: string | null }).ai_run_mode;
+
+    // Internal self-invokes from the dispatcher always pass an explicit
+    // mode. But watchdog-triggered recoveries default to "core" — which
+    // would silently downgrade a "deep" run mid-chain. Prefer the persisted
+    // mode whenever the caller didn't explicitly specify one (we only get
+    // an explicit mode from the original user click or the dispatcher).
+    const effectiveMode: PipelineMode =
+      persistedMode === "deep" || persistedMode === "full"
+        ? (persistedMode as PipelineMode)
+        : mode;
+    const effectiveChain = stagesForMode(effectiveMode);
+
+    // First-touch: persist the mode the user originally chose so a future
+    // recovery worker can rebuild the same chain.
+    if (!persistedMode) {
+      await admin
+        .from("plan_reviews")
+        .update({ ai_run_mode: mode })
+        .eq("id", plan_review_id);
+    }
 
     setCostCtx({
       admin,
