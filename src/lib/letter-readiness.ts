@@ -25,6 +25,7 @@ export interface ReadinessCheck {
   id:
     | "triage"
     | "citations"
+    | "verifier_completion"
     | "sheet_refs"
     | "qc"
     | "project_dna"
