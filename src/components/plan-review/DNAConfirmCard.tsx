@@ -61,8 +61,10 @@ export default function DNAConfirmCard({
   if (typeof dna.stories === "number") summary.push(["Stories", String(dna.stories)]);
   if (typeof dna.total_sq_ft === "number") summary.push(["Sq Ft", dna.total_sq_ft.toLocaleString()]);
   if (dna.hvhz === true) summary.push(["HVHZ", "Yes"]);
+  if (dna.is_coastal === true) summary.push(["Coastal", "Yes"]);
   if (dna.flood_zone) summary.push(["Flood", dna.flood_zone]);
   if (typeof dna.wind_speed_vult === "number") summary.push(["Wind Vult", `${dna.wind_speed_vult} mph`]);
+  if (typeof dna.occupant_load === "number") summary.push(["Occ Load", dna.occupant_load.toLocaleString()]);
 
   const handleConfirm = async () => {
     if (saving) return;
