@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, ShieldCheck, ShieldX, ShieldAlert, GitMerge, RefreshCw } from "lucide-react";
+import { ExternalLink, ShieldCheck, ShieldX, ShieldAlert, GitMerge, RefreshCw, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -146,6 +146,7 @@ export default function DeficiencyHeader({ planReviewId, def }: Props) {
               canonicalText={def.citation_canonical_text}
               compact
             />
+            <CitationStatusInfo />
             {needsReground(def.citation_status) && (
               <RegroundButton
                 planReviewId={planReviewId}
@@ -290,12 +291,13 @@ function RegroundButton({
           <RefreshCw
             className={cn("h-3 w-3", reground.isPending && "animate-spin")}
           />
-          Re-ground
+          Recheck citation
         </Button>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-xs text-xs">
-        Re-runs FBC citation matching for just this finding. Use after editing
-        the code reference, or to retry a hallucinated/mismatched citation.
+        Asks the AI to re-match this finding's code reference against the
+        Florida Building Code library. Use after editing the code reference, or
+        when the citation shows as hallucinated, mismatched, or unverified.
       </TooltipContent>
     </Tooltip>
   );
