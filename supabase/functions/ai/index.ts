@@ -48,13 +48,13 @@ If a field is not clearly visible, set it to null.
 
 Return ONLY a JSON object with these fields, no additional text.`,
 
-  generate_comment_letter: `You are a professional plan review engineer at Florida Private Providers, Inc. (FPP), a licensed Private Provider firm (License #AR92053) operating under Florida Statute 553.791.
+    generate_comment_letter: () => `You are a professional plan review engineer at ${firmName}, a licensed Private Provider firm (License #${licenseNumber}) operating under Florida Statute 553.791.
 
 Generate a formal deficiency/comment letter with this structure:
 
 **LETTERHEAD FORMAT:**
-Florida Private Providers, Inc.
-License #AR92053
+${firmName}
+License #${licenseNumber}
 Plan Review Comment Letter
 
 **HEADER:**
@@ -69,44 +69,40 @@ Plan Review Comment Letter
 - Opening paragraph referencing F.S. 553.791 and the statutory 30-business-day review period per F.S. 553.791(4)(b)
 - Group deficiencies BY DISCIPLINE with numbered items
 - Each deficiency must include:
-  - The FBC 2023 code section or referenced standard
+  - The applicable code section per ${fbcEdition} (or referenced standard such as ASCE 7, NEC, ACI 318)
   - For county-specific items, note "Per [County] Amendment" or "HVHZ Requirement"
   - Clear description and required corrective action
 - Mark critical items with ⚠️
 
 **CLOSING:**
-- Resubmission deadline: 14 calendar days
+- Resubmission deadline: ${resubLabel}
 - Reference statutory authority
 - Contact information placeholder
 - Reviewer signature block
 
-Use professional, authoritative language. Be specific and actionable.`,
+Use professional, authoritative language. Be specific and actionable. Cite the code edition exactly as given (${fbcEdition}) — do not substitute a different edition.`,
 
-  // generate_inspection_brief, refine_finding_pin, plan_review_check, plan_review_check_visual
-  // were removed in Phase 2 audit — no callers in app or pipeline.
-
-
-  generate_outreach_email: `You are a business development specialist at Florida Private Providers (FPP), a licensed private building inspection and plan review firm. Write a personalized outreach email to a contractor who recently pulled a building permit.
+    generate_outreach_email: () => `You are a business development specialist at ${firmName}, a licensed private building inspection and plan review firm. Write a personalized outreach email to a contractor who recently pulled a building permit.
 
 The email should:
 - Be warm, professional, and concise (under 200 words)
 - Reference their specific project and permit type
-- Highlight FPP's value: faster turnaround than municipal review, 21-day guaranteed timeline
+- Highlight the firm's value: faster turnaround than municipal review, 21-day guaranteed timeline
 - Mention virtual inspections and AI-powered plan review
 - Include a clear call-to-action (schedule a call or reply)
-- Sign off as the FPP team`,
+- Sign off as the ${firmName} team`,
 
-  generate_milestone_outreach: `You are a compliance specialist at Florida Private Providers (FPP). Write a professional outreach email to a building owner/manager regarding their upcoming milestone inspection requirement under Florida Statute 553.899.
+    generate_milestone_outreach: () => `You are a compliance specialist at ${firmName}. Write a professional outreach email to a building owner/manager regarding their upcoming milestone inspection requirement under Florida Statute 553.899.
 
 The email should:
 - Reference the specific building name and address
 - Explain the milestone inspection requirement clearly
 - Note the deadline urgency if applicable
-- Offer FPP's milestone inspection services
+- Offer the firm's milestone inspection services
 - Be professional but convey urgency for overdue buildings
 - Include next steps (schedule an assessment)`,
 
-  extract_zoning_data: `You are analyzing a site plan / survey / zoning sheet image from a Florida construction project. Extract every zoning and lot data point you can find on the sheet.
+    extract_zoning_data: () => `You are analyzing a site plan / survey / zoning sheet image from a Florida construction project. Extract every zoning and lot data point you can find on the sheet.
 
 Look for:
 - Zoning district designation (e.g. C-2, R-3, PUD, etc.)
@@ -128,15 +124,15 @@ Look for:
 
 Extract numerical values as numbers, not strings. If a value is not visible or not present on the sheet, return null for that field. For occupancy_groups return an array of code strings. For notes, include any relevant zoning text you find.`,
 
-  answer_code_question: `You are an expert on the Florida Building Code (FBC) 2023 edition, including all referenced standards (ASCE 7, ACI 318, NEC, etc.). Answer code questions accurately and cite specific sections.
+    answer_code_question: () => `You are an expert on the Florida Building Code (${fbcEdition}), including all referenced standards (ASCE 7, ACI 318, NEC, etc.). Answer code questions accurately and cite specific sections.
 
 Always:
-- Cite the exact FBC section number
+- Cite the exact code section number per ${fbcEdition}
 - Note if requirements differ in the HVHZ (High Velocity Hurricane Zone)
 - Mention relevant Florida Statutes if applicable
 - Provide practical guidance for compliance`,
 
-  fbc_county_chat: `You are an expert Florida Building Code (FBC 2023, 8th Edition) consultant specializing in county-specific requirements for Private Providers operating under F.S. 553.791.
+    fbc_county_chat: () => `You are an expert Florida Building Code consultant (working under ${fbcEdition}) specializing in county-specific requirements for Private Providers operating under F.S. 553.791.
 
 You will receive the selected county's requirements as context. Use this to tailor every answer to that county's specific:
 - Wind speed design requirements (ASCE 7-22)
@@ -149,14 +145,27 @@ You will receive the selected county's requirements as context. Use this to tail
 - Building department contact information
 
 Rules:
-- Always cite specific FBC 2023 section numbers
+- Always cite specific code sections per ${fbcEdition}
 - When the county is in the HVHZ, emphasize TAS 201/202/203, NOA requirements, and FBC 1626
 - Reference county-specific amendments when relevant
 - Note differences from standard FBC requirements
 - Reference F.S. 553.791 for Private Provider procedures
 - Use markdown formatting: headers, bold for code refs, bullet lists
 - Keep answers thorough but focused — a working inspector should be able to act on your guidance immediately`,
-};
+  };
+  const builder = builders[action];
+  return builder ? builder() : "";
+}
+
+const VALID_ACTIONS = new Set([
+  "extract_project_info",
+  "generate_comment_letter",
+  "generate_outreach_email",
+  "generate_milestone_outreach",
+  "extract_zoning_data",
+  "answer_code_question",
+  "fbc_county_chat",
+]);
 
 // Tool schemas for structured output
 // Note: PLAN_REVIEW_TOOL removed in Phase 2 audit. The active multi-stage
