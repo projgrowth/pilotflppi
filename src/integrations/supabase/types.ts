@@ -2646,10 +2646,6 @@ export type Database = {
         Args: { _patch: Json; _plan_review_id: string }
         Returns: undefined
       }
-      try_acquire_pipeline_lock: {
-        Args: { p_plan_review_id: string }
-        Returns: boolean
-      }
       user_firm_id: { Args: { _user: string }; Returns: string }
     }
     Enums: {
