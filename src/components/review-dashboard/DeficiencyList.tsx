@@ -260,3 +260,12 @@ export default function DeficiencyList({ planReviewId, chipFilter }: Props) {
     </div>
   );
 }
+
+function DispoLegend({ swatch, label, count }: { swatch: string; label: string; count: number }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className={`inline-block h-1.5 w-1.5 rounded-full ${swatch}`} aria-hidden />
+      {label} <span className="font-mono">{count}</span>
+    </span>
+  );
+}
