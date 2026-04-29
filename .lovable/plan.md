@@ -1,88 +1,67 @@
-## The problem
+# Phase 4 — Remaining Wire-Crossing & Hallucination Risks
 
-After uploading a PDF, the left panel of `/plan-review/:id` either shows the empty drop zone or a tiny "Loading document…" spinner with a thin progress bar. Meanwhile the actual pipeline (upload → prepare_pages → sheet_map → … → comment letter) is humming along, but its only visual home is a popover hidden behind the "Re‑Analyze" button in the top bar. Users can't tell that anything is happening, so it feels broken.
+After Phases 1-3, four real footguns remain. Three are confirmed by current logs/code; one is preventative.
 
-The fix: turn the left canvas itself into the pipeline status during processing, then automatically transition into the PDF + comments view the moment the pipeline lands. No extra clicks, no hidden popover, no jargon.
+## 1. Realtime crash on plan-review page (HIGH — confirmed in console)
 
-## What we'll build
+`PipelineProgressStepper` opens its own channel `pr-progress-${planReviewId}` and calls `.on("postgres_changes", ...).subscribe()` directly. On any remount (StrictMode dev double-mount, route transition, parent re-render that changes `key`), Supabase reuses the existing channel object and the second `.on()` call after `.subscribe()` throws:
 
-### 1. New `ProcessingOverlay` component (left canvas)
+> `cannot add postgres_changes callbacks for realtime:pr-progress-... after subscribe()`
 
-When a review has files but is still processing (no rendered page images yet, OR the pipeline terminal stage isn't `complete`), the left panel renders a centered, calm "we're working on it" surface instead of the blank drop zone or a 8px spinner.
+This is exactly the bug `RouteBoundary` is catching right now on `/plan-review/344a5783...` — it crashes the whole route into the error boundary.
+
+We already solved this elsewhere with `subscribeShared()` in `useReviewDashboard.ts` (ref-counted shared topic registry). The stepper just isn't using it.
+
+**Fix:** route the stepper's subscription through `subscribeShared()` (or a small dedicated wrapper) so a single channel is reused across mounts and the second `.on()` never happens. Same pattern as `useDeficienciesV2`.
+
+## 2. `ai_run_progress` lost-update race (HIGH — silent data loss)
+
+Five different writers all do read-modify-write on the same JSONB column with no atomicity:
 
 ```text
-┌──────────────────────────────────────────────────┐
-│                                                  │
-│             ⟳  Reviewing your plans              │
-│        Architectural — chunk 5 of 10             │
-│                                                  │
-│   ✓ Files received                               │
-│   ✓ Prepared 24 pages                            │
-│   ✓ Indexed sheets                               │
-│   ⟳ Reading discipline sheets · 12s ago          │
-│   ○ Cross‑checking findings                      │
-│   ○ Grounding code citations                     │
-│   ○ Drafting comment letter                      │
-│                                                  │
-│   Usually 2–4 minutes. You can leave this page   │
-│   — we'll notify you when it's done.             │
-│                                                  │
-│            [View pipeline dashboard]             │
-└──────────────────────────────────────────────────┘
+stages/complete.ts          stages/discipline-review.ts (×2)
+stages/submittal-check.ts   index.ts (dispatch self-update)
 ```
 
-Implementation:
-- New file `src/components/plan-review/ProcessingOverlay.tsx`.
-- Internally just renders the existing `<PipelineProgressStepper compact mode="core" />` with a wrapper that adds the headline, current sub-stage subtitle (pulled from `disciplineProgress` when discipline_review is running), and an "estimated time" line.
-- Reuses all the heartbeat / stuck / auto-retry logic already in `PipelineProgressStepper` — no duplication.
+Pattern in every one:
+```ts
+const { data } = await admin.from("plan_reviews").select("ai_run_progress")...
+const prev = data?.ai_run_progress ?? {};
+await admin.from("plan_reviews").update({ ai_run_progress: { ...prev, key: newVal } })...
+```
 
-### 2. Wire it into `PlanViewerPanel`
+When two stages run concurrently (very common during fan-out: `discipline-review` heartbeats while `submittal-check` finishes), one overwrite wins and the other's keys vanish. Symptoms users would see: progress chunk counter resets to 0, DNA confirmation flag disappears, mode flips back to `core` mid-run.
 
-`PlanViewerPanel` currently has three states: empty drop zone, "Loading document…" spinner, and the rendered viewer. Add a fourth state and reorder priority:
+**Fix:** add a Postgres helper `merge_review_progress(plan_review_id uuid, patch jsonb)` that does a single atomic `UPDATE ... SET ai_run_progress = COALESCE(ai_run_progress, '{}') || $patch` and call it from all five writers. One migration + 5 small refactors.
 
-1. No documents → drop zone (unchanged).
-2. Documents present **and pipeline not complete** → `<ProcessingOverlay planReviewId=… />` (NEW).
-3. Documents present + pipeline complete + still rasterizing locally → existing tiny "Loading document…" spinner.
-4. `pageImages.length > 0` → `PlanMarkupViewer` (unchanged).
+## 3. Dispatcher "stuck_no_progress" loops (MEDIUM — confirmed)
 
-The page already knows `pageAssetCount`, `pipeRows` (via `usePipelineStatus`), and the terminal stage status — pass a single derived `processingState: "uploading" | "preparing" | "analyzing" | "ready"` prop down to keep `PlanViewerPanel` dumb.
+Two `dispatch` errors logged in the last 24h with `error_class=stuck_no_progress`. Combined with the edge logs showing 3 `[stage:upload] No files uploaded` retries on a fresh review, this means a project can enter the dispatch loop before any file has actually finished uploading — the pipeline retries 3× then logs an error, but the run isn't transitioned to `needs_user_action` (Phase 2 only handled rasterization/partial-upload, not "zero files at dispatch time").
 
-### 3. Auto-flip to "ready" view on completion
+**Fix:** in `stages/upload.ts`, when count is zero on the FINAL retry attempt, flip `ai_check_status='needs_user_action'` with an explicit reason "no files uploaded — re-upload PDF" instead of just throwing. Surfaces immediately in the existing banner.
 
-When the terminal stage transitions to `complete`:
-- The existing `PipelineProgressStepper.onComplete` already fires once. Hoist that handler to the page level so both the top‑bar popover and the new overlay share it.
-- On complete: invalidate `plan-review`, `pipeline_status`, and `page-asset-count` queries (already done in the existing `onPipelineComplete`), and flash a single subtle toast: "Review ready · {N} findings". No modal, no extra step.
-- Once `pageImages` are rendered, the overlay automatically unmounts and the PDF + pin overlays appear — which is already the existing behavior, so this part is just confirming the auto-transition works without a manual click.
+## 4. DialogContent a11y warnings → mask real errors (LOW)
 
-### 4. Quiet the existing UI noise during processing
+Console shows `Missing Description or aria-describedby` warning from a `DialogContent`. `NewReviewDialog` already has `aria-describedby="new-review-desc"` — the offender is one of: `ProcessingOverlay`, `LetterLintDialog`, `RecordDeliveryDialog`, `DeleteConfirmDialog`, etc. Noisy a11y warnings train devs to ignore the console and miss real errors.
 
-The current page stacks several banners above the canvas during processing (`StuckRecoveryBanner`, `SubmittalIncompleteBanner`, `DNAConfirmCard`, `ReviewProvenanceStrip`). They're useful *after* completion but compete for attention during the run. Rules:
-- `DNAConfirmCard`, `ReviewProvenanceStrip`, `RoundCarryoverPanel`: keep gated on `findings.length > 0` (already is for some). Add the same gate to DNAConfirmCard.
-- `StuckRecoveryBanner` and `SubmittalIncompleteBanner` and `preparePagesErrored`: keep — these are actionable error states and need to be visible.
-- The thin `UploadProgressBar` at the top stays during the actual file upload only (already correct).
+**Fix:** add `<DialogDescription>` (or `aria-describedby` + sr-only text) to every `DialogContent` lacking one. ~5min sweep.
 
-### 5. Pin placement on the PDF (already correct, just verify)
+---
 
-The user mentioned "all of the comments would be placed according to the page that they relate to." This is already how it works — `PlanMarkupViewer` renders `findings[i].markup.page_index/x/y/width/height` overlays per-page, deterministic placement is handled by the existing pin-placement logic in memory. **No change needed**, but the plan calls it out so we double‑check after the auto-flip lands that pins render correctly on first paint (no flash of unmarked PDF).
+## Out of scope (audited, not problems)
 
-## Files
+- **Edge function `createClient` cast to `any`** in `_shared/supabase.ts` — intentional to avoid Deno↔Node type drift; behaviour is fine.
+- **`as unknown as` casts on `ai_run_progress`** in `PlanReviewDetail.tsx` — types are honest; would only matter if shape drifted (Issue #2 above prevents that better than typing).
+- **Telemetry severity** — Phase 1 is working: 67 info / 2 warn / 0 error in last 24h with the 2 warns being legit `dispatch:stuck_no_progress` (Issue #3).
 
-**New**
-- `src/components/plan-review/ProcessingOverlay.tsx` — full-canvas processing surface; thin wrapper around `PipelineProgressStepper`.
+## Files to touch
 
-**Modified**
-- `src/components/plan-review/PlanViewerPanel.tsx` — accept `processingState`, render `ProcessingOverlay` when documents exist but processing isn't done.
-- `src/pages/PlanReviewDetail.tsx` — derive `processingState` from `pipeRows` + `pageAssetCount` + `pageImages`, pass it down; add gentle "Review ready" completion toast; gate `DNAConfirmCard` on `findings.length > 0`.
+- `src/components/plan-review/PipelineProgressStepper.tsx` — use shared subscription
+- `src/hooks/useReviewDashboard.ts` — export `subscribeShared` if not already (it is)
+- New migration: `merge_review_progress(uuid, jsonb)` SQL function
+- `supabase/functions/run-review-pipeline/_shared/pipeline-status.ts` — add `mergeProgress()` helper that calls the RPC
+- `supabase/functions/run-review-pipeline/{index.ts, stages/complete.ts, stages/discipline-review.ts, stages/submittal-check.ts}` — replace 5 read-modify-write blocks with `mergeProgress()`
+- `supabase/functions/run-review-pipeline/stages/upload.ts` — flip to `needs_user_action` when 0 files on final attempt
+- Sweep `src/components/**/Dialog*.tsx` and any `DialogContent` usages for missing descriptions
 
-## Out of scope (call-outs)
-
-- We are NOT removing the top‑bar popover stepper — it's still useful as a persistent peek and works once the overlay disappears.
-- We are NOT adding background/desktop notifications here — Phase C already shipped `usePipelineCompleteNotifications` for that.
-- No schema changes, no new edge functions, no new dependencies.
-
-## Risks
-
-- The page already mounts a lot of realtime subscriptions; the overlay reuses `usePipelineStatus` (same channel) so no extra socket cost.
-- One race to verify: after `onComplete` fires, `pageImages` may take 1–3s to finish rasterizing in-browser — during that window the overlay should show the existing tiny "Loading document…" state (step 3 above), not bounce back to the full processing surface.
-
-Approve to ship this as a single self-contained patch.
+Approve and I'll implement all four in one pass.

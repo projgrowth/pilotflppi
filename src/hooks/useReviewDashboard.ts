@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { RealtimeChannel } from "@supabase/supabase-js";
+import type { RealtimeChannel, RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
 /**
@@ -12,15 +12,19 @@ import { supabase } from "@/integrations/supabase/client";
  * "cannot add postgres_changes callbacks ... after subscribe()". This registry
  * ref-counts subscribers so we open one WebSocket topic per (key) and fan out
  * change notifications to every listener.
+ *
+ * Listener signature is `(payload?) => void` — existing callers that don't
+ * need the payload just ignore the arg.
  */
-type Sub = { channel: RealtimeChannel; refCount: number; listeners: Set<() => void> };
+type Listener = (payload?: RealtimePostgresChangesPayload<Record<string, unknown>>) => void;
+type Sub = { channel: RealtimeChannel; refCount: number; listeners: Set<Listener> };
 const subs = new Map<string, Sub>();
 
 export function subscribeShared(
   key: string,
   table: string,
   filter: string,
-  onChange: () => void,
+  onChange: Listener,
 ): () => void {
   let entry = subs.get(key);
   if (!entry) {
@@ -34,7 +38,10 @@ export function subscribeShared(
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table, filter },
-        () => created.listeners.forEach((fn) => fn()),
+        (payload) =>
+          created.listeners.forEach((fn) =>
+            fn(payload as RealtimePostgresChangesPayload<Record<string, unknown>>),
+          ),
       )
       .subscribe();
     subs.set(key, created);

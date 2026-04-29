@@ -8,7 +8,7 @@ import { useFirmSettings } from "@/hooks/useFirmSettings";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { FileCheck, MessageSquare, Building2, ClipboardList, Search, CheckCircle2, AlertTriangle, Copy, Download } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
@@ -387,6 +387,7 @@ export default function DocumentsPage() {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-auto">
           <DialogHeader>
             <DialogTitle>{generating}</DialogTitle>
+            <DialogDescription>Preview and copy the generated document.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             {/* Pre-flight checklist */}

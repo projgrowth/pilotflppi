@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useContractors } from "@/hooks/useContractors";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -85,9 +85,10 @@ export function EditProjectDialog({ open, onOpenChange, project }: Props) {
  return (
  <Dialog open={open} onOpenChange={onOpenChange}>
  <DialogContent className="sm:max-w-md">
- <DialogHeader>
- <DialogTitle>Edit Project</DialogTitle>
- </DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Edit Project</DialogTitle>
+            <DialogDescription>Update the project's basic details.</DialogDescription>
+          </DialogHeader>
  <div className="space-y-4">
  <div className="space-y-2">
  <Label>Project Name</Label>

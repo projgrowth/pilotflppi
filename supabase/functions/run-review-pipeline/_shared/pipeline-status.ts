@@ -146,3 +146,30 @@ export async function heartbeat(
     console.warn("[heartbeat] failed:", err);
   }
 }
+
+/**
+ * Atomically merge a JSON patch into plan_reviews.ai_run_progress.
+ *
+ * Replaces the old read-modify-write pattern that lost updates whenever two
+ * stages wrote concurrently (e.g. a discipline_review chunk beacon racing a
+ * submittal_check completion). Calls the public.merge_review_progress
+ * Postgres function which does the merge in a single UPDATE statement.
+ *
+ * Best-effort — never throws. Progress writes are advisory; a missed one is
+ * not worth aborting a stage over.
+ */
+export async function mergeProgress(
+  admin: Admin,
+  planReviewId: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const { error } = await admin.rpc("merge_review_progress", {
+      _plan_review_id: planReviewId,
+      _patch: patch,
+    });
+    if (error) console.warn("[mergeProgress] rpc failed:", error.message);
+  } catch (err) {
+    console.warn("[mergeProgress] threw:", err);
+  }
+}

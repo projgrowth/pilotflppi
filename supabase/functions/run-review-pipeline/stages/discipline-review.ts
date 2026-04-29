@@ -12,7 +12,7 @@ import { createClient } from "../_shared/supabase.ts";
 import { callAI } from "../_shared/ai.ts";
 import { embedText } from "../_shared/embedding.ts";
 import { signedSheetUrls } from "../_shared/storage.ts";
-import { recordPipelineError, heartbeat } from "../_shared/pipeline-status.ts";
+import { recordPipelineError, heartbeat, mergeProgress } from "../_shared/pipeline-status.ts";
 import {
   DISCIPLINES,
   normalizeAIDiscipline,
@@ -750,29 +750,18 @@ export async function stageDisciplineReview(
     findingsSoFar: number;
   }) => {
     try {
-      const { data: cur } = await admin
-        .from("plan_reviews")
-        .select("ai_run_progress")
-        .eq("id", planReviewId)
-        .maybeSingle();
-      const prev =
-        ((cur as { ai_run_progress?: Record<string, unknown> | null } | null)
-          ?.ai_run_progress ?? {}) as Record<string, unknown>;
-      await admin
-        .from("plan_reviews")
-        .update({
-          ai_run_progress: {
-            ...prev,
-            discipline_review_progress: {
-              discipline: args.discipline,
-              chunk: args.chunk,
-              total: args.total,
-              findings_so_far: args.findingsSoFar,
-              last_chunk_at: new Date().toISOString(),
-            },
-          },
-        })
-        .eq("id", planReviewId);
+      // Atomic JSONB merge — see _shared/pipeline-status.ts. Replaces an
+      // earlier read-modify-write that would clobber concurrent submittal_check
+      // / dispatch updates.
+      await mergeProgress(admin, planReviewId, {
+        discipline_review_progress: {
+          discipline: args.discipline,
+          chunk: args.chunk,
+          total: args.total,
+          findings_so_far: args.findingsSoFar,
+          last_chunk_at: new Date().toISOString(),
+        },
+      });
       lastBeaconAt = Date.now();
       // Bump per-stage heartbeat so the watchdog sees this stage as alive
       // even if a single chunk takes >5 minutes.
@@ -1249,16 +1238,19 @@ export async function stageDisciplineReview(
   const expectedPages = allSheets.length;
   if (totalFindings === 0 && carryoverInserted === 0 && expectedPages > 5 && failed.length === 0) {
     const reason = `Pipeline produced 0 findings on ${expectedPages} sheets. Likely a bad upload or empty rasterize — please review manually.`;
+    // Atomic merge for ai_run_progress so concurrent stage writes can't
+    // clobber the failure_reason/low_yield_at markers the StuckRecoveryBanner
+    // reads.
+    await mergeProgress(admin, planReviewId, {
+      failure_reason: reason,
+      low_yield_at: new Date().toISOString(),
+      expected_pages: expectedPages,
+      total_findings: 0,
+    });
     await admin
       .from("plan_reviews")
       .update({
         ai_check_status: "needs_human_review",
-        ai_run_progress: {
-          failure_reason: reason,
-          low_yield_at: new Date().toISOString(),
-          expected_pages: expectedPages,
-          total_findings: 0,
-        },
         updated_at: new Date().toISOString(),
       })
       .eq("id", planReviewId);

@@ -23,7 +23,7 @@ import {
   stagesForMode,
   NEEDS_BROWSER_RASTERIZATION,
 } from "./_shared/types.ts";
-import { setStage, recordPipelineError } from "./_shared/pipeline-status.ts";
+import { setStage, recordPipelineError, mergeProgress } from "./_shared/pipeline-status.ts";
 import { withRetry } from "./_shared/retry.ts";
 import { setCostCtx, withCostCtx } from "./_shared/cost.ts";
 import { scheduleNextStage } from "./_shared/dispatcher.ts";
@@ -298,6 +298,7 @@ Deno.serve(async (req) => {
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        const errName = err instanceof Error ? err.name : "";
 
         // LOW_YIELD_REVIEW: pipeline already wrote ai_check_status='needs_human_review'.
         if (message.includes("LOW_YIELD_REVIEW")) {
@@ -307,6 +308,41 @@ Deno.serve(async (req) => {
             metadata: { error_class: "LOW_YIELD_REVIEW" },
           });
           return;
+        }
+
+        // No-files-uploaded is a user error, not a transient pipeline failure.
+        // Skip the 3× retry loop and flip the review to needs_user_action so
+        // the upload re-prompt surfaces immediately.
+        if (errName === "NoFilesUploadedError" || stageToRun === "upload") {
+          if (errName === "NoFilesUploadedError" || message.toLowerCase().includes("no files uploaded")) {
+            await recordPipelineError(admin, {
+              planReviewId: plan_review_id,
+              firmId,
+              stage: "upload",
+              errorClass: "no_files_uploaded",
+              errorMessage: message,
+              severity: "warn",
+            });
+            await setStage(admin, plan_review_id, firmId, "upload", {
+              status: "error",
+              error_message:
+                "No PDF files have been uploaded yet. Re-upload the plan set to start the review.",
+              metadata: { error_class: "no_files_uploaded" },
+            });
+            await mergeProgress(admin, plan_review_id, {
+              failure_reason: "No PDF files have been uploaded for this plan review yet.",
+              needs_user_action_stage: "upload",
+              needs_user_action_at: new Date().toISOString(),
+            });
+            await admin
+              .from("plan_reviews")
+              .update({
+                ai_check_status: "needs_user_action",
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", plan_review_id);
+            return;
+          }
         }
 
         // prepare_pages is verify-only here. A throw means the manifest is
@@ -332,24 +368,18 @@ Deno.serve(async (req) => {
           // review to needs_user_action immediately so StuckRecoveryBanner
           // surfaces the "Re-prepare in browser" CTA on this very page load.
           if (isNeedsBrowser) {
-            const { data: prRow } = await admin
-              .from("plan_reviews")
-              .select("ai_run_progress")
-              .eq("id", plan_review_id)
-              .maybeSingle();
-            const progress =
-              ((prRow as { ai_run_progress?: Record<string, unknown> | null } | null)
-                ?.ai_run_progress) ?? {};
+            // Atomic merge so we don't clobber other progress keys (chunk
+            // beacons, DNA confirmation, etc.) that may have been written by
+            // a still-running parallel stage.
+            await mergeProgress(admin, plan_review_id, {
+              failure_reason: userMessage,
+              needs_user_action_stage: "prepare_pages",
+              needs_user_action_at: new Date().toISOString(),
+            });
             await admin
               .from("plan_reviews")
               .update({
                 ai_check_status: "needs_user_action",
-                ai_run_progress: {
-                  ...(progress as Record<string, unknown>),
-                  failure_reason: userMessage,
-                  needs_user_action_stage: "prepare_pages",
-                  needs_user_action_at: new Date().toISOString(),
-                },
                 updated_at: new Date().toISOString(),
               })
               .eq("id", plan_review_id);
