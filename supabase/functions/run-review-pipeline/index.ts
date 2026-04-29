@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
     const rawMode = typeof body?.mode === "string" ? body.mode : "core";
     const mode: PipelineMode =
       rawMode === "deep" || rawMode === "full" ? rawMode : "core";
-    const activeChain = stagesForMode(mode);
+    const effectiveChain = stagesForMode(mode);
     void body?.target_source; // legacy field, ignored
     const isInternalSelfInvoke =
       body?._internal === true || req.headers.get("x-internal-self-invoke") === "1";
@@ -164,8 +164,8 @@ Deno.serve(async (req) => {
         await setStage(admin, plan_review_id, firmId, s, { status: "pending" });
       }
     } else {
-      stageToRun = activeChain[0];
-      for (const s of activeChain) {
+      stageToRun = effectiveChain[0];
+      for (const s of effectiveChain) {
         await setStage(admin, plan_review_id, firmId, s, { status: "pending" });
       }
     }
@@ -279,8 +279,8 @@ Deno.serve(async (req) => {
         }
 
         if (await isCancelled()) return;
-        const idx = activeChain.indexOf(stageToRun);
-        const next = idx >= 0 ? activeChain[idx + 1] : undefined;
+        const idx = effectiveChain.indexOf(stageToRun);
+        const next = idx >= 0 ? effectiveChain[idx + 1] : undefined;
         if (next) {
           // Don't double-schedule: the watchdog or a recovery worker may have
           // already advanced the chain.
@@ -292,7 +292,7 @@ Deno.serve(async (req) => {
             .maybeSingle();
           const ns = (nextRow as { status?: string } | null)?.status;
           if (ns !== "running" && ns !== "complete") {
-            scheduleNextStage(plan_review_id, next, { mode });
+            scheduleNextStage(plan_review_id, next, { mode: effectiveMode });
           }
         }
       } catch (err) {
@@ -394,7 +394,7 @@ Deno.serve(async (req) => {
               metadata: { ...existingMeta, [attemptsKey]: attempts, last_error: message },
             });
             setTimeout(() => {
-              scheduleNextStage(plan_review_id, stageToRun, { mode });
+              scheduleNextStage(plan_review_id, stageToRun, { mode: effectiveMode });
             }, 2000);
             return;
           }
@@ -409,9 +409,9 @@ Deno.serve(async (req) => {
         const isFatal = stageToRun === "upload" || stageToRun === "dna_extract";
         if (!isFatal) {
           if (await isCancelled()) return;
-          const idx = activeChain.indexOf(stageToRun);
-          const next = idx >= 0 ? activeChain[idx + 1] : undefined;
-          if (next) scheduleNextStage(plan_review_id, next, { mode });
+          const idx = effectiveChain.indexOf(stageToRun);
+          const next = idx >= 0 ? effectiveChain[idx + 1] : undefined;
+          if (next) scheduleNextStage(plan_review_id, next, { mode: effectiveMode });
         }
       }
     };
@@ -427,7 +427,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ ok: true, accepted: true, plan_review_id, stage: stageToRun, mode }),
+      JSON.stringify({ ok: true, accepted: true, plan_review_id, stage: stageToRun, mode: effectiveMode }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 202,
