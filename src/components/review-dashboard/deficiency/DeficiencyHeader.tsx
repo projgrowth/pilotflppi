@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, ShieldCheck, ShieldX, ShieldAlert, GitMerge, RefreshCw } from "lucide-react";
+import { ExternalLink, ShieldCheck, ShieldX, ShieldAlert, GitMerge, RefreshCw, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -146,6 +146,7 @@ export default function DeficiencyHeader({ planReviewId, def }: Props) {
               canonicalText={def.citation_canonical_text}
               compact
             />
+            <CitationStatusInfo />
             {needsReground(def.citation_status) && (
               <RegroundButton
                 planReviewId={planReviewId}
@@ -290,12 +291,36 @@ function RegroundButton({
           <RefreshCw
             className={cn("h-3 w-3", reground.isPending && "animate-spin")}
           />
-          Re-ground
+          Recheck citation
         </Button>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-xs text-xs">
-        Re-runs FBC citation matching for just this finding. Use after editing
-        the code reference, or to retry a hallucinated/mismatched citation.
+        Asks the AI to re-match this finding's code reference against the
+        Florida Building Code library. Use after editing the code reference, or
+        when the citation shows as hallucinated, mismatched, or unverified.
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function CitationStatusInfo() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label="What does the citation status mean?"
+          className="inline-flex items-center text-muted-foreground/60 hover:text-muted-foreground"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <HelpCircle className="h-3 w-3" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-[18rem] space-y-1 text-xs">
+        <div><span className="font-semibold">Verified</span> — the cited section's text supports this finding.</div>
+        <div><span className="font-semibold">Mismatch</span> — section exists, but its text doesn't support this finding.</div>
+        <div><span className="font-semibold">Hallucinated</span> — section doesn't exist in the FBC library.</div>
+        <div><span className="font-semibold">Unverified</span> — not yet checked. Click <span className="font-medium">Recheck citation</span> to run.</div>
       </TooltipContent>
     </Tooltip>
   );

@@ -165,7 +165,7 @@ export default function TriageInbox({ planReviewId }: Props) {
           <div className="flex-1">
             <div className="mb-1 flex items-center justify-between text-xs">
               <span className="font-medium">
-                Triage queue · {reviewedCount} of {totalCount} reviewed
+                Progress · {reviewedCount} of {totalCount} reviewed
                 {activeIdx >= 0 && (
                   <span className="ml-2 text-muted-foreground">
                     · viewing #{activeIdx + 1}
@@ -188,17 +188,11 @@ export default function TriageInbox({ planReviewId }: Props) {
           </Button>
         </div>
         <p className="mt-2 text-2xs text-muted-foreground">
-          Sorted by urgency — needs-human-review first, then life-safety, permit
-          blockers, liability, low-confidence. Press{" "}
           <kbd className="rounded border bg-background px-1 font-mono">J</kbd>/
-          <kbd className="rounded border bg-background px-1 font-mono">K</kbd> to
-          move,{" "}
-          <kbd className="rounded border bg-background px-1 font-mono">C</kbd>{" "}
-          confirm,{" "}
-          <kbd className="rounded border bg-background px-1 font-mono">R</kbd>{" "}
-          reject,{" "}
-          <kbd className="rounded border bg-background px-1 font-mono">M</kbd>{" "}
-          modify.
+          <kbd className="rounded border bg-background px-1 font-mono">K</kbd> move ·{" "}
+          <kbd className="rounded border bg-background px-1 font-mono">C</kbd> confirm ·{" "}
+          <kbd className="rounded border bg-background px-1 font-mono">⇧R</kbd> reject ·{" "}
+          <kbd className="rounded border bg-background px-1 font-mono">M</kbd> modify
         </p>
       </div>
 

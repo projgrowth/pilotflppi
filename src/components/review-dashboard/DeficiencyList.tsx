@@ -129,7 +129,7 @@ export default function DeficiencyList({ planReviewId, chipFilter }: Props) {
           <div className="flex-1">
             <div className="mb-1 flex items-center justify-between text-xs">
               <span className="font-medium">
-                Triage progress · {triage.reviewedCount} of {triage.totalCount}
+                Reviewed · {triage.reviewedCount} of {triage.totalCount}
               </span>
               <span className="font-mono text-muted-foreground">{progressPct}%</span>
             </div>
