@@ -51,6 +51,9 @@ const FIELDS: FieldDef[] = [
   { key: "has_mezzanine", label: "Has Mezzanine", type: "boolean" },
   { key: "is_high_rise", label: "High Rise", type: "boolean" },
   { key: "mixed_occupancy", label: "Mixed Occupancy", type: "boolean" },
+  // Audit Wave 5: editable so reviewers can fix when extraction misses.
+  { key: "occupant_load", label: "Occupant Load (designed)", type: "number" },
+  { key: "is_coastal", label: "Coastal / WBDR (parcel-level)", type: "boolean" },
 ];
 
 export default function ProjectDNAViewer({

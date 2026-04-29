@@ -149,6 +149,11 @@ export interface ProjectDnaRow {
   has_mezzanine: boolean | null;
   is_high_rise: boolean | null;
   mixed_occupancy: boolean | null;
+  /** Total designed occupant load — drives F.S. 553.79(5)(b) threshold check. */
+  occupant_load: number | null;
+  /** True when the parcel is on a barrier island / WBDR / coastal flood
+   *  zone — overrides the county's default inland classification. */
+  is_coastal: boolean | null;
   missing_fields: string[] | null;
   ambiguous_fields: string[] | null;
 }
