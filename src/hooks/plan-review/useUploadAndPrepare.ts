@@ -131,8 +131,12 @@ export function useUploadAndPrepare({
           .select("id", { count: "exact", head: true })
           .eq("plan_review_id", review.id);
 
+        if (!review.firm_id) {
+          throw new Error("This review is missing firm context. Reload and try again.");
+        }
         const result = await uploadPlanReviewFiles({
           reviewId: review.id,
+          firmId: review.firm_id,
           round: review.round,
           existingFileUrls: review.file_urls || [],
           existingPageCount: existingPageCount ?? 0,
