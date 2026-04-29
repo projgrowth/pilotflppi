@@ -496,11 +496,32 @@ async function attachEvidenceCrops(
     ? (checklist.last_sheet_map as Array<{ sheet_ref?: string; page_index?: number }>)
     : [];
 
+  // Fallback: pull from sheet_coverage when checklist snapshot is missing.
+  // This is the source of the top-left-pin bug — when sheet_map didn't
+  // persist (older runs, partial failures), every finding fell into the
+  // deterministic-default placement with no real page context.
+  const { data: coverageRows } = await admin
+    .from("sheet_coverage")
+    .select("sheet_ref, page_index")
+    .eq("plan_review_id", planReviewId);
+  const coverageMap = ((coverageRows ?? []) as Array<{
+    sheet_ref: string;
+    page_index: number | null;
+  }>).filter((r) => r.page_index !== null && r.page_index !== undefined) as Array<{
+    sheet_ref: string;
+    page_index: number;
+  }>;
+
   // Strict + fuzzy lookup so "A101", "A-101", "A-0101", "A.101" all collapse.
   const sheetToPage = new Map<string, number>();
   const fuzzyToPage = new Map<string, number>();
   const fuzzy = (s: string) =>
     s.toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^([A-Z]+)0+(\d)/, "$1$2");
+  // Coverage first (lower priority), then checklist (higher priority — overwrites).
+  for (const m of coverageMap) {
+    sheetToPage.set(m.sheet_ref.toUpperCase().trim(), m.page_index);
+    fuzzyToPage.set(fuzzy(m.sheet_ref), m.page_index);
+  }
   for (const m of rawMap) {
     if (typeof m.sheet_ref === "string" && typeof m.page_index === "number") {
       sheetToPage.set(m.sheet_ref.toUpperCase().trim(), m.page_index);
