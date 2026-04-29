@@ -69,7 +69,8 @@ Deno.serve(async (req) => {
     const rawMode = typeof body?.mode === "string" ? body.mode : "core";
     const mode: PipelineMode =
       rawMode === "deep" || rawMode === "full" ? rawMode : "core";
-    const effectiveChain = stagesForMode(mode);
+    // effectiveChain is built later (after persisted mode lookup) so a
+    // recovery worker doesn't downgrade a "deep" run to "core".
     void body?.target_source; // legacy field, ignored
     const isInternalSelfInvoke =
       body?._internal === true || req.headers.get("x-internal-self-invoke") === "1";
