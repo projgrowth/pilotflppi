@@ -212,6 +212,7 @@ export async function stageCritic(
         ],
         CRITIC_SCHEMA as unknown as Record<string, unknown>,
         "google/gemini-2.5-flash",
+        0,
       )) as typeof result;
     } catch (err) {
       console.error("[critic] batch failed:", err);

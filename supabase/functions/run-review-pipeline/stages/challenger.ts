@@ -148,6 +148,7 @@ export async function stageChallenger(
         // Stronger model than the critic. The cost is bounded — we only
         // challenge a small fraction of findings (high-stakes + low-confidence).
         "google/gemini-2.5-pro",
+        0,
       )) as typeof result;
     } catch (err) {
       console.error("[challenger] batch failed:", err);

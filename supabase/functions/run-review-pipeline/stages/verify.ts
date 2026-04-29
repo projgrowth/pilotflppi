@@ -242,6 +242,8 @@ export async function stageVerify(
             { role: "user", content },
           ],
           VERIFY_SCHEMA as unknown as Record<string, unknown>,
+          "google/gemini-2.5-flash",
+          0,
         )) as typeof result;
         lastError = null;
         break;
