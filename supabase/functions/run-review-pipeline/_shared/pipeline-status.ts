@@ -30,9 +30,13 @@ export async function setStage(
     error_message: patch.error_message ?? null,
     metadata: patch.metadata ?? {},
   };
-  if (patch.status === "running") payload.started_at = now;
+  if (patch.status === "running") {
+    payload.started_at = now;
+    payload.heartbeat_at = now;
+  }
   if (patch.status === "complete" || patch.status === "error") {
     payload.completed_at = now;
+    payload.heartbeat_at = now;
   }
 
   // Single upsert keyed on the (plan_review_id, stage) unique index. If the
