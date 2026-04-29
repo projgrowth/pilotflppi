@@ -6,6 +6,7 @@ import {
   validatePDFHeader,
 } from "@/lib/pdf-utils";
 import { startPipeline } from "@/lib/pipeline-run";
+import { normalizeStorageKey } from "@/lib/storage-paths";
 
 /**
  * Re-runs browser rasterization for an already-uploaded plan review.
@@ -56,10 +57,11 @@ async function downloadAndValidate(
   storagePath: string,
   warnings: string[],
 ): Promise<{ file: File; pageCount: number } | null> {
-  const name = storagePath.split("/").pop() ?? "plan.pdf";
+  const key = normalizeStorageKey(storagePath);
+  const name = key.split("/").pop() ?? "plan.pdf";
   const { data: signed, error: signErr } = await supabase.storage
     .from("documents")
-    .createSignedUrl(storagePath, 60 * 10);
+    .createSignedUrl(key, 60 * 10);
   if (signErr || !signed) {
     warnings.push(`${name}: ${signErr?.message ?? "could not sign URL"}`);
     return null;
