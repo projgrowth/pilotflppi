@@ -52,6 +52,7 @@ import { isHVHZ } from "@/lib/county-utils";
 import { getStatutoryStatus } from "@/lib/statutory-deadlines";
 import type { PlanReviewRow, ProjectInfo } from "@/types";
 import { usePlanReviewData } from "@/hooks/plan-review/usePlanReviewData";
+import { useCommentLetter } from "@/hooks/plan-review/useCommentLetter";
 import { useFindingFilters, useRoundDiff } from "@/hooks/plan-review/useFindingFilters";
 import { useFindingStatuses } from "@/hooks/plan-review/useFindingStatuses";
 import { usePdfPageRender } from "@/hooks/plan-review/usePdfPageRender";
@@ -93,6 +94,19 @@ export default function PlanReviewDetail() {
   // ── Data ───────────────────────────────────────────────────────────────
   const { review, isLoading, rounds, findings } = usePlanReviewData(id);
   const { findingStatuses, updateFindingStatus } = useFindingStatuses(review, user?.id, refetchHistory);
+
+  // ── Comment letter (AI streaming, autosave, hydration) ────────────────
+  const {
+    commentLetter,
+    setCommentLetter,
+    generatingLetter,
+    copied,
+    autosaveState,
+    lastSavedAt,
+    generate: generateCommentLetter,
+    cancel: cancelCommentLetter,
+    copy: copyLetter,
+  } = useCommentLetter({ review, findings, firmSettings });
 
   // ── PDF rendering ──────────────────────────────────────────────────────
   const { pageImages, renderingPages, renderProgress, renderDocumentPages, resetPages } =
