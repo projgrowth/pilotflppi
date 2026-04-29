@@ -103,7 +103,7 @@ export default function PlanReviewDetail() {
     copied,
     autosaveState,
     lastSavedAt,
-    generate: generateCommentLetter,
+    generate: streamCommentLetter,
     cancel: cancelCommentLetter,
     copy: copyLetter,
   } = useCommentLetter({ review, findings, firmSettings });
@@ -352,55 +352,15 @@ export default function PlanReviewDetail() {
     navigate(`/plan-review/${review.id}/dashboard`);
   };
 
-  const generateCommentLetter = async (r: PlanReviewRow) => {
-    letterAbortRef.current?.abort();
-    const controller = new AbortController();
-    letterAbortRef.current = controller;
-
-    setGeneratingLetter(true);
-    setCommentLetter("");
-    setRightPanel("letter");
-    try {
-      await streamAI({
-        action: "generate_comment_letter",
-        payload: {
-          project_name: r.project?.name,
-          address: r.project?.address,
-          trade_type: r.project?.trade_type,
-          county: r.project?.county,
-          jurisdiction: r.project?.jurisdiction,
-          findings,
-          round: r.round,
-          firm_name: firmSettings?.firm_name || undefined,
-          license_number: firmSettings?.license_number || undefined,
-        },
-        onDelta: (chunk) => setCommentLetter((prev) => prev + chunk),
-        onDone: () => setGeneratingLetter(false),
-        signal: controller.signal,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to generate letter";
-      if (msg === "AI request cancelled") {
-        toast.message("Letter generation cancelled");
-      } else {
-        toast.error(msg);
-      }
-      setGeneratingLetter(false);
-    } finally {
-      if (letterAbortRef.current === controller) letterAbortRef.current = null;
-    }
-  };
-
-  const cancelCommentLetter = () => {
-    letterAbortRef.current?.abort();
-  };
-
-  const copyLetter = () => {
-    navigator.clipboard.writeText(commentLetter);
-    setCopied(true);
-    toast.success("Copied to clipboard");
-    setTimeout(() => setCopied(false), 2000);
-  };
+  // Page-level wrapper: in addition to streaming, switch the right panel to
+  // the letter tab so the user sees the AI text as it arrives.
+  const generateCommentLetter = useCallback(
+    async (r: PlanReviewRow) => {
+      setRightPanel("letter");
+      await streamCommentLetter(r);
+    },
+    [streamCommentLetter],
+  );
 
   const handleAnnotationClick = useCallback((index: number) => {
     setActiveFindingIndex(index);
