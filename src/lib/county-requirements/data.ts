@@ -92,7 +92,7 @@ export const COUNTY_REGISTRY: Record<string, Partial<CountyRequirements>> = {
     amendments: [
       { ref: "Broward County Amendments to FBC Ch. 17", description: "Local structural amendments" },
       { ref: "FBC 1626 (HVHZ)", description: "High Velocity Hurricane Zone requirements" },
-      { ref: "Broward County Ordinance 2023-XX", description: "Local building safety amendments" },
+      { ref: "Broward County Ordinance Ch. 39 (Building Code)", description: "Local building safety amendments adopting FBC with HVHZ provisions" },
     ],
     supplementalSections: [
       "wind_mitigation_enhanced", "noa_table", "flood_zone",
