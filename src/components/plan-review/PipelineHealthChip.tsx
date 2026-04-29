@@ -71,6 +71,7 @@ export default function PipelineHealthChip({
         .from("pipeline_error_log")
         .select("id, stage, error_class, error_message, attempt_count, created_at, plan_review_id")
         .in("plan_review_id", ids)
+        .in("severity", ["warn", "error"])
         .gte("created_at", since)
         .order("created_at", { ascending: false })
         .limit(20);

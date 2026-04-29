@@ -254,9 +254,24 @@ export async function uploadPlanReviewFiles(
 
   let pipelineStarted = false;
   if (partialRasterize) {
-    warnings.push(
-      `Pipeline NOT started — only ${pageAssetRows.length} of ${totalExpectedPages} pages prepared. Use "Prepare pages now" to retry the gaps.`,
-    );
+    const reason = `Only ${pageAssetRows.length} of ${totalExpectedPages} pages prepared. Use "Prepare pages now" to retry the gaps before analyzing.`;
+    warnings.push(`Pipeline NOT started — ${reason}`);
+    // Persist the limbo state so a user who closes the tab and comes back
+    // tomorrow sees the StuckRecoveryBanner CTA instead of an empty workspace.
+    await supabase
+      .from("plan_reviews")
+      .update({
+        ai_check_status: "needs_user_action",
+        ai_run_progress: {
+          pre_rasterized: pageAssetRows.length > 0,
+          pre_rasterized_pages: pageAssetRows.length,
+          expected_pages: (existingPageCount ?? 0) + totalExpectedPages,
+          failure_reason: reason,
+          needs_user_action_stage: "prepare_pages",
+          needs_user_action_at: new Date().toISOString(),
+        },
+      })
+      .eq("id", reviewId);
   } else {
     const pipeline = await startPipeline(reviewId, "core");
     if (!pipeline.ok) {

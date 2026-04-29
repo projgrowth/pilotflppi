@@ -184,9 +184,14 @@ Deno.serve(async (req) => {
 
     const runOneStage = async () => {
       if (await isCancelled()) {
+        // Cancelled runs used to be marked `error` with message "Cancelled by
+        // user" — that polluted the Errors tab and the Analytics failure-rate
+        // chart. Mark them with a metadata flag instead so dashboards can
+        // bucket them separately.
         await setStage(admin, plan_review_id, firmId, stageToRun, {
           status: "error",
           error_message: "Cancelled by user",
+          metadata: { cancelled: true, error_class: "cancelled" },
         });
         return;
       }
@@ -301,6 +306,32 @@ Deno.serve(async (req) => {
             error_message: userMessage,
             metadata: { error_class: isNeedsBrowser ? NEEDS_BROWSER_RASTERIZATION : "prepare_pages_failed" },
           });
+          // Don't make the user wait 15 minutes for the watchdog. Flip the
+          // review to needs_user_action immediately so StuckRecoveryBanner
+          // surfaces the "Re-prepare in browser" CTA on this very page load.
+          if (isNeedsBrowser) {
+            const { data: prRow } = await admin
+              .from("plan_reviews")
+              .select("ai_run_progress")
+              .eq("id", plan_review_id)
+              .maybeSingle();
+            const progress =
+              ((prRow as { ai_run_progress?: Record<string, unknown> | null } | null)
+                ?.ai_run_progress) ?? {};
+            await admin
+              .from("plan_reviews")
+              .update({
+                ai_check_status: "needs_user_action",
+                ai_run_progress: {
+                  ...(progress as Record<string, unknown>),
+                  failure_reason: userMessage,
+                  needs_user_action_stage: "prepare_pages",
+                  needs_user_action_at: new Date().toISOString(),
+                },
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", plan_review_id);
+          }
           return;
         }
 

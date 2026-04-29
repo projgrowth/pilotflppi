@@ -63,6 +63,9 @@ export async function recordCostMetric(metadata: Record<string, unknown>): Promi
       error_class: "cost_metric",
       error_message: "",
       attempt_count: 1,
+      // Cost rows are telemetry, not errors — `severity` keeps the Errors
+      // tab and Analytics trend chart from drowning in green-path noise.
+      severity: "info",
       metadata: {
         discipline: ctx.discipline,
         chunk: ctx.chunk,
