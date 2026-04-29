@@ -592,6 +592,8 @@ export default function PlanReviewDetail() {
       // Compute readiness from the live deficiencies_v2 rows so the gate the
       // reviewer sees in the dialog matches what we'll snapshot at send-time.
       try {
+        const ctyForCoastal = (projectDna?.county ?? review.project?.county ?? "").trim();
+        const countyReq = ctyForCoastal ? getCountyRequirements(ctyForCoastal) : null;
         const readiness = await fetchReadinessForSend({
           planReviewId: review.id,
           qcStatus: review.qc_status,
@@ -602,6 +604,8 @@ export default function PlanReviewDetail() {
           specialInspectorDesignated: !!review.special_inspector_designated,
           reviewerLicensedDisciplines: [],
           projectDnaMissingFields: [],
+          dnaIsCoastal: projectDna?.is_coastal ?? null,
+          countyAlreadyCoastal: !!(countyReq?.windBorneDebrisRegion && countyReq?.floodZoneRequired),
         });
         setPendingReadiness(readiness);
       } catch {
