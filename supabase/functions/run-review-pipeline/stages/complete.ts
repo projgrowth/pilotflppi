@@ -77,6 +77,28 @@ export async function stageComplete(
   // Pre-pass: attach a page thumbnail to every finding missing visual evidence
   // so the legitimacy "with_evidence_crop_pct" metric below reflects reality.
   const cropStats = await attachPageThumbnailCrops(admin, planReviewId);
+
+  // Upstream-error gate: if verify or ground_citations errored, the findings
+  // we have are not validated. Computing a quality score on top of un-grounded
+  // findings produces a misleading "looks good — 3 findings" UX. Force the
+  // run into needs_human_review with a precise blocker reason instead.
+  const { data: upstreamRows } = await admin
+    .from("review_pipeline_status")
+    .select("stage, status, error_message, metadata")
+    .eq("plan_review_id", planReviewId)
+    .in("stage", ["verify", "ground_citations", "discipline_review"]);
+  const failedUpstream = ((upstreamRows ?? []) as Array<{
+    stage: string;
+    status: string;
+    error_message: string | null;
+    metadata: Record<string, unknown> | null;
+  }>).filter((r) => {
+    if (r.status !== "error") return false;
+    // Cancellations are a user choice, not a quality failure — don't gate on them.
+    const cls = (r.metadata as { error_class?: string } | null)?.error_class;
+    return cls !== "cancelled";
+  });
+
   const { data: sheetRows } = await admin
     .from("sheet_coverage")
     .select("sheet_ref, page_index, discipline")
@@ -118,13 +140,19 @@ export async function stageComplete(
   if (withCrop >= 0.8) qualityScore += 20;
   if (!hasHallucinated) qualityScore += 20;
 
-  // Defensibility gate — verifier stalled or hallucinated citations remain.
-  const needsHumanReview = unverifiedPct > 0.25 || hasHallucinated;
+  // Defensibility gate — verifier stalled, hallucinated citations remain, OR
+  // an upstream verification stage errored.
+  const upstreamFailed = failedUpstream.length > 0;
+  const needsHumanReview = upstreamFailed || unverifiedPct > 0.25 || hasHallucinated;
   const aiCheckStatus = needsHumanReview ? "needs_human_review" : "complete";
   const blockerReason = needsHumanReview
-    ? unverifiedPct > 0.25
-      ? `Verifier stalled — ${unverifiedCount} of ${live.length} findings never reached a verdict.`
-      : "Hallucinated FBC citations remain. Triage before this can be marked complete."
+    ? upstreamFailed
+      ? `Upstream stage failed (${failedUpstream
+          .map((r) => r.stage)
+          .join(", ")}) — findings were not validated. Re-run before sending.`
+      : unverifiedPct > 0.25
+        ? `Verifier stalled — ${unverifiedCount} of ${live.length} findings never reached a verdict.`
+        : "Hallucinated FBC citations remain. Triage before this can be marked complete."
     : null;
 
   const { data: existing } = await admin
