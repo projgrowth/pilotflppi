@@ -184,9 +184,14 @@ Deno.serve(async (req) => {
 
     const runOneStage = async () => {
       if (await isCancelled()) {
+        // Cancelled runs used to be marked `error` with message "Cancelled by
+        // user" — that polluted the Errors tab and the Analytics failure-rate
+        // chart. Mark them with a metadata flag instead so dashboards can
+        // bucket them separately.
         await setStage(admin, plan_review_id, firmId, stageToRun, {
           status: "error",
           error_message: "Cancelled by user",
+          metadata: { cancelled: true, error_class: "cancelled" },
         });
         return;
       }
