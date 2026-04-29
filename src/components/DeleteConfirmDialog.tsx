@@ -6,7 +6,7 @@
  * Pattern: user must type the resource's name verbatim before the destructive
  * button enables. Matches Linear/GitHub/Vercel.
  */
-import { useEffect, useState } from "react";
+import { forwardRef, useEffect, useState } from "react";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -34,10 +34,12 @@ export interface DeleteConfirmDialogProps {
   onConfirm: () => Promise<void> | void;
 }
 
-export function DeleteConfirmDialog({
+// forwardRef so callers can wrap us in <Tooltip asChild> or any Radix slot
+// pattern without React warning about refs being passed to a function component.
+export const DeleteConfirmDialog = forwardRef<HTMLDivElement, DeleteConfirmDialogProps>(function DeleteConfirmDialog({
   open, onOpenChange, resourceLabel, expectedConfirmText,
   title, description, cascadeItems, loading, onConfirm,
-}: DeleteConfirmDialogProps) {
+}, _ref) {
   const [typed, setTyped] = useState("");
 
   useEffect(() => {
