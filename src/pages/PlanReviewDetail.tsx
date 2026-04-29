@@ -1005,6 +1005,10 @@ export default function PlanReviewDetail() {
                 uploading={uploading}
                 uploadSuccess={uploadSuccess}
                 pipelineProcessing={pipelineProcessing}
+                processingPhase={processingPhase}
+                preparedPages={uploadProgress?.prepared ?? pageAssetCount}
+                expectedPages={uploadProgress?.expected ?? justCreatedState?.pendingPageCount ?? 0}
+                pendingFileCount={justCreatedState?.pendingFileCount ?? fileUrls.length}
                 onPipelineComplete={handlePipelineComplete}
                 onOpenDashboard={openDashboard}
                 planReviewId={review.id}
@@ -1083,6 +1087,10 @@ export default function PlanReviewDetail() {
                 uploading={uploading}
                 uploadSuccess={uploadSuccess}
                 pipelineProcessing={pipelineProcessing}
+                processingPhase={processingPhase}
+                preparedPages={uploadProgress?.prepared ?? pageAssetCount}
+                expectedPages={uploadProgress?.expected ?? justCreatedState?.pendingPageCount ?? 0}
+                pendingFileCount={justCreatedState?.pendingFileCount ?? fileUrls.length}
                 onPipelineComplete={handlePipelineComplete}
                 onOpenDashboard={openDashboard}
                 findings={findings}
