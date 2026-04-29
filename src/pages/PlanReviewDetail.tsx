@@ -118,33 +118,30 @@ export default function PlanReviewDetail() {
   // failure (Edge can't rasterize PDFs reliably). Surface a banner so reviewers
   // can recover without leaving this page.
   const { data: pipeRows = [] } = usePipelineStatus(id);
-  const preparePagesErrored = (() => {
-    const row = pipeRows.find((r) => r.stage === "prepare_pages");
-    if (!row || row.status !== "error") return false;
-    const meta = (row as unknown as { metadata?: { error_class?: string } })?.metadata;
-    const msg = (row.error_message ?? "").toLowerCase();
-    return (
-      meta?.error_class === "needs_browser_rasterization" ||
-      msg.includes("re-prepare") ||
-      msg.includes("haven't been prepared")
-    );
-  })();
-
-  // Live page-asset count drives the "needs preparation" banner — when files
-  // are uploaded but no rasterized pages exist yet, the pipeline cannot run
-  // and we need to nudge the user to prepare before they hit "Re-Analyze".
-  const { data: pageAssetCount = 0 } = useQuery({
-    queryKey: ["plan-review-page-asset-count", id],
-    queryFn: async () => {
-      if (!id) return 0;
-      const { count } = await supabase
-        .from("plan_review_page_assets")
-        .select("id", { count: "exact", head: true })
-        .eq("plan_review_id", id);
-      return count ?? 0;
+  // Upload + prepare-pages flow lives in useUploadAndPrepare. The
+  // hasAutoRendered ref is declared up here so the upload-complete callback
+  // can reset it before resetPages() — keeps re-render of fresh uploads
+  // deterministic without bouncing through a ref-via-effect dance.
+  const hasAutoRendered = useRef(false);
+  const {
+    uploading,
+    uploadProgress,
+    uploadSuccess,
+    pageAssetCount,
+    preparePagesErrored,
+    reprepping,
+    handleFileUpload,
+    handleReprepareInBrowser,
+  } = useUploadAndPrepare({
+    reviewId: id,
+    review,
+    userId: user?.id,
+    pipeRows: pipeRows as Parameters<typeof useUploadAndPrepare>[0]["pipeRows"],
+    navigateToDashboard: (rid) => navigate(`/plan-review/${rid}/dashboard`),
+    onUploadComplete: () => {
+      hasAutoRendered.current = false;
+      resetPages();
     },
-    enabled: !!id,
-    refetchInterval: 5000,
   });
 
   // ── UI state ───────────────────────────────────────────────────────────
