@@ -249,23 +249,29 @@ Deno.serve(async (req) => {
         if (stageToRun === "submittal_check") {
           const m = meta as { complete?: boolean; missing?: string[] };
           if (m.complete === false) {
-            const { data: settingsRow } = await admin
-              .from("firm_settings")
-              .select("block_review_on_incomplete_submittal")
-              .eq("user_id", firmId ?? "00000000-0000-0000-0000-000000000000")
-              .maybeSingle();
-            // firm_settings is keyed by user_id (firm owner), so fall back to
-            // any row in the firm if the owner row isn't present.
-            let block = (settingsRow as { block_review_on_incomplete_submittal?: boolean } | null)
-              ?.block_review_on_incomplete_submittal ?? false;
-            if (!settingsRow && firmId) {
-              const { data: anyRow } = await admin
+            // Multi-tenant safety (A-03): always scope firm_settings to the
+            // current firm. Prefer firm_id (tenant key); fall back to user_id
+            // (firm owner) for legacy rows. NEVER query without a firm filter
+            // or another tenant's settings could leak in.
+            let block = false;
+            if (firmId) {
+              const { data: byFirm } = await admin
                 .from("firm_settings")
                 .select("block_review_on_incomplete_submittal")
-                .limit(1)
+                .eq("firm_id", firmId)
                 .maybeSingle();
-              block = (anyRow as { block_review_on_incomplete_submittal?: boolean } | null)
-                ?.block_review_on_incomplete_submittal ?? false;
+              if (byFirm) {
+                block = (byFirm as { block_review_on_incomplete_submittal?: boolean })
+                  ?.block_review_on_incomplete_submittal ?? false;
+              } else {
+                const { data: byOwner } = await admin
+                  .from("firm_settings")
+                  .select("block_review_on_incomplete_submittal")
+                  .eq("user_id", firmId)
+                  .maybeSingle();
+                block = (byOwner as { block_review_on_incomplete_submittal?: boolean } | null)
+                  ?.block_review_on_incomplete_submittal ?? false;
+              }
             }
             if (block) {
               const missingLabel = (m.missing ?? []).join(", ") || "required disciplines";
