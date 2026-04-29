@@ -8,6 +8,7 @@
 //    and computes the legitimacy quality score shown on the review header.
 
 import { createClient } from "../_shared/supabase.ts";
+import { mergeProgress } from "../_shared/pipeline-status.ts";
 
 async function attachPageThumbnailCrops(
   admin: ReturnType<typeof createClient>,
@@ -157,11 +158,25 @@ export async function stageComplete(
 
   const { data: existing } = await admin
     .from("plan_reviews")
-    .select("ai_run_progress, checklist_state")
+    .select("checklist_state")
     .eq("id", planReviewId)
     .maybeSingle();
   const prevState = ((existing?.checklist_state ?? {}) as Record<string, unknown>) ?? {};
-  const prevProgress = ((existing?.ai_run_progress ?? {}) as Record<string, unknown>) ?? {};
+
+  // Atomic JSONB merge for the quality breakdown so a late discipline_review
+  // chunk beacon can't accidentally erase the score we just computed.
+  await mergeProgress(admin, planReviewId, {
+    quality_score: qualityScore,
+    quality_breakdown: {
+      verified_citations_pct: Math.round(verifiedCit * 100),
+      verified_findings_pct: Math.round(verifiedVer * 100),
+      with_evidence_crop_pct: Math.round(withCrop * 100),
+      has_hallucinated_citations: hasHallucinated,
+      unverified_pct: Math.round(unverifiedPct * 100),
+      total_live_findings: live.length,
+      blocker_reason: blockerReason,
+    },
+  });
 
   await admin
     .from("plan_reviews")
@@ -172,19 +187,6 @@ export async function stageComplete(
         ...prevState,
         last_sheet_map: snapshot,
         last_sheet_map_at: new Date().toISOString(),
-      },
-      ai_run_progress: {
-        ...prevProgress,
-        quality_score: qualityScore,
-        quality_breakdown: {
-          verified_citations_pct: Math.round(verifiedCit * 100),
-          verified_findings_pct: Math.round(verifiedVer * 100),
-          with_evidence_crop_pct: Math.round(withCrop * 100),
-          has_hallucinated_citations: hasHallucinated,
-          unverified_pct: Math.round(unverifiedPct * 100),
-          total_live_findings: live.length,
-          blocker_reason: blockerReason,
-        },
       },
       updated_at: new Date().toISOString(),
     })
