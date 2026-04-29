@@ -18,7 +18,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 // streamAI now consumed by useCommentLetter
 import { useFirmSettings } from "@/hooks/useFirmSettings";
