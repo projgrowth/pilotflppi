@@ -89,10 +89,17 @@ export function NewReviewDialog({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [uploading, setUploading] = useState(false);
+  const [validatingCount, setValidatingCount] = useState<{ done: number; total: number } | null>(null);
   const [saving, setSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [extractDoneCount, setExtractDoneCount] = useState<number | null>(null);
   const [geocoding, setGeocoding] = useState(false);
+  // Live progress while we await the upload helper before navigating.
+  const [submitProgress, setSubmitProgress] = useState<{
+    phase: string;
+    prepared: number;
+    expected: number;
+  } | null>(null);
 
   const [files, setFiles] = useState<UploadedFile[]>([]);
 
