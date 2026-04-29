@@ -719,15 +719,14 @@ export default function PlanReviewDetail() {
       // Compute readiness from the live deficiencies_v2 rows so the gate the
       // reviewer sees in the dialog matches what we'll snapshot at send-time.
       try {
-        const r: any = review as any;
         const readiness = await fetchReadinessForSend({
           planReviewId: review.id,
           qcStatus: review.qc_status,
-          noticeFiledAt: r.notice_to_building_official_filed_at ?? null,
-          affidavitSignedAt: r.compliance_affidavit_signed_at ?? null,
-          isThresholdBuilding: !!r.threshold_building,
-          thresholdTriggers: Array.isArray(r.threshold_triggers) ? r.threshold_triggers : [],
-          specialInspectorDesignated: !!r.special_inspector_designated,
+          noticeFiledAt: review.notice_to_building_official_filed_at ?? null,
+          affidavitSignedAt: review.compliance_affidavit_signed_at ?? null,
+          isThresholdBuilding: !!review.threshold_building,
+          thresholdTriggers: Array.isArray(review.threshold_triggers) ? review.threshold_triggers : [],
+          specialInspectorDesignated: !!review.special_inspector_designated,
           reviewerLicensedDisciplines: [],
           projectDnaMissingFields: [],
         });
@@ -1220,8 +1219,8 @@ export default function PlanReviewDetail() {
           setSending(true);
           try {
             const recipient =
-              (review as any).contractor_email ??
-              (review.project as any)?.contractor_email ??
+              review.contractor_email ??
+              (review.project as ProjectInfo & { contractor_email?: string | null } | null | undefined)?.contractor_email ??
               "";
             const result = await sendCommentLetter({
               planReviewId: review.id,

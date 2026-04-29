@@ -94,7 +94,7 @@ export interface PlanReviewRow {
   finding_statuses?: Record<string, string> | null;
   previous_findings?: unknown;
   project?: ProjectInfo | null;
-  qc_status?: string;
+  qc_status?: QcStatus | string;
   qc_reviewer_id?: string | null;
   qc_notes?: string;
   reviewer_id?: string | null;
@@ -102,4 +102,25 @@ export interface PlanReviewRow {
    *  /dashboard route is now the sole orchestrator and writes deficiencies_v2.
    *  Field kept for backward-compat with existing query selects. */
   pipeline_version?: string;
+  // Statutory / compliance fields used by the letter-readiness gate.
+  // Typing these explicitly removes the dangerous `as any` cast in
+  // PlanReviewDetail and lets TS catch a misspelled field name before a
+  // misleading "ready to send" verdict reaches the building official.
+  notice_to_building_official_filed_at?: string | null;
+  compliance_affidavit_signed_at?: string | null;
+  threshold_building?: boolean | null;
+  threshold_triggers?: string[] | null;
+  special_inspector_designated?: boolean | null;
+  contractor_email?: string | null;
 }
+
+/**
+ * QC review status. Compared as a string literal at the readiness gate
+ * (`qcStatus === "qc_approved"`), so a typo would silently send a draft
+ * letter — keeping this as a closed union is a load-bearing safety check.
+ */
+export type QcStatus =
+  | "draft"
+  | "qc_pending"
+  | "qc_approved"
+  | "qc_rejected";
