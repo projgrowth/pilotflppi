@@ -23,7 +23,7 @@ import {
   stagesForMode,
   NEEDS_BROWSER_RASTERIZATION,
 } from "./_shared/types.ts";
-import { setStage, recordPipelineError } from "./_shared/pipeline-status.ts";
+import { setStage, recordPipelineError, mergeProgress } from "./_shared/pipeline-status.ts";
 import { withRetry } from "./_shared/retry.ts";
 import { setCostCtx, withCostCtx } from "./_shared/cost.ts";
 import { scheduleNextStage } from "./_shared/dispatcher.ts";
@@ -332,24 +332,18 @@ Deno.serve(async (req) => {
           // review to needs_user_action immediately so StuckRecoveryBanner
           // surfaces the "Re-prepare in browser" CTA on this very page load.
           if (isNeedsBrowser) {
-            const { data: prRow } = await admin
-              .from("plan_reviews")
-              .select("ai_run_progress")
-              .eq("id", plan_review_id)
-              .maybeSingle();
-            const progress =
-              ((prRow as { ai_run_progress?: Record<string, unknown> | null } | null)
-                ?.ai_run_progress) ?? {};
+            // Atomic merge so we don't clobber other progress keys (chunk
+            // beacons, DNA confirmation, etc.) that may have been written by
+            // a still-running parallel stage.
+            await mergeProgress(admin, plan_review_id, {
+              failure_reason: userMessage,
+              needs_user_action_stage: "prepare_pages",
+              needs_user_action_at: new Date().toISOString(),
+            });
             await admin
               .from("plan_reviews")
               .update({
                 ai_check_status: "needs_user_action",
-                ai_run_progress: {
-                  ...(progress as Record<string, unknown>),
-                  failure_reason: userMessage,
-                  needs_user_action_stage: "prepare_pages",
-                  needs_user_action_at: new Date().toISOString(),
-                },
                 updated_at: new Date().toISOString(),
               })
               .eq("id", plan_review_id);
