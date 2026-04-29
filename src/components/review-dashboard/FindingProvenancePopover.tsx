@@ -7,7 +7,7 @@ import {
 import { type DeficiencyV2Row } from "@/hooks/useReviewDashboard";
 
 interface Props {
-  def: DeficiencyV2Row & { model_version?: string | null };
+  def: DeficiencyV2Row & { model_version?: string | null; prompt_version_id?: string | null };
 }
 
 /**
@@ -51,6 +51,11 @@ export default function FindingProvenancePopover({ def }: Props) {
               <span className="text-muted-foreground">unknown</span>
             )}
           </Row>
+          {def.prompt_version_id && (
+            <Row label="Prompt">
+              <span className="font-mono opacity-80">{def.prompt_version_id.slice(0, 8)}…</span>
+            </Row>
+          )}
           <Row label="Confidence">
             {typeof def.confidence_score === "number" ? (
               <span className="font-mono">{def.confidence_score.toFixed(2)}</span>
