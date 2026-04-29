@@ -147,6 +147,7 @@ export function NewReviewDialog({
     setUploading(false);
     setSaving(false);
     setExtracting(false);
+    setExtractDoneCount(null);
     setGeocoding(false);
   };
 
