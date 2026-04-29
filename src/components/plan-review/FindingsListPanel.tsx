@@ -9,7 +9,7 @@
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Sparkles, Upload } from "lucide-react";
+import { Sparkles, Upload, FileText, X } from "lucide-react";
 import { FindingCard, type Finding } from "@/components/FindingCard";
 import { BulkTriageFilters, type ConfidenceFilter, type QualityFilter } from "@/components/BulkTriageFilters";
 import { ConfidenceMeter } from "@/components/shared/ConfidenceMeter";
