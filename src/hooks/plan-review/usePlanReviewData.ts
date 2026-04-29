@@ -72,9 +72,45 @@ export function usePlanReviewData(reviewId: string | undefined) {
   // flags). The adapter shapes them into the legacy Finding interface and
   // joins each row to the stored sheet_map snapshot so every finding gets
   // a deterministic pin on the right page in the viewer.
-  const sheetMap: SheetMapEntry[] | null =
+  //
+  // We compose the sheet→page map from TWO sources:
+  //   1. `plan_reviews.checklist_state.last_sheet_map` — written by the
+  //      sheet_map pipeline stage. Authoritative when present.
+  //   2. `sheet_coverage` rows — written for every reviewed sheet, including
+  //      reviews where last_sheet_map was never persisted. Used as a fallback
+  //      so pin placement still works on legacy / partially-failed reviews.
+  // Without the fallback, every pin lands at the deterministic-default
+  // location with no real page context.
+  const checklistMap: SheetMapEntry[] | null =
     ((review as unknown as { checklist_state?: { last_sheet_map?: SheetMapEntry[] } } | undefined)
       ?.checklist_state?.last_sheet_map) ?? null;
+  const coverageQuery = useQuery({
+    queryKey: ["sheet-coverage-for-pins", review?.id],
+    enabled: !!review?.id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("sheet_coverage")
+        .select("sheet_ref, page_index")
+        .eq("plan_review_id", review!.id);
+      if (error) throw error;
+      return (data ?? []) as SheetMapEntry[];
+    },
+  });
+  const sheetMap: SheetMapEntry[] | null = (() => {
+    const merged = new Map<string, SheetMapEntry>();
+    for (const r of coverageQuery.data ?? []) {
+      if (r.sheet_ref && typeof r.page_index === "number") {
+        merged.set(r.sheet_ref.toUpperCase().trim(), r);
+      }
+    }
+    // checklist_state wins on conflict — it's the authoritative snapshot.
+    for (const r of checklistMap ?? []) {
+      if (r.sheet_ref && typeof r.page_index === "number") {
+        merged.set(r.sheet_ref.toUpperCase().trim(), r);
+      }
+    }
+    return merged.size > 0 ? Array.from(merged.values()) : null;
+  })();
   const findingsQuery = useQuery<Finding[]>({
     queryKey: ["v2-findings-for-viewer", review?.id, sheetMap?.length ?? 0],
     enabled: !!review?.id,
