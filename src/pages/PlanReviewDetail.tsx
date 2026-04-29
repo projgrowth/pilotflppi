@@ -20,7 +20,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { streamAI } from "@/lib/ai";
+// streamAI now consumed by useCommentLetter
 import { useFirmSettings } from "@/hooks/useFirmSettings";
 import { useFindingHistory } from "@/hooks/useFindingHistory";
 import { useAuth } from "@/contexts/AuthContext";
@@ -38,7 +38,7 @@ import { LetterLintDialog } from "@/components/plan-review/LetterLintDialog";
 import { FindingsListPanel } from "@/components/plan-review/FindingsListPanel";
 import { PlanViewerPanel } from "@/components/plan-review/PlanViewerPanel";
 import { useConfirm } from "@/hooks/useConfirm";
-import { useLetterAutosave } from "@/hooks/useLetterAutosave";
+// useLetterAutosave now consumed by useCommentLetter
 import { lintCommentLetter, hasBlockingIssues, type LintIssue } from "@/lib/letter-linter";
 import { cn } from "@/lib/utils";
 import { isTypingTarget } from "@/lib/review-shortcuts";
@@ -52,6 +52,7 @@ import { isHVHZ } from "@/lib/county-utils";
 import { getStatutoryStatus } from "@/lib/statutory-deadlines";
 import type { PlanReviewRow, ProjectInfo } from "@/types";
 import { usePlanReviewData } from "@/hooks/plan-review/usePlanReviewData";
+import { useCommentLetter } from "@/hooks/plan-review/useCommentLetter";
 import { useFindingFilters, useRoundDiff } from "@/hooks/plan-review/useFindingFilters";
 import { useFindingStatuses } from "@/hooks/plan-review/useFindingStatuses";
 import { usePdfPageRender } from "@/hooks/plan-review/usePdfPageRender";
@@ -94,6 +95,19 @@ export default function PlanReviewDetail() {
   const { review, isLoading, rounds, findings } = usePlanReviewData(id);
   const { findingStatuses, updateFindingStatus } = useFindingStatuses(review, user?.id, refetchHistory);
 
+  // ── Comment letter (AI streaming, autosave, hydration) ────────────────
+  const {
+    commentLetter,
+    setCommentLetter,
+    generatingLetter,
+    copied,
+    autosaveState,
+    lastSavedAt,
+    generate: streamCommentLetter,
+    cancel: cancelCommentLetter,
+    copy: copyLetter,
+  } = useCommentLetter({ review, findings, firmSettings });
+
   // ── PDF rendering ──────────────────────────────────────────────────────
   const { pageImages, renderingPages, renderProgress, renderDocumentPages, resetPages } =
     usePdfPageRender();
@@ -133,10 +147,7 @@ export default function PlanReviewDetail() {
   });
 
   // ── UI state ───────────────────────────────────────────────────────────
-  const [commentLetter, setCommentLetter] = useState("");
-  const [generatingLetter, setGeneratingLetter] = useState(false);
-  const letterAbortRef = useRef<AbortController | null>(null);
-  const [copied, setCopied] = useState(false);
+  // Comment-letter state lives in useCommentLetter — see below where review/findings are wired up.
   const [uploading, setUploading] = useState(false);
   const [rightPanel, setRightPanel] = useState<RightPanelMode>("findings");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -227,21 +238,7 @@ export default function PlanReviewDetail() {
       setReprepping(false);
     }
   }, [id, reprepping, queryClient]);
-  const letterHydratedRef = useRef<string | null>(null);
-
-  // Autosave the comment letter to the review row, debounced.
-  const { state: autosaveState, lastSavedAt } = useLetterAutosave(review?.id, commentLetter, !generatingLetter);
-
-  // Hydrate the letter draft once per review id (don't clobber in-flight stream).
-  useEffect(() => {
-    if (!review) return;
-    if (letterHydratedRef.current === review.id) return;
-    letterHydratedRef.current = review.id;
-    const draft = (review as { comment_letter_draft?: string }).comment_letter_draft;
-    if (typeof draft === "string" && draft.length > 0) {
-      setCommentLetter(draft);
-    }
-  }, [review?.id]);
+  // (Letter hydration + autosave moved to useCommentLetter.)
 
   const handleRepositionConfirm = useCallback(
     async (
@@ -355,55 +352,15 @@ export default function PlanReviewDetail() {
     navigate(`/plan-review/${review.id}/dashboard`);
   };
 
-  const generateCommentLetter = async (r: PlanReviewRow) => {
-    letterAbortRef.current?.abort();
-    const controller = new AbortController();
-    letterAbortRef.current = controller;
-
-    setGeneratingLetter(true);
-    setCommentLetter("");
-    setRightPanel("letter");
-    try {
-      await streamAI({
-        action: "generate_comment_letter",
-        payload: {
-          project_name: r.project?.name,
-          address: r.project?.address,
-          trade_type: r.project?.trade_type,
-          county: r.project?.county,
-          jurisdiction: r.project?.jurisdiction,
-          findings,
-          round: r.round,
-          firm_name: firmSettings?.firm_name || undefined,
-          license_number: firmSettings?.license_number || undefined,
-        },
-        onDelta: (chunk) => setCommentLetter((prev) => prev + chunk),
-        onDone: () => setGeneratingLetter(false),
-        signal: controller.signal,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to generate letter";
-      if (msg === "AI request cancelled") {
-        toast.message("Letter generation cancelled");
-      } else {
-        toast.error(msg);
-      }
-      setGeneratingLetter(false);
-    } finally {
-      if (letterAbortRef.current === controller) letterAbortRef.current = null;
-    }
-  };
-
-  const cancelCommentLetter = () => {
-    letterAbortRef.current?.abort();
-  };
-
-  const copyLetter = () => {
-    navigator.clipboard.writeText(commentLetter);
-    setCopied(true);
-    toast.success("Copied to clipboard");
-    setTimeout(() => setCopied(false), 2000);
-  };
+  // Page-level wrapper: in addition to streaming, switch the right panel to
+  // the letter tab so the user sees the AI text as it arrives.
+  const generateCommentLetter = useCallback(
+    async (r: PlanReviewRow) => {
+      setRightPanel("letter");
+      await streamCommentLetter(r);
+    },
+    [streamCommentLetter],
+  );
 
   const handleAnnotationClick = useCallback((index: number) => {
     setActiveFindingIndex(index);
