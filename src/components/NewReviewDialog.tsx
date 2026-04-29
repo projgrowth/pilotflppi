@@ -554,18 +554,33 @@ export function NewReviewDialog({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label className="text-xs">Project name *</Label>
-                  <Input value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="e.g. Palm Gardens Residence" />
+                  <div className="relative">
+                    <Input
+                      value={projectName}
+                      onChange={(e) => setProjectName(e.target.value)}
+                      placeholder={extracting && !projectName ? "AI is filling this in…" : "e.g. Palm Gardens Residence"}
+                      className={cn(extracting && !projectName && "pr-8 ring-1 ring-accent/30 animate-pulse")}
+                    />
+                    {extracting && !projectName && (
+                      <Sparkles className="h-3.5 w-3.5 text-accent absolute right-2.5 top-1/2 -translate-y-1/2 animate-pulse pointer-events-none" />
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label className="text-xs">Address *</Label>
                   <div className="flex gap-2">
-                    <Input
-                      value={address}
-                      onChange={(e) => setAddress(e.target.value)}
-                      onBlur={handleAddressBlur}
-                      placeholder="123 Main St, Miami, FL"
-                      className="flex-1"
-                    />
+                    <div className="relative flex-1">
+                      <Input
+                        value={address}
+                        onChange={(e) => setAddress(e.target.value)}
+                        onBlur={handleAddressBlur}
+                        placeholder={extracting && !address ? "AI is filling this in…" : "123 Main St, Miami, FL"}
+                        className={cn("w-full", extracting && !address && "pr-8 ring-1 ring-accent/30 animate-pulse")}
+                      />
+                      {extracting && !address && (
+                        <Sparkles className="h-3.5 w-3.5 text-accent absolute right-2.5 top-1/2 -translate-y-1/2 animate-pulse pointer-events-none" />
+                      )}
+                    </div>
                     <Button
                       type="button"
                       variant="outline"
