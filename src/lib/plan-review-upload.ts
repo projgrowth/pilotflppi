@@ -163,7 +163,11 @@ export async function uploadPlanReviewFiles(
             .upload(path, blob, { upsert: true, contentType: "image/jpeg" });
           return { error: res.error ? { message: res.error.message } : null };
         },
-        { startGlobalIndex: existingPageCount ?? 0, batchSize: 4 },
+        {
+          startGlobalIndex: existingPageCount ?? 0,
+          batchSize: 4,
+          pagesPrefix: `${prefix}/pages`,
+        },
       );
       pageAssetRows = succeeded;
       allFailures = failures.map((f) => ({
