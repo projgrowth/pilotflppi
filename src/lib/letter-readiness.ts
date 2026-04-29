@@ -403,6 +403,41 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
     });
   }
 
+  // 11. Coastal overlay (Audit M-04 follow-up). DNA flagged the project as
+  // coastal but the county's static registry doesn't cover WBDR + flood —
+  // boilerplate WBDR/flood callouts will be missing. Block until the
+  // reviewer reclassifies the county or escalates manually.
+  if (input.dnaIsCoastal === true && input.countyAlreadyCoastal === false) {
+    checks.push({
+      id: "coastal_overlay",
+      required: true,
+      severity: "block",
+      title: "Project is coastal but county is classified inland",
+      detail:
+        "DNA marked this project as coastal (barrier island, WBDR strip, or coastline frontage), but the county registry doesn't carry Wind-Borne Debris Region + flood-zone boilerplate. Reclassify the county to coastal in the registry, or add WBDR/flood comments by hand before sending.",
+    });
+  }
+
+  // 12. Stale dispositions (audit follow-up risk #6). Any finding whose
+  // `updated_at` advanced after the reviewer marked it confirm/reject/modify
+  // means the human's decision no longer reflects the current finding text.
+  // Force them to re-decide before the letter goes out.
+  const stale = live.filter((f) => {
+    if (!f.reviewer_disposition || !f.reviewer_disposition_at || !f.updated_at) return false;
+    return new Date(f.updated_at).getTime() - new Date(f.reviewer_disposition_at).getTime() > 1000;
+  });
+  if (stale.length > 0) {
+    checks.push({
+      id: "stale_disposition",
+      required: true,
+      severity: "block",
+      title: `${stale.length} finding${stale.length === 1 ? " was" : "s were"} edited after triage`,
+      detail:
+        "These findings changed (text, citation, sheet, etc.) after the reviewer last marked them confirm/reject/modify. Re-triage so the recorded human decision matches the current finding before sending.",
+      jumpFindingId: stale[0]?.id,
+    });
+  }
+
   const required = checks.filter((c) => c.required);
   const blockingCount = required.filter((c) => c.severity === "block").length;
   return {
