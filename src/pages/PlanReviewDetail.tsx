@@ -67,6 +67,7 @@ import { ReviewProvenanceStrip } from "@/components/plan-review/ReviewProvenance
 import DNAConfirmCard from "@/components/plan-review/DNAConfirmCard";
 import { sendCommentLetter } from "@/lib/send-comment-letter";
 import { fetchReadinessForSend } from "@/lib/letter-readiness-fetch";
+import { getCountyRequirements } from "@/lib/county-requirements/utils";
 import { useFirmId } from "@/hooks/useFirmId";
 import type { ReadinessResult } from "@/lib/letter-readiness";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
@@ -105,11 +106,11 @@ export default function PlanReviewDetail() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("project_dna")
-        .select("fbc_edition")
+        .select("fbc_edition, is_coastal, county")
         .eq("plan_review_id", id!)
         .maybeSingle();
       if (error) throw error;
-      return (data ?? null) as { fbc_edition: string | null } | null;
+      return (data ?? null) as { fbc_edition: string | null; is_coastal: boolean | null; county: string | null } | null;
     },
   });
 
@@ -592,6 +593,8 @@ export default function PlanReviewDetail() {
       // Compute readiness from the live deficiencies_v2 rows so the gate the
       // reviewer sees in the dialog matches what we'll snapshot at send-time.
       try {
+        const ctyForCoastal = (projectDna?.county ?? review.project?.county ?? "").trim();
+        const countyReq = ctyForCoastal ? getCountyRequirements(ctyForCoastal) : null;
         const readiness = await fetchReadinessForSend({
           planReviewId: review.id,
           qcStatus: review.qc_status,
@@ -602,6 +605,8 @@ export default function PlanReviewDetail() {
           specialInspectorDesignated: !!review.special_inspector_designated,
           reviewerLicensedDisciplines: [],
           projectDnaMissingFields: [],
+          dnaIsCoastal: projectDna?.is_coastal ?? null,
+          countyAlreadyCoastal: !!(countyReq?.windBorneDebrisRegion && countyReq?.floodZoneRequired),
         });
         setPendingReadiness(readiness);
       } catch {

@@ -53,6 +53,7 @@ import { cancelPipelineForReview } from "@/lib/pipeline-cancel";
 import { usePipelineErrorStream } from "@/hooks/usePipelineErrors";
 import { reprepareInBrowser } from "@/lib/reprepare-in-browser";
 import type { ChipFilter } from "@/hooks/useFilteredDeficiencies";
+import { getCountyRequirements } from "@/lib/county-requirements/utils";
 
 interface ReviewWithProject {
   id: string;
@@ -520,6 +521,13 @@ export default function ReviewDashboard() {
           coveragePct={coveragePct}
           blockLetterOnLowCoverage={firmSettings?.block_letter_on_low_coverage ?? true}
           blockLetterOnUngrounded={firmSettings?.block_letter_on_ungrounded ?? true}
+          dnaIsCoastal={dna?.is_coastal ?? null}
+          countyAlreadyCoastal={(() => {
+            const cty = (dna?.county ?? review?.project?.county ?? "").trim();
+            if (!cty) return false;
+            const req = getCountyRequirements(cty);
+            return !!(req.windBorneDebrisRegion && req.floodZoneRequired);
+          })()}
           onJumpToFinding={() => setActiveTab("triage")}
         />
       )}
