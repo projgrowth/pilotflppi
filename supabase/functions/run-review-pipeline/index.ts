@@ -165,6 +165,33 @@ Deno.serve(async (req) => {
         await setStage(admin, plan_review_id, firmId, s, { status: "pending" });
       }
     } else {
+      // H-04: Concurrency guard — fresh runs only. If a live run already
+      // exists on this plan_review_id (a stage marked running with a
+      // recent heartbeat), reject instead of double-billing AI tokens.
+      // Stale runs (heartbeat > 2 min old) are reaped by the watchdog and
+      // will not block a new attempt.
+      const HEARTBEAT_FRESH_MS = 2 * 60 * 1000;
+      const cutoffIso = new Date(Date.now() - HEARTBEAT_FRESH_MS).toISOString();
+      const { data: liveStages } = await admin
+        .from("review_pipeline_status")
+        .select("stage, heartbeat_at, updated_at")
+        .eq("plan_review_id", plan_review_id)
+        .eq("status", "running")
+        .gte("heartbeat_at", cutoffIso);
+      if (liveStages && liveStages.length > 0) {
+        const stages = (liveStages as Array<{ stage: string }>).map((s) => s.stage).join(", ");
+        return new Response(
+          JSON.stringify({
+            error: "pipeline_already_running",
+            message: `A pipeline run is already in progress for this review (stages: ${stages}). Cancel it first or wait for it to finish.`,
+          }),
+          {
+            status: 409,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+
       stageToRun = effectiveChain[0];
       for (const s of effectiveChain) {
         await setStage(admin, plan_review_id, firmId, s, { status: "pending" });
