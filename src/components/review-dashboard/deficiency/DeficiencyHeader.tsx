@@ -303,6 +303,29 @@ function RegroundButton({
   );
 }
 
+function CitationStatusInfo() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label="What does the citation status mean?"
+          className="inline-flex items-center text-muted-foreground/60 hover:text-muted-foreground"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <HelpCircle className="h-3 w-3" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-[18rem] space-y-1 text-xs">
+        <div><span className="font-semibold">Verified</span> — the cited section's text supports this finding.</div>
+        <div><span className="font-semibold">Mismatch</span> — section exists, but its text doesn't support this finding.</div>
+        <div><span className="font-semibold">Hallucinated</span> — section doesn't exist in the FBC library.</div>
+        <div><span className="font-semibold">Unverified</span> — not yet checked. Click <span className="font-medium">Recheck citation</span> to run.</div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function Tag({
   tone,
   children,
