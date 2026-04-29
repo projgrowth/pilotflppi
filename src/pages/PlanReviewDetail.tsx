@@ -58,7 +58,7 @@ import { useFindingFilters, useRoundDiff } from "@/hooks/plan-review/useFindingF
 import { useFindingStatuses } from "@/hooks/plan-review/useFindingStatuses";
 import { usePdfPageRender } from "@/hooks/plan-review/usePdfPageRender";
 import { usePipelineStatus } from "@/hooks/useReviewDashboard";
-import { reprepareInBrowser } from "@/lib/reprepare-in-browser";
+// reprepareInBrowser now consumed by useUploadAndPrepare
 import { StuckRecoveryBanner } from "@/components/plan-review/StuckRecoveryBanner";
 import { RoundCarryoverPanel } from "@/components/plan-review/RoundCarryoverPanel";
 import { UploadProgressBar } from "@/components/plan-review/UploadProgressBar";
