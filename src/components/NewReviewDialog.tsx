@@ -91,6 +91,7 @@ export function NewReviewDialog({
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
+  const [extractDoneCount, setExtractDoneCount] = useState<number | null>(null);
   const [geocoding, setGeocoding] = useState(false);
 
   const [files, setFiles] = useState<UploadedFile[]>([]);
@@ -146,6 +147,7 @@ export function NewReviewDialog({
     setUploading(false);
     setSaving(false);
     setExtracting(false);
+    setExtractDoneCount(null);
     setGeocoding(false);
   };
 
@@ -211,6 +213,8 @@ export function NewReviewDialog({
 
   const backgroundAutoFill = useCallback(async (firstPdf: File) => {
     setExtracting(true);
+    setExtractDoneCount(null);
+    let timedOut = false;
     try {
       const titleBlockBase64 = await renderTitleBlock(firstPdf);
       if (!titleBlockBase64) return;
@@ -220,7 +224,7 @@ export function NewReviewDialog({
           payload: { images: [titleBlockBase64] },
         }),
         new Promise<string>((_, reject) =>
-          setTimeout(() => reject(new Error("timeout")), EXTRACTION_TIMEOUT_MS),
+          setTimeout(() => { timedOut = true; reject(new Error("timeout")); }, EXTRACTION_TIMEOUT_MS),
         ),
       ]);
       let extracted: Record<string, string | null> = {};
@@ -267,9 +271,16 @@ export function NewReviewDialog({
         if (match) setMatchedProject({ id: match.id, name: match.name });
       }
 
-      if (filledCount > 0) toast.success(`AI auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"}`);
+      setExtractDoneCount(filledCount);
+      if (filledCount > 0) {
+        toast.success(`AI auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"}`);
+      }
+      // Auto-clear the success banner after a few seconds
+      setTimeout(() => setExtractDoneCount(null), 4000);
     } catch {
-      // Silent — user can still submit manually.
+      if (timedOut) {
+        toast.warning("Auto-fill timed out — please fill the fields manually");
+      }
     } finally {
       setExtracting(false);
     }
@@ -442,12 +453,35 @@ export function NewReviewDialog({
               ))}
               <p className="text-[11px] text-muted-foreground">
                 {files.length} file(s) · {totalPages} pages
-                {extracting && (
-                  <span className="ml-2 inline-flex items-center gap-1 text-accent">
-                    <Sparkles className="h-3 w-3 animate-pulse" /> AI auto-filling…
-                  </span>
-                )}
               </p>
+            </div>
+          )}
+
+          {/* AI extraction banner — prominent so users know we're working */}
+          {extracting && (
+            <div className="rounded-lg border border-accent/40 bg-accent/5 p-3">
+              <div className="flex items-start gap-2.5">
+                <Sparkles className="h-4 w-4 text-accent shrink-0 mt-0.5 animate-pulse" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-foreground">Reading your plans…</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    AI is extracting the project name, address, county and trade from the title block. Usually 5–15 seconds — you can keep filling in fields while we work.
+                  </p>
+                  <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-accent/15">
+                    <div className="h-full w-1/3 rounded-full bg-accent/70 animate-[slide-in-right_1.6s_ease-in-out_infinite]" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          {!extracting && extractDoneCount !== null && extractDoneCount > 0 && (
+            <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 animate-fade-in">
+              <div className="flex items-center gap-2">
+                <Check className="h-4 w-4 text-accent shrink-0" />
+                <p className="text-sm font-medium text-foreground">
+                  Auto-filled {extractDoneCount} field{extractDoneCount === 1 ? "" : "s"} — please review before submitting.
+                </p>
+              </div>
             </div>
           )}
 
@@ -520,18 +554,33 @@ export function NewReviewDialog({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label className="text-xs">Project name *</Label>
-                  <Input value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="e.g. Palm Gardens Residence" />
+                  <div className="relative">
+                    <Input
+                      value={projectName}
+                      onChange={(e) => setProjectName(e.target.value)}
+                      placeholder={extracting && !projectName ? "AI is filling this in…" : "e.g. Palm Gardens Residence"}
+                      className={cn(extracting && !projectName && "pr-8 ring-1 ring-accent/30 animate-pulse")}
+                    />
+                    {extracting && !projectName && (
+                      <Sparkles className="h-3.5 w-3.5 text-accent absolute right-2.5 top-1/2 -translate-y-1/2 animate-pulse pointer-events-none" />
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label className="text-xs">Address *</Label>
                   <div className="flex gap-2">
-                    <Input
-                      value={address}
-                      onChange={(e) => setAddress(e.target.value)}
-                      onBlur={handleAddressBlur}
-                      placeholder="123 Main St, Miami, FL"
-                      className="flex-1"
-                    />
+                    <div className="relative flex-1">
+                      <Input
+                        value={address}
+                        onChange={(e) => setAddress(e.target.value)}
+                        onBlur={handleAddressBlur}
+                        placeholder={extracting && !address ? "AI is filling this in…" : "123 Main St, Miami, FL"}
+                        className={cn("w-full", extracting && !address && "pr-8 ring-1 ring-accent/30 animate-pulse")}
+                      />
+                      {extracting && !address && (
+                        <Sparkles className="h-3.5 w-3.5 text-accent absolute right-2.5 top-1/2 -translate-y-1/2 animate-pulse pointer-events-none" />
+                      )}
+                    </div>
                     <Button
                       type="button"
                       variant="outline"
@@ -625,9 +674,25 @@ export function NewReviewDialog({
               <><Sparkles className="h-4 w-4 mr-2" /> Start review <ArrowRight className="h-4 w-4 ml-2" /></>
             )}
           </Button>
-          <p className="text-[11px] text-center text-muted-foreground leading-relaxed">
-            We'll keep uploading in the workspace — keep this browser open for ~30 sec, then it's safe to leave.
-          </p>
+          {saving ? (
+            <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 animate-fade-in">
+              <div className="flex items-start gap-2.5">
+                <Loader2 className="h-4 w-4 text-accent shrink-0 mt-0.5 animate-spin" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-foreground">
+                    Creating review and uploading {files.length} file{files.length === 1 ? "" : "s"}…
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    You'll be taken to the workspace in a moment. Keep this tab open for ~30 seconds while uploads finish.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-[11px] text-center text-muted-foreground leading-relaxed">
+              We'll keep uploading in the workspace — keep this browser open for ~30 sec, then it's safe to leave.
+            </p>
+          )}
         </div>
       </DialogContent>
     </Dialog>

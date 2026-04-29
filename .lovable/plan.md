@@ -1,68 +1,59 @@
-## Audit reconciliation — what shipped vs. what didn't
+# Make AI auto-fill visible during New Plan Review
 
-The original `fpp_audit_report.html` is no longer in the sandbox (uploads are ephemeral), but every claim from it is captured verbatim in `.lovable/plan.md`'s verification table. I cross-checked each against live code.
+## Problem
 
-### Audit findings — final status (21 items)
+When you drop PDFs into "New Plan Review", the AI runs in the background to extract project name, address, county, etc. from the title block. This can take up to ~20 seconds, but the only visible signal is a tiny `Sparkles` icon and the text "AI auto-filling…" wedged into the file-count line at the bottom of the file list. There's no indication on the form fields themselves that they're about to be populated, no progress, and no estimate of how long it will take. Users assume the dialog is frozen and either wait confused or start typing manually (which then blocks the AI from filling those fields).
 
-| ID | Item | Shipped? | Where to verify |
-|---|---|---|---|
-| C-01 | Mixed AI model families | ✅ | `_shared/ai.ts` default `gemini-2.5-flash`; corrections promoted off `flash-lite` |
-| C-02 | Firm name/license hardcoded | ✅ | `ai/index.ts:42-58` `PromptContext` injected |
-| C-03 | Pause/resume double-counts | ✅ | `statutory-deadlines.ts:187` `getNetBusinessDaysElapsed` |
-| C-04 | No `temperature` on AI calls | ✅ | `_shared/ai.ts:11` required arg, default 0 |
-| C-05 | Duplicate `id: "citations"` | ✅ | `letter-readiness.ts:222` renamed to `verifier_completion` |
-| C-06 | "FBC 2023" hardcoded | ✅ | `ai/index.ts:52, 95, 106, 150` use `${fbcEdition}` |
-| C-07 | `occupant_load` missing from DNA | ✅ | `stages/dna.ts:43, 274` |
-| H-01 | Broward `2023-XX` placeholder | ✅ | `data.ts:95` real ordinance ref |
-| H-02 | `blockLetterOnUngrounded` ambiguous | ⚠ partial | JSDoc warning added; column rename deferred |
-| H-03 | Lovable AI gateway = SPOF | ❌ deferred | No fallback provider |
-| H-04 | No concurrent-run guard | ✅ | `run-review-pipeline/index.ts:185` returns 409 |
-| H-05 | 14-day resubmission hardcoded | ✅ | `ai/index.ts:53-58` `resubmission_days` from county |
-| H-06 | DBPR license verification | ❌ deferred | Documented in README + UI |
-| M-01 | False-positive Assembly threshold | ✅ | `threshold-building.ts:55-71` |
-| M-02 | Single pause/resume slot | ✅ | `clock_pause_history` JSONB + `buildPausedIntervals` |
-| M-03 | No `letter-readiness` tests | ✅ | `src/test/letter-readiness.test.ts` (23 cases) |
-| M-04 | Hillsborough mis-classified inland | ✅ | `data.ts:203` `coastal()` |
-| M-05 | Correction matching on `flash-lite` | ✅ | both correction edge fns on `gemini-2.5-flash` |
-| A-01 | Default README | ✅ | rewritten |
-| A-02 | CORS wildcard | ✅ | `ai/index.ts:7-31` allowlist + Vary: Origin |
-| A-03 | Cross-firm `firm_settings` leak | ✅ | `index.ts:283-302` firm-scoped lookup |
+A second smaller issue: after clicking "Start review", the button shows a spinner labeled "Starting…" but the helper text below ("We'll keep uploading in the workspace — keep this browser open for ~30 sec") is small and easy to miss.
 
-**Closed: 18. Intentionally deferred: 3 (H-02 column rename, H-03 gateway fallback, H-06 DBPR API).**
+## What we'll change
 
-### Latent risks the audit didn't catch
+All changes are in `src/components/NewReviewDialog.tsx`. No backend/API changes.
 
-These are real issues I found while verifying the audit. Each is small but worth a sweep before calling the review system "production-trustworthy."
+### 1. Prominent auto-fill banner
 
-1. **`projects.review_clock_paused_at` and `clock_pause_history` can drift.** The legacy column is now a "derived view of the open entry" but nothing enforces that. If two clients race a pause/resume, the column and JSON can disagree and `getStatutoryStatus` will quietly use the wrong one. Fix: a Postgres trigger that keeps the column in sync with the last entry of the JSONB array, or drop the column entirely after a backfill.
+When `extracting === true`, show a full-width banner directly under the drop zone (above the form fields) instead of the tiny inline hint:
 
-2. **DNA `is_coastal` is extracted but no readiness check enforces it.** We added the field and flipped Hillsborough to coastal, but if the AI returns `is_coastal: true` on an inland-classified county, nothing in `letter-readiness.ts` overlays WBDR/flood requirements as the plan promised (plan item 13). The data lands; the logic gate is missing.
+```
+┌──────────────────────────────────────────────────────────┐
+│ ✦ Reading your plans…                                    │
+│   AI is extracting the project name, address, county     │
+│   and trade from the title block. Usually 5–15 seconds.  │
+│   ▓▓▓▓▓▓▓▓░░░░░░░░░░░░  (animated indeterminate bar)    │
+└──────────────────────────────────────────────────────────┘
+```
 
-3. **`signed_url` lifetime vs. DNA vision call.** `stages/dna.ts:162` uses `signedSheetUrls` then sends URLs to the model. If signed URL TTL is short and the gateway retries, the second attempt may 403. Worth a 60s minimum TTL audit across all vision stages.
+- Uses the existing accent color, `Sparkles` icon, and a Tailwind animated progress bar (no new deps).
+- After completion, briefly transitions to a green "✓ Auto-filled N field(s)" confirmation that fades out after ~3s (we already toast this — we'll keep both, but the banner makes it impossible to miss).
 
-4. **Concurrency guard is single-region only.** `H-04` is satisfied at the application layer (`pipeline_already_running`), but with no Postgres advisory lock a true race (two workers within the same millisecond) can still slip through. Plan said "add a Postgres advisory lock on the plan_review_id UUID hash" — that part wasn't implemented. Add `pg_try_advisory_xact_lock(hashtext(plan_review_id))` at the top of the stage runner.
+### 2. Per-field "AI is filling this…" affordance
 
-5. **CORS allowlist excludes the Lovable id-preview pattern host.** The regex `/^https:\/\/[a-z0-9-]+\.lovable\.app$/i` matches `pilotflppi.lovable.app` and `id-preview--6396bf6f-...lovable.app`, but the user's custom domain `projgrowth.site` is correctly explicit. Confirm the pattern also matches `*--*.lovable.app` (it does — `-` is in the character class). No fix needed; flagging because the audit's A-02 would have caught a typo here.
+While `extracting` is true, on the empty fields that AI will populate (Project Name, Address, County, Trade), show a faint shimmer/pulse on the input border and a small `Sparkles` icon inside the input on the right side. The moment a field is filled (or the user types in it), the affordance disappears for that field. This gives a visual link between "AI is working" and the specific fields it's about to touch.
 
-6. **Letter readiness gate trusts `reviewer_disposition !== null` to mean "human decided."** A reviewer who saves a draft and walks away can leave a stale disposition that no longer matches the current finding. Consider checking `reviewer_disposition_at >= finding.updated_at` so a finding edited after disposition re-blocks the letter.
+### 3. Don't reset extraction state silently on timeout
 
-### Recommended next moves (ordered)
+Today, on the 20s timeout the `catch` block is silent. We'll add a soft toast: "Auto-fill timed out — please fill the fields manually" so users know to take over. The form is otherwise unaffected.
 
-**Wave 6 — Trust hardening (recommended).** ~1 evening of work. Closes the highest-impact gaps from the latent list.
-- Add a DB trigger to keep `review_clock_paused_at` in sync with `clock_pause_history` (risk #1).
-- Add an `is_coastal` overlay in `letter-readiness.ts` so inland-classified coastal jobs pick up WBDR/flood requirements (risk #2 — completes plan item 13).
-- Add `pg_try_advisory_xact_lock(hashtext(plan_review_id))` at the top of the stage runner (risk #4).
-- Stale-disposition check in `letter-readiness.ts` (risk #6).
+### 4. Clearer submit/handoff state
 
-**Wave 7 — Deferred items (optional, larger).**
-- H-02 column rename: coordinated migration of `block_letter_on_ungrounded` → `allow_stub_citations` with value flip + UI sweep.
-- H-03 gateway fallback: add a direct-Google AI provider behind a feature flag.
-- H-06 DBPR license verification: live API integration; multi-day project on its own.
+Replace the small helper text under the "Start review" button with a more prominent inline status block that appears only while `saving` is true:
 
-### What I'd skip
+```
+┌──────────────────────────────────────────────────────────┐
+│ ⟳ Creating review and uploading {N} file(s)…             │
+│   You'll be taken to the workspace in a moment. Keep     │
+│   this tab open for ~30 seconds while uploads finish.    │
+└──────────────────────────────────────────────────────────┘
+```
 
-The audit's C-01 model-family complaint is essentially closed by standardizing on `gemini-2.5-flash` and documenting the choice in `mem://logic/ai-intelligence-logic`. Don't churn on it further.
+The button itself stays disabled with the existing "Starting…" spinner.
 
-### My recommendation
+### 5. Disable form interaction during extraction? (No)
 
-Approve **Wave 6 — Trust hardening** as the next deploy unit. It's the smallest set of changes that closes every audit-adjacent risk I can verify in the code, and it leaves the three intentionally-deferred items (H-02, H-03, H-06) clearly scoped for their own waves. Reply "yes" to proceed and I'll switch to build mode.
+We considered disabling the form during extraction so users wait for AI, but the current "user can submit immediately, AI fills empty fields only" behavior is good. We'll keep it. The new banner just makes the wait *visible* rather than hidden.
+
+## Files touched
+
+- `src/components/NewReviewDialog.tsx` — banner, per-field affordance, timeout toast, submit status block.
+
+No new packages, no backend changes, no migrations. Nothing else in the app is affected.
