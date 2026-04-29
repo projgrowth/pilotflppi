@@ -237,7 +237,7 @@ export async function reprepareInBrowser(reviewId: string): Promise<ReprepareRes
         const baseName = src.name.replace(/\.pdf$/i, "");
         for (const r of rendered) {
           const globalIdx = src.globalStart + (r.pageInFile - 1);
-          const pagePath = `plan-reviews/${reviewId}/pages/${baseName}/p-${String(globalIdx).padStart(3, "0")}.jpg`;
+          const pagePath = `${pagesPrefix}/${baseName}/p-${String(globalIdx).padStart(3, "0")}.jpg`;
           const { error: upErr } = await supabase.storage
             .from("documents")
             .upload(pagePath, r.blob, { upsert: true, contentType: "image/jpeg" });
