@@ -36,6 +36,9 @@ interface Props {
   preparedPages?: number;
   expectedPages?: number;
   pendingFileCount?: number;
+  /** Optional context shown on the bootstrapping overlay. */
+  projectName?: string;
+  pendingFileNames?: string[];
   onPipelineComplete?: () => void;
   onOpenDashboard?: () => void;
 
@@ -104,13 +107,13 @@ export function PlanViewerPanel(props: Props) {
             <Upload className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
           )}
           <p className="text-sm font-medium text-foreground">
-            {props.uploading ? "Uploading…" : "Drop the full plan set (PDF)"}
+            {props.uploading ? "Uploading…" : "Drop your plans (PDFs)"}
           </p>
           <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
             Include the cover, code summary, and all discipline sheets.<br />
             We auto-detect Architectural, Structural, MEP, Civil &amp; Fire Protection.
           </p>
-          <p className="text-2xs text-muted-foreground/70 mt-2">PDF up to 50&nbsp;MB</p>
+          <p className="text-2xs text-muted-foreground/70 mt-2">PDFs up to 50&nbsp;MB each</p>
           <input
             ref={props.fileInputRef}
             type="file"
@@ -139,6 +142,8 @@ export function PlanViewerPanel(props: Props) {
           preparedPages={props.preparedPages}
           expectedPages={props.expectedPages}
           fileCount={props.pendingFileCount}
+          projectName={props.projectName}
+          fileNames={props.pendingFileNames}
           onComplete={props.onPipelineComplete}
           onOpenDashboard={props.onOpenDashboard}
         />
@@ -177,6 +182,7 @@ export function PlanViewerPanel(props: Props) {
             return (
               <span
                 key={i}
+                title={name}
                 className="group inline-flex items-center gap-1 text-2xs text-muted-foreground bg-muted px-2 py-0.5 rounded max-w-[240px]"
               >
                 <span className="truncate">{name}</span>
@@ -194,10 +200,10 @@ export function PlanViewerPanel(props: Props) {
             );
           })}
           <button
-            className="text-2xs text-accent hover:text-accent/80 transition-colors shrink-0"
+            className="inline-flex items-center gap-1 text-2xs font-medium text-accent hover:text-accent/80 hover:bg-accent/10 px-2 py-0.5 rounded transition-colors shrink-0"
             onClick={() => props.fileInputRef.current?.click()}
           >
-            + Add file
+            <span aria-hidden>+</span> Add file
           </button>
           <input
             ref={props.fileInputRef}

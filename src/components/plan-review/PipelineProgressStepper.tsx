@@ -210,6 +210,8 @@ export function PipelineProgressStepper({
 
   // Auto-retry watcher: any visible stage that's been `running` past the stuck
   // threshold gets one nudge per attempt, capped at 2 auto-retries per stage.
+  // Skip discipline_review when we have a fresh heartbeat — it's healthy work,
+  // not a stalled worker.
   useEffect(() => {
     for (const row of rows) {
       const stage = row.stage as PipelineStage;
@@ -218,6 +220,15 @@ export function PipelineProgressStepper({
 
       const startedAtMs = new Date(row.started_at).getTime();
       if (Date.now() - startedAtMs <= STUCK_THRESHOLD_MS) continue;
+
+      // Heartbeat bypass — same logic the watchdog uses server-side.
+      if (
+        stage === "discipline_review" &&
+        disciplineProgress?.last_chunk_at &&
+        Date.now() - new Date(disciplineProgress.last_chunk_at).getTime() < 60_000
+      ) {
+        continue;
+      }
 
       const log = autoRetryLog.current.get(stage) ?? { count: 0, lastStartedAt: null };
       if (log.lastStartedAt === row.started_at) continue;
@@ -230,7 +241,7 @@ export function PipelineProgressStepper({
       void handleRetryStage(stage, { auto: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, planReviewId, visibleKeys]);
+  }, [rows, planReviewId, visibleKeys, disciplineProgress?.last_chunk_at]);
 
   return (
     <ul className={cn("space-y-1.5", className)}>
@@ -243,11 +254,21 @@ export function PipelineProgressStepper({
           const hint = FRIENDLY_HINTS[s.key];
 
           // Stuck detection: status='running' with started_at older than threshold.
+          // BUT — if this is the discipline_review row and we have a recent
+          // heartbeat from `disciplineProgress.last_chunk_at` (<60s old), the
+          // worker is healthy and just slow. Suppressing the stuck UI here
+          // prevents the auto-retry loop from fighting a legitimate Gemini
+          // chunk that takes 2-3 minutes on a large set.
           const startedAt = row?.started_at ? new Date(row.started_at).getTime() : 0;
+          const heartbeatFresh =
+            s.key === "discipline_review" &&
+            disciplineProgress?.last_chunk_at &&
+            Date.now() - new Date(disciplineProgress.last_chunk_at).getTime() < 60_000;
           const isStuck =
             status === "running" &&
             startedAt > 0 &&
-            Date.now() - startedAt > STUCK_THRESHOLD_MS;
+            Date.now() - startedAt > STUCK_THRESHOLD_MS &&
+            !heartbeatFresh;
 
           return (
             <li
