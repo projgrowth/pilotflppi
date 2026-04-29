@@ -799,6 +799,7 @@ export default function PlanReviewDetail() {
         aiCompleteFlash={aiCompleteFlash}
         hasFindings={hasFindings}
         rounds={projectRounds}
+        pipelineProcessing={pipelineProcessing}
         onBack={() => navigate("/plan-review")}
         onRunAICheck={runAICheck}
         onNavigateRound={(rid) => navigate(`/plan-review/${rid}`)}
