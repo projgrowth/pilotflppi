@@ -96,6 +96,7 @@ export function getBusinessDaysElapsed(startDate: string | null, asOf?: Date): n
   if (!startDate) return 0;
   const start = new Date(startDate);
   const now = asOf ?? new Date();
+  if (now <= start) return 0;
   let count = 0;
   const current = new Date(start);
   current.setDate(current.getDate() + 1); // Start counting from next day
@@ -105,6 +106,95 @@ export function getBusinessDaysElapsed(startDate: string | null, asOf?: Date): n
     current.setDate(current.getDate() + 1);
   }
   return count;
+}
+
+/**
+ * A single entry in projects.clock_pause_history.
+ * Written by the log_clock_state_changes() trigger.
+ */
+export interface ClockPauseEvent {
+  event: "pause" | "resume";
+  at: string; // ISO timestamp
+  reason?: string | null;
+  status?: string | null;
+}
+
+/**
+ * Convert pause/resume event log into closed [pausedAt, resumedAt] intervals.
+ * If currentPausedAt is set and the last event was a pause without a matching
+ * resume, the open interval is included with end = currentPausedAt (i.e. it
+ * stays paused indefinitely; today's elapsed should still freeze at pause).
+ */
+function buildPausedIntervals(
+  history: ClockPauseEvent[] | null | undefined,
+  currentPausedAt: string | null | undefined,
+): Array<{ start: Date; end: Date }> {
+  const events = (history ?? [])
+    .filter((e) => e && (e.event === "pause" || e.event === "resume") && e.at)
+    .slice()
+    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+
+  const intervals: Array<{ start: Date; end: Date }> = [];
+  let openStart: Date | null = null;
+
+  for (const ev of events) {
+    if (ev.event === "pause") {
+      if (!openStart) openStart = new Date(ev.at);
+    } else if (ev.event === "resume") {
+      if (openStart) {
+        intervals.push({ start: openStart, end: new Date(ev.at) });
+        openStart = null;
+      }
+    }
+  }
+  // Dangling pause without resume — currently still paused.
+  if (openStart && currentPausedAt) {
+    // already represented by freezing asOf at currentPausedAt; skip to avoid double counting
+  } else if (openStart) {
+    // unusual: history says paused but column is null — treat as ongoing to "now"
+    intervals.push({ start: openStart, end: new Date() });
+  }
+  return intervals;
+}
+
+/**
+ * Sum business days that fell inside paused intervals between start and asOf.
+ * Used to subtract banked days from gross elapsed.
+ */
+export function getPausedBusinessDays(
+  startDate: string | null,
+  asOf: Date,
+  history: ClockPauseEvent[] | null | undefined,
+  currentPausedAt: string | null | undefined,
+): number {
+  if (!startDate) return 0;
+  const start = new Date(startDate);
+  const intervals = buildPausedIntervals(history, currentPausedAt);
+  let total = 0;
+  for (const { start: pStart, end: pEnd } of intervals) {
+    const lo = pStart < start ? start : pStart;
+    const hi = pEnd > asOf ? asOf : pEnd;
+    if (hi <= lo) continue;
+    total += getBusinessDaysElapsed(lo.toISOString(), hi);
+  }
+  return total;
+}
+
+/**
+ * Net business days the clock has actually been running between start and asOf,
+ * subtracting any banked paused intervals.
+ */
+export function getNetBusinessDaysElapsed(
+  startDate: string | null,
+  asOf: Date | undefined,
+  history: ClockPauseEvent[] | null | undefined,
+  currentPausedAt: string | null | undefined,
+): number {
+  if (!startDate) return 0;
+  const now = asOf ?? new Date();
+  const gross = getBusinessDaysElapsed(startDate, now);
+  const paused = getPausedBusinessDays(startDate, now, history, currentPausedAt);
+  return Math.max(0, gross - paused);
 }
 
 export function getStatutoryDeadlineDate(
@@ -146,11 +236,13 @@ export function getStatutoryStatus(project: {
   statutory_review_days?: number | null;
   statutory_inspection_days?: number | null;
   notice_filed_at?: string | null;
+  clock_pause_history?: ClockPauseEvent[] | null;
 }): StatutoryStatus {
   const reviewDays = project.statutory_review_days ?? 30;
   const inspectionDays = project.statutory_inspection_days ?? 10;
   const clockStart = project.review_clock_started_at || project.notice_filed_at;
   const isPaused = !!project.review_clock_paused_at;
+  const history = project.clock_pause_history ?? null;
 
   const inspectionStatuses = ["inspection_scheduled", "inspection_complete"];
   const completedStatuses = ["certificate_issued", "cancelled"];
@@ -165,17 +257,18 @@ export function getStatutoryStatus(project: {
     phase = "review";
   }
 
-  // When paused, freeze the count at the moment of pause (F.S. 553.791 compliance).
-  // Pass paused_at as asOf so we count days from clockStart up to the pause timestamp,
-  // not days since the pause was set.
-  const reviewDaysUsed = phase === "review"
-    ? (isPaused
-        ? getBusinessDaysElapsed(clockStart, new Date(project.review_clock_paused_at!))
-        : getBusinessDaysElapsed(clockStart))
-    : 0;
+  // Net elapsed = gross business days from clockStart up to "now" (or to the
+  // current pause moment if currently paused), MINUS business days banked
+  // during prior pause/resume cycles. Required for F.S. 553.791 because the
+  // clock can pause when comments are sent and resume when resubmitted.
+  const asOf = isPaused ? new Date(project.review_clock_paused_at!) : new Date();
+  const reviewDaysUsed =
+    phase === "review"
+      ? getNetBusinessDaysElapsed(clockStart, asOf, history, project.review_clock_paused_at)
+      : 0;
   const reviewDaysRemaining = Math.max(0, reviewDays - reviewDaysUsed);
 
-  // Inspection phase uses dedicated inspection clock
+  // Inspection phase uses dedicated inspection clock (no pause semantics yet).
   const inspectionClockStart = project.inspection_clock_started_at || clockStart;
   const inspectionDaysUsed = phase === "inspection" ? getBusinessDaysElapsed(inspectionClockStart) : 0;
   const inspectionDaysRemaining = Math.max(0, inspectionDays - inspectionDaysUsed);

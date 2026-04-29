@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { DeadlineBar } from "@/components/DeadlineBar";
 import { Badge } from "@/components/ui/badge";
 import { Gavel, Pause, Play, AlertTriangle, History } from "lucide-react";
-import { getStatutoryStatus } from "@/lib/statutory-deadlines";
+import { getStatutoryStatus, type ClockPauseEvent } from "@/lib/statutory-deadlines";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -22,6 +22,7 @@ interface StatutoryClockCardProps {
     statutory_review_days?: number | null;
     statutory_inspection_days?: number | null;
     notice_filed_at?: string | null;
+    clock_pause_history?: ClockPauseEvent[] | null;
   };
 }
 

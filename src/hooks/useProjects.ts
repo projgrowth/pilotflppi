@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { getStatutoryStatus } from "@/lib/statutory-deadlines";
+import { getStatutoryStatus, type ClockPauseEvent } from "@/lib/statutory-deadlines";
 
 export interface Project {
   id: string;
@@ -25,6 +25,7 @@ export interface Project {
   review_clock_started_at: string | null;
   review_clock_paused_at: string | null;
   inspection_clock_started_at: string | null;
+  clock_pause_history?: ClockPauseEvent[] | null;
   hold_reason: string | null;
   zoning_data: Record<string, unknown> | null;
   /** Earliest plan_review_files.uploaded_at across all reviews. */
@@ -43,7 +44,7 @@ export function useProjects() {
         .is("deleted_at", null)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      const projects = (data ?? []) as Project[];
+      const projects = ((data ?? []) as unknown) as Project[];
       if (projects.length === 0) return projects;
 
       // One round-trip for plan_reviews (id + project_id + updated_at) so we
@@ -103,7 +104,7 @@ export function useProject(id: string) {
         .is("deleted_at", null)
         .single();
       if (error) throw error;
-      return data as Project;
+      return (data as unknown) as Project;
     },
     enabled: !!id,
   });
@@ -118,7 +119,13 @@ export function getDaysElapsed(noticeFiledAt: string | null): number {
 
 export function getDaysRemaining(
   deadlineAt: string | null,
-  project?: { status: string; review_clock_started_at?: string | null; review_clock_paused_at?: string | null; statutory_review_days?: number | null }
+  project?: {
+    status: string;
+    review_clock_started_at?: string | null;
+    review_clock_paused_at?: string | null;
+    statutory_review_days?: number | null;
+    clock_pause_history?: ClockPauseEvent[] | null;
+  },
 ): number {
   if (project) {
     const s = getStatutoryStatus({
@@ -126,6 +133,7 @@ export function getDaysRemaining(
       review_clock_started_at: project.review_clock_started_at,
       review_clock_paused_at: project.review_clock_paused_at,
       statutory_review_days: project.statutory_review_days,
+      clock_pause_history: project.clock_pause_history,
     });
     return s.reviewDaysRemaining;
   }
