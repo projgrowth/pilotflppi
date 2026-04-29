@@ -89,10 +89,17 @@ export function NewReviewDialog({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [uploading, setUploading] = useState(false);
+  const [validatingCount, setValidatingCount] = useState<{ done: number; total: number } | null>(null);
   const [saving, setSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [extractDoneCount, setExtractDoneCount] = useState<number | null>(null);
   const [geocoding, setGeocoding] = useState(false);
+  // Live progress while we await the upload helper before navigating.
+  const [submitProgress, setSubmitProgress] = useState<{
+    phase: string;
+    prepared: number;
+    expected: number;
+  } | null>(null);
 
   const [files, setFiles] = useState<UploadedFile[]>([]);
 
@@ -149,6 +156,8 @@ export function NewReviewDialog({
     setExtracting(false);
     setExtractDoneCount(null);
     setGeocoding(false);
+    setSubmitProgress(null);
+    setValidatingCount(null);
   };
 
   const close = () => {
@@ -162,19 +171,40 @@ export function NewReviewDialog({
   // ── File intake ─────────────────────────────────────────────────────────
   const handleFiles = useCallback(async (incoming: FileList | null) => {
     if (!incoming) return;
+    const list = Array.from(incoming);
     setUploading(true);
+    setValidatingCount({ done: 0, total: list.length });
     try {
+      // Validate every PDF in parallel — sequential validation on a 10-file
+      // drop used to freeze the dialog for 5–10s with no feedback.
+      let done = 0;
+      const results = await Promise.all(
+        list.map(async (file) => {
+          if (file.size > 50 * 1024 * 1024) {
+            done++;
+            setValidatingCount({ done, total: list.length });
+            return { file, ok: false, reason: `${file.name} exceeds 50MB` } as const;
+          }
+          const ok = await validatePDFHeader(file);
+          if (!ok) {
+            done++;
+            setValidatingCount({ done, total: list.length });
+            return { file, ok: false, reason: `${file.name} is not a valid PDF` } as const;
+          }
+          const pageCount = await getPDFPageCount(file);
+          done++;
+          setValidatingCount({ done, total: list.length });
+          return { file, ok: true, pageCount } as const;
+        }),
+      );
+
       const next: UploadedFile[] = [];
-      for (const file of Array.from(incoming)) {
-        if (!(await validatePDFHeader(file))) {
-          toast.error(`${file.name} is not a valid PDF`);
+      for (const r of results) {
+        if (!r.ok) {
+          toast.error(r.reason);
           continue;
         }
-        if (file.size > 50 * 1024 * 1024) {
-          toast.error(`${file.name} exceeds 50MB`);
-          continue;
-        }
-        next.push({ name: file.name, file, pageCount: await getPDFPageCount(file) });
+        next.push({ name: r.file.name, file: r.file, pageCount: r.pageCount });
       }
       if (next.length === 0) return;
 
@@ -207,6 +237,7 @@ export function NewReviewDialog({
       toast.error(err instanceof Error ? err.message : "Failed to read files");
     } finally {
       setUploading(false);
+      setValidatingCount(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files, preselectedProjectId]);
@@ -346,37 +377,51 @@ export function NewReviewDialog({
         .single();
       if (revErr) throw revErr;
 
-      // Hand off to the shared upload helper. We DO NOT await heavy
-      // rasterization before navigating — the workspace polls page assets and
-      // pipeline status itself, so the user gets there immediately.
-      void uploadPlanReviewFiles({
-        reviewId: review.id,
-        round: review.round ?? 1,
-        existingFileUrls: [],
-        existingPageCount: 0,
-        files: files.map((f) => f.file),
-        userId: user?.id ?? null,
-      })
-        .then((result) => {
-          for (const w of result.warnings) toast.warning(w);
-          if (result.partialRasterize) {
-            toast.error(
-              `Only ${result.pageAssetCount}/${result.expectedPages} pages prepared. Use "Prepare pages now" in the workspace.`,
-              { duration: 8000 },
-            );
-          } else if (result.pipelineStarted) {
-            toast.success("Analysis started");
-          }
-          queryClient.invalidateQueries({ queryKey: ["plan-review", review.id] });
-          queryClient.invalidateQueries({ queryKey: ["plan-review-page-asset-count", review.id] });
-        })
-        .catch((err) => {
-          toast.error(err instanceof Error ? err.message : "Upload failed in background");
+      // AWAIT the upload before navigating. Previously this was fire-and-
+      // forget (`void uploadPlanReviewFiles(...).then(...)`), which meant the
+      // promise was orphaned the moment we navigated. If the user reloaded,
+      // hit back, or React unmounted the dialog quickly, the upload was
+      // killed mid-flight and the workspace landed on an empty drop zone
+      // with no error.
+      //
+      // Blocking the dialog feels slower (~30s for typical sets) but it's
+      // 100% reliable AND the user still has their file picker contents in
+      // memory, so a failure here is recoverable without re-selecting.
+      try {
+        const result = await uploadPlanReviewFiles({
+          reviewId: review.id,
+          round: review.round ?? 1,
+          existingFileUrls: [],
+          existingPageCount: 0,
+          files: files.map((f) => f.file),
+          userId: user?.id ?? null,
+          onProgress: (p) => setSubmitProgress(p),
         });
+        for (const w of result.warnings) toast.warning(w);
+        if (result.partialRasterize) {
+          toast.error(
+            `Only ${result.pageAssetCount}/${result.expectedPages} pages prepared. Use "Prepare pages now" in the workspace.`,
+            { duration: 8000 },
+          );
+        } else if (result.pipelineStarted) {
+          toast.success("Analysis started");
+        }
+      } catch (uploadErr) {
+        // Upload failed — keep the dialog open so the user can retry without
+        // losing their selection. The plan_review row will be cleaned up by
+        // the reconcile-stuck-reviews cron if the user closes the dialog.
+        toast.error(uploadErr instanceof Error ? uploadErr.message : "Upload failed");
+        setSubmitProgress(null);
+        setSaving(false);
+        return;
+      }
 
+      queryClient.invalidateQueries({ queryKey: ["plan-review", review.id] });
+      queryClient.invalidateQueries({ queryKey: ["plan-review-page-asset-count", review.id] });
       queryClient.invalidateQueries({ queryKey: ["plan-reviews"] });
       queryClient.invalidateQueries({ queryKey: ["projects"] });
 
+      setSubmitProgress(null);
       onComplete?.(review.id, projectId);
       close();
       navigate(`/plan-review/${review.id}`, {
@@ -388,6 +433,7 @@ export function NewReviewDialog({
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create review");
+      setSubmitProgress(null);
       setSaving(false);
     }
   };
@@ -665,32 +711,49 @@ export function NewReviewDialog({
 
           <Button
             onClick={handleSubmit}
-            disabled={!formValid || saving}
+            disabled={!formValid || saving || !!validatingCount}
             className="w-full h-11"
           >
             {saving ? (
-              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Starting…</>
+              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> {submitProgress?.phase ?? "Starting…"}</>
+            ) : validatingCount ? (
+              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Validating {validatingCount.done}/{validatingCount.total}…</>
             ) : (
               <><Sparkles className="h-4 w-4 mr-2" /> Start review <ArrowRight className="h-4 w-4 ml-2" /></>
             )}
           </Button>
           {saving ? (
-            <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 animate-fade-in">
+            <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 animate-fade-in space-y-2">
               <div className="flex items-start gap-2.5">
                 <Loader2 className="h-4 w-4 text-accent shrink-0 mt-0.5 animate-spin" />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-foreground">
-                    Creating review and uploading {files.length} file{files.length === 1 ? "" : "s"}…
+                    {submitProgress?.phase ?? `Uploading ${files.length} file${files.length === 1 ? "" : "s"}…`}
                   </p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    You'll be taken to the workspace in a moment. Keep this tab open for ~30 seconds while uploads finish.
+                    Keep this dialog open until upload completes — we'll take you to the workspace automatically.
                   </p>
+                  {submitProgress && submitProgress.expected > 0 && (
+                    <div className="mt-2 space-y-1">
+                      <div className="h-1 w-full overflow-hidden rounded-full bg-accent/15">
+                        <div
+                          className="h-full rounded-full bg-accent transition-all"
+                          style={{
+                            width: `${Math.min(100, Math.round((submitProgress.prepared / submitProgress.expected) * 100))}%`,
+                          }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-muted-foreground tabular-nums">
+                        {submitProgress.prepared} / {submitProgress.expected} pages prepared
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           ) : (
             <p className="text-[11px] text-center text-muted-foreground leading-relaxed">
-              We'll keep uploading in the workspace — keep this browser open for ~30 sec, then it's safe to leave.
+              Upload completes in the dialog (~30s for typical sets). Then we'll open the review workspace.
             </p>
           )}
         </div>
