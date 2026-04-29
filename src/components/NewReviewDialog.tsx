@@ -368,7 +368,13 @@ export function NewReviewDialog({
 
       onComplete?.(review.id, projectId);
       close();
-      navigate(`/plan-review/${review.id}`);
+      navigate(`/plan-review/${review.id}`, {
+        state: {
+          justCreated: true,
+          pendingFileCount: files.length,
+          pendingPageCount: totalPages,
+        },
+      });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create review");
       setSaving(false);

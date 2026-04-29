@@ -15,9 +15,9 @@
  * shortcuts (since they cross multiple panels), and handles the actions
  * (upload, generate letter, navigate).
  */
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { streamAI } from "@/lib/ai";
@@ -80,6 +80,10 @@ export default function PlanReviewDetail() {
   const [mobileTab, setMobileTab] = useState<"plans" | "findings">("plans");
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const justCreatedState = (location.state ?? null) as
+    | { justCreated?: boolean; pendingFileCount?: number; pendingPageCount?: number }
+    | null;
   const queryClient = useQueryClient();
   const { firmSettings } = useFirmSettings();
   const { user } = useAuth();
@@ -165,14 +169,38 @@ export default function PlanReviewDetail() {
 
   // Pipeline is "processing" when any stage row exists but the terminal
   // `complete` row hasn't landed yet — OR when the user explicitly kicked off
-  // a Re-Analyze. Drives the full-canvas ProcessingOverlay so freshly-
-  // uploaded reviews show live progress instead of a blank panel.
+  // a Re-Analyze, OR when the review was just created via NewReviewDialog
+  // (in which case file upload + page prep are still happening in the
+  // background and pipeline rows haven't appeared yet). Drives the full-canvas
+  // ProcessingOverlay so freshly-uploaded reviews show live progress instead
+  // of a blank panel.
   const terminalComplete = pipeRows.some(
     (r) => r.stage === "complete" && r.status === "complete",
   );
   const hasFatalError = pipeRows.some((r) => r.status === "error");
+  // The "just created" flag stays sticky until pipeline rows appear OR ~3min
+  // pass (whichever comes first) so a slow upload doesn't drop the user back
+  // into the empty drop zone.
+  const [justCreatedAt] = useState<number | null>(() =>
+    justCreatedState?.justCreated ? Date.now() : null,
+  );
+  const justCreatedFresh =
+    !!justCreatedAt && pipeRows.length === 0 && Date.now() - justCreatedAt < 3 * 60_000;
   const pipelineProcessing =
-    aiRunning || (pipeRows.length > 0 && !terminalComplete && !hasFatalError);
+    aiRunning ||
+    justCreatedFresh ||
+    (pipeRows.length > 0 && !terminalComplete && !hasFatalError);
+
+  // Phase that the ProcessingOverlay should render. Walked deterministically
+  // from the available signals — file_urls + page assets + pipeline rows.
+  const processingPhase: import("@/components/plan-review/ProcessingOverlay").ProcessingPhase =
+    useMemo(() => {
+      if (pipeRows.length > 0) return "analyzing";
+      if (uploading) return "uploading";
+      if ((review?.file_urls?.length ?? 0) === 0) return "bootstrapping";
+      // Files exist but pipeline hasn't started — page prep still running.
+      return "preparing";
+    }, [pipeRows.length, uploading, review?.file_urls?.length]);
 
   // Re-prepare pages in the browser using pdf.js — only path out of a
   // needs_browser_rasterization failure since Edge can't reliably rasterize PDFs.
@@ -634,6 +662,7 @@ export default function PlanReviewDetail() {
     hasDocuments,
     fileUrls,
     onOpenDashboard: openDashboard,
+    pipelineProcessing,
   };
 
   const letterPanelProps = {
@@ -977,6 +1006,10 @@ export default function PlanReviewDetail() {
                 uploading={uploading}
                 uploadSuccess={uploadSuccess}
                 pipelineProcessing={pipelineProcessing}
+                processingPhase={processingPhase}
+                preparedPages={uploadProgress?.prepared ?? pageAssetCount}
+                expectedPages={uploadProgress?.expected ?? justCreatedState?.pendingPageCount ?? 0}
+                pendingFileCount={justCreatedState?.pendingFileCount ?? fileUrls.length}
                 onPipelineComplete={handlePipelineComplete}
                 onOpenDashboard={openDashboard}
                 planReviewId={review.id}
@@ -1055,6 +1088,10 @@ export default function PlanReviewDetail() {
                 uploading={uploading}
                 uploadSuccess={uploadSuccess}
                 pipelineProcessing={pipelineProcessing}
+                processingPhase={processingPhase}
+                preparedPages={uploadProgress?.prepared ?? pageAssetCount}
+                expectedPages={uploadProgress?.expected ?? justCreatedState?.pendingPageCount ?? 0}
+                pendingFileCount={justCreatedState?.pendingFileCount ?? fileUrls.length}
                 onPipelineComplete={handlePipelineComplete}
                 onOpenDashboard={openDashboard}
                 findings={findings}
