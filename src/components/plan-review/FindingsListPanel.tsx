@@ -105,6 +105,12 @@ interface Props {
    *  locked "Analyzing…" state instead of the partial findings list so
    *  reviewers don't mistake an in-flight result set for the final output. */
   pipelineProcessing?: boolean;
+  /** When set (count of findings just produced), shows a celebratory
+   *  completion banner above the list with a one-click "Generate letter"
+   *  CTA. Parent clears it after ~3s. */
+  completionFlash?: number | null;
+  onDismissCompletionFlash?: () => void;
+  onGenerateLetterClick?: () => void;
 }
 
 export function FindingsListPanel(props: Props) {
