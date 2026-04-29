@@ -190,7 +190,7 @@ export interface DeficiencyV2Row {
   reviewer_disposition: "confirm" | "reject" | "modify" | null;
   reviewer_notes: string;
   status: "open" | "resolved" | "waived" | "needs_info";
-  verification_status: "unverified" | "verified" | "overturned" | "modified" | "superseded" | "needs_human";
+  verification_status: "unverified" | "verified" | "overturned" | "modified" | "superseded" | "needs_human" | "cannot_locate";
   verification_notes: string;
   model_version?: string | null;
   citation_status?: "unverified" | "verified" | "verified_stub" | "mismatch" | "not_found" | "hallucinated" | "no_citation_required";
