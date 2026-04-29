@@ -404,6 +404,38 @@ export async function stageGroundCitations(
     if (updErr) console.error("[ground_citations] update failed", def.id, updErr);
   }
 
+  // Auto-waive hallucinated findings. The reviewer cannot defend a finding
+  // that cites a fabricated FBC section — surfacing it as if it were real
+  // erodes trust in every other finding. We waive (not delete) so the
+  // reviewer can un-waive if they want to manually re-cite. Idempotent:
+  // only waives still-open rows that ground-citations just decided are
+  // hallucinated AND that the vector-grounder couldn't rescue (those are
+  // demoted to `mismatch` above and survive).
+  const { data: waiveTargets, error: waiveErr } = await admin
+    .from("deficiencies_v2")
+    .select("id")
+    .eq("plan_review_id", planReviewId)
+    .eq("citation_status", "hallucinated")
+    .eq("status", "open");
+  if (waiveErr) {
+    console.error("[ground_citations] auto-waive read failed", waiveErr);
+  } else if ((waiveTargets ?? []).length > 0) {
+    const ids = (waiveTargets as Array<{ id: string }>).map((r) => r.id);
+    const { error: bulkErr } = await admin
+      .from("deficiencies_v2")
+      .update({
+        status: "waived",
+        reviewer_disposition: "reject",
+        reviewer_notes:
+          "Auto-waived: AI cited a non-parseable FBC section. Un-waive and re-cite manually if this finding is real.",
+        verification_notes:
+          "Hidden from the comment letter to keep fabricated citations from reaching the AHJ.",
+      })
+      .in("id", ids);
+    if (bulkErr) console.error("[ground_citations] auto-waive write failed", bulkErr);
+    else console.log(`[ground_citations] auto-waived ${ids.length} hallucinated finding(s)`);
+  }
+
   const cropResult = await attachEvidenceCrops(admin, planReviewId);
 
   return {
@@ -414,6 +446,7 @@ export async function stageGroundCitations(
     not_found: counts.not_found,
     hallucinated: counts.hallucinated,
     no_citation_required: counts.no_citation_required,
+    auto_waived: (waiveTargets ?? []).length,
     crops_attached: cropResult.attached,
     crops_skipped: cropResult.skipped,
     crops_unresolved_sheets: cropResult.unresolved_sheets,
