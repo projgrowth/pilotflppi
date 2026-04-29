@@ -96,6 +96,23 @@ export default function PlanReviewDetail() {
   const { review, isLoading, rounds, findings } = usePlanReviewData(id);
   const { findingStatuses, updateFindingStatus } = useFindingStatuses(review, user?.id, refetchHistory);
 
+  // Project DNA — needed so the letter prompt cites the *actual* FBC edition
+  // for this project, not a hardcoded "FBC 2023" (audit C-06).
+  const { data: projectDna } = useQuery({
+    queryKey: ["project_dna", "letter-fbc-edition", id],
+    enabled: !!id,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("project_dna")
+        .select("fbc_edition")
+        .eq("plan_review_id", id!)
+        .maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as { fbc_edition: string | null } | null;
+    },
+  });
+
   // ── Comment letter (AI streaming, autosave, hydration) ────────────────
   const {
     commentLetter,
@@ -107,7 +124,7 @@ export default function PlanReviewDetail() {
     generate: streamCommentLetter,
     cancel: cancelCommentLetter,
     copy: copyLetter,
-  } = useCommentLetter({ review, findings, firmSettings });
+  } = useCommentLetter({ review, findings, firmSettings, projectDna });
 
   // ── PDF rendering ──────────────────────────────────────────────────────
   const { pageImages, renderingPages, renderProgress, renderDocumentPages, resetPages } =
