@@ -147,7 +147,7 @@ export default function BulkActionBar({ planReviewId, selected, onClear }: Props
   }
 
   return (
-    <div className="sticky top-2 z-30 flex flex-wrap items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2 shadow-sm backdrop-blur">
+    <div className="sticky top-2 z-sticky flex flex-wrap items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2 shadow-sm backdrop-blur">
       <span className="text-xs font-medium">
         {selected.length} selected
       </span>
