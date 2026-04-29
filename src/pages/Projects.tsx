@@ -241,11 +241,22 @@ export default function Projects() {
               <SelectItem value="deadline">Deadline soonest</SelectItem>
             </SelectContent>
           </Select>
-          <div className="relative ml-auto">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input placeholder="Search projects..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 w-64" />
+          <div className="flex items-center gap-2 ml-auto">
+            <div className="flex items-center gap-2 px-2 py-1 rounded-md border bg-muted/30">
+              <Switch
+                id="show-deleted"
+                checked={showDeleted}
+                onCheckedChange={(v) => { setShowDeleted(v); clearSelection(); }}
+              />
+              <Label htmlFor="show-deleted" className="text-xs cursor-pointer select-none">
+                Show deleted
+              </Label>
+            </div>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input placeholder="Search projects..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 w-64" />
+            </div>
           </div>
-        </div>
 
         <Card className="shadow-subtle relative">
           {isLoading ? (
