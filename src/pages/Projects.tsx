@@ -362,19 +362,35 @@ export default function Projects() {
                     )}>
                       {remaining <= 0 ? "Overdue" : `${remaining}d left`}
                     </span>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); setPendingDelete(project); }}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                          aria-label={`Delete ${project.name}`}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="text-xs">Delete project</TooltipContent>
-                    </Tooltip>
+                    {project.deleted_at ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleRestore(project); }}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                            aria-label={`Restore ${project.name}`}
+                          >
+                            <Undo2 className="h-3.5 w-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs">Restore project</TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setPendingDelete(project); }}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            aria-label={`Delete ${project.name}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs">Delete project</TooltipContent>
+                      </Tooltip>
+                    )}
                     <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0" />
                   </div>
                 );
