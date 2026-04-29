@@ -65,6 +65,9 @@ export function detectThresholdBuilding(dna: ThresholdInput | null | undefined):
         `Assembly occupancy (${occ}), ${sqft.toLocaleString()} sf, OL ${occupantLoad} (>500)`,
       );
     }
+    // else: occupantLoad ≤ 500 — definitively NOT a threshold building under
+    // F.S. 553.79(5)(b). Skip the trigger entirely. (Audit M-01 fix: prevents
+    // false-positive Special Inspector requirements when DNA captures OL.)
   }
 
   return {
