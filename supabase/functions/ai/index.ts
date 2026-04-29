@@ -7,9 +7,34 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const SYSTEM_PROMPTS: Record<string, string> = {
+/**
+ * Build per-action system prompts. Firm identity, FBC edition, and
+ * resubmission deadline are NEVER hardcoded — every value flows in via
+ * payload so a second firm or a project under FBC 7th Edition produces
+ * a correct letter. Defaults are explicit and labeled as fallbacks.
+ *
+ * Audit reference: C-02 (firm hardcoded), C-06 (FBC edition hardcoded),
+ * H-05 (14-day deadline hardcoded). All three resolved here.
+ */
+interface PromptContext {
+  firm_name?: string | null;
+  license_number?: string | null;
+  fbc_edition?: string | null;
+  resubmission_days?: number | null;
+}
 
-  extract_project_info: `You are analyzing a construction plan title block. Extract the following information from the image:
+function buildSystemPrompt(action: string, ctx: PromptContext): string {
+  const firmName = (ctx.firm_name && ctx.firm_name.trim()) || "[Firm name not configured]";
+  const licenseNumber = (ctx.license_number && ctx.license_number.trim()) || "[License # not configured]";
+  const fbcEdition = (ctx.fbc_edition && ctx.fbc_edition.trim()) || "FBC 2023 (default — project FBC edition not extracted)";
+  const resubDays = typeof ctx.resubmission_days === "number" && ctx.resubmission_days > 0
+    ? ctx.resubmission_days
+    : 14;
+  const resubLabel = typeof ctx.resubmission_days === "number" && ctx.resubmission_days > 0
+    ? `${resubDays} calendar days`
+    : `${resubDays} calendar days (default — county-specific deadline not configured)`;
+  const builders: Record<string, () => string> = {
+    extract_project_info: () => `You are analyzing a construction plan title block. Extract the following information from the image:
 
 - project_name: The name of the project
 - address: The full street address
