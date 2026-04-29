@@ -419,6 +419,10 @@ export default function PlanReviewDetail() {
           (review.project as { review_clock_paused_at?: string | null }).review_clock_paused_at ?? null,
         statutory_review_days:
           (review.project as { statutory_review_days?: number | null }).statutory_review_days ?? 30,
+        clock_pause_history:
+          ((review.project as { clock_pause_history?: unknown }).clock_pause_history ?? null) as
+            | import("@/lib/statutory-deadlines").ClockPauseEvent[]
+            | null,
       })
     : null;
   const daysLeft = statutory ? statutory.reviewDaysRemaining : 30;
