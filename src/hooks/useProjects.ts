@@ -44,7 +44,7 @@ export function useProjects() {
         .is("deleted_at", null)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      const projects = (data ?? []) as Project[];
+      const projects = ((data ?? []) as unknown) as Project[];
       if (projects.length === 0) return projects;
 
       // One round-trip for plan_reviews (id + project_id + updated_at) so we
@@ -104,7 +104,7 @@ export function useProject(id: string) {
         .is("deleted_at", null)
         .single();
       if (error) throw error;
-      return data as Project;
+      return (data as unknown) as Project;
     },
     enabled: !!id,
   });
