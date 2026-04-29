@@ -662,6 +662,7 @@ export default function PlanReviewDetail() {
     hasDocuments,
     fileUrls,
     onOpenDashboard: openDashboard,
+    pipelineProcessing,
   };
 
   const letterPanelProps = {
