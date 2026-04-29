@@ -276,6 +276,13 @@ export async function rasterizeAndUploadPagesResilient(
     onProgress?: (done: number, total: number) => void;
     /** Called after each successfully uploaded page so callers can persist incrementally. */
     onPageReady?: (asset: PreparedPageAsset) => void | Promise<void>;
+    /**
+     * Required for firm-scoped storage: page JPEGs are written to
+     * `<pagesPrefix>/<basename>/p-NNN.jpg`. Callers should pass
+     * `firms/<firmId>/plan-reviews/<reviewId>/pages` so the new
+     * storage RLS + CHECK constraint accept the path.
+     */
+    pagesPrefix?: string;
   } = {},
 ): Promise<RasterizeResult & { aborted?: boolean }> {
   const dpi = opts.dpi ?? 96;
