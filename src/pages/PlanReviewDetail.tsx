@@ -663,6 +663,13 @@ export default function PlanReviewDetail() {
     fileUrls,
     onOpenDashboard: openDashboard,
     pipelineProcessing,
+    completionFlash: aiCompleteFlash,
+    onDismissCompletionFlash: () => setAiCompleteFlash(null),
+    onGenerateLetterClick: () => {
+      setAiCompleteFlash(null);
+      setRightPanel("letter");
+      if (!commentLetter && !generatingLetter) generateCommentLetter(review);
+    },
   };
 
   const letterPanelProps = {
