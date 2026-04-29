@@ -169,19 +169,40 @@ export function NewReviewDialog({
   // ── File intake ─────────────────────────────────────────────────────────
   const handleFiles = useCallback(async (incoming: FileList | null) => {
     if (!incoming) return;
+    const list = Array.from(incoming);
     setUploading(true);
+    setValidatingCount({ done: 0, total: list.length });
     try {
+      // Validate every PDF in parallel — sequential validation on a 10-file
+      // drop used to freeze the dialog for 5–10s with no feedback.
+      let done = 0;
+      const results = await Promise.all(
+        list.map(async (file) => {
+          if (file.size > 50 * 1024 * 1024) {
+            done++;
+            setValidatingCount({ done, total: list.length });
+            return { file, ok: false, reason: `${file.name} exceeds 50MB` } as const;
+          }
+          const ok = await validatePDFHeader(file);
+          if (!ok) {
+            done++;
+            setValidatingCount({ done, total: list.length });
+            return { file, ok: false, reason: `${file.name} is not a valid PDF` } as const;
+          }
+          const pageCount = await getPDFPageCount(file);
+          done++;
+          setValidatingCount({ done, total: list.length });
+          return { file, ok: true, pageCount } as const;
+        }),
+      );
+
       const next: UploadedFile[] = [];
-      for (const file of Array.from(incoming)) {
-        if (!(await validatePDFHeader(file))) {
-          toast.error(`${file.name} is not a valid PDF`);
+      for (const r of results) {
+        if (!r.ok) {
+          toast.error(r.reason);
           continue;
         }
-        if (file.size > 50 * 1024 * 1024) {
-          toast.error(`${file.name} exceeds 50MB`);
-          continue;
-        }
-        next.push({ name: file.name, file, pageCount: await getPDFPageCount(file) });
+        next.push({ name: r.file.name, file: r.file, pageCount: r.pageCount });
       }
       if (next.length === 0) return;
 
@@ -214,6 +235,7 @@ export function NewReviewDialog({
       toast.error(err instanceof Error ? err.message : "Failed to read files");
     } finally {
       setUploading(false);
+      setValidatingCount(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files, preselectedProjectId]);
