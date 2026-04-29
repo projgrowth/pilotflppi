@@ -1,6 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.74.0";
 
+type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
+
 // CORS allowlist (audit A-02). Only origins we operate from may call this
 // function from a browser. Edge-to-edge / server requests bypass CORS by
 // not sending an Origin header, so this only restricts cross-site browsers.
@@ -44,6 +46,12 @@ interface PromptContext {
   license_number?: string | null;
   fbc_edition?: string | null;
   resubmission_days?: number | null;
+}
+
+function payloadObject(payload: unknown): Record<string, Json> {
+  return payload && typeof payload === "object" && !Array.isArray(payload)
+    ? payload as Record<string, Json>
+    : {};
 }
 
 function buildSystemPrompt(action: string, ctx: PromptContext): string {
@@ -319,12 +327,44 @@ serve(async (req) => {
       );
     }
 
+    const payloadObj = payloadObject(payload);
+    const userId = claimsData.claims.sub;
+    let promptFirmName = typeof payloadObj.firm_name === "string" ? payloadObj.firm_name : null;
+    let promptLicenseNumber = typeof payloadObj.license_number === "string" ? payloadObj.license_number : null;
+
+    if (!promptFirmName || !promptLicenseNumber) {
+      const admin = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      );
+
+      const { data: membership } = await admin
+        .from("firm_members")
+        .select("firm_id")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      const firmId = (membership as { firm_id?: string | null } | null)?.firm_id ?? null;
+      if (firmId) {
+        const { data: firmSettings } = await admin
+          .from("firm_settings")
+          .select("firm_name, license_number")
+          .eq("firm_id", firmId)
+          .maybeSingle();
+
+        promptFirmName = promptFirmName || (firmSettings as { firm_name?: string | null } | null)?.firm_name || null;
+        promptLicenseNumber = promptLicenseNumber || (firmSettings as { license_number?: string | null } | null)?.license_number || null;
+      }
+    }
+
     // Build the per-request system prompt with firm/code/deadline injected
     // dynamically. See PromptContext for the contract — callers pass these
     // via payload.{firm_name, license_number, fbc_edition, resubmission_days}.
     const systemPrompt = buildSystemPrompt(action, {
-      firm_name: payload?.firm_name ?? null,
-      license_number: payload?.license_number ?? null,
+      firm_name: promptFirmName,
+      license_number: promptLicenseNumber,
       fbc_edition: payload?.fbc_edition ?? null,
       resubmission_days: typeof payload?.resubmission_days === "number" ? payload.resubmission_days : null,
     });

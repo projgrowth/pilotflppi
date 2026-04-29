@@ -114,6 +114,7 @@ export async function stageSheetMap(
         ],
         SHEET_MAP_SCHEMA as unknown as Record<string, unknown>,
         "google/gemini-2.5-flash",
+        0,
       )) as {
         sheets: Array<{
           page_index: number;

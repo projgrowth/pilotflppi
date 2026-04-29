@@ -74,6 +74,16 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     body:
       "Every finding must be dispositioned (accept / reject / needs more info) before the letter sends. Open findings without a disposition block delivery.",
   },
+  citations: {
+    label: "Citation defensibility",
+    body:
+      "Blocks send when a live finding still has hallucinated, mismatched, missing, stub, or otherwise ungrounded code citations that no reviewer has resolved.",
+  },
+  verifier_completion: {
+    label: "Verifier completion",
+    body:
+      "Tracks whether the second-pass verifier actually reached each live finding. If too many findings never got a verifier verdict, the letter is blocked until they are rerun or triaged manually.",
+  },
   qc: {
     label: "Letter QC",
     body:

@@ -155,6 +155,7 @@ export async function stageDeferredScope(
       ],
       DEFERRED_SCOPE_SCHEMA as unknown as Record<string, unknown>,
       "google/gemini-2.5-flash",
+      0,
     )) as { items: Array<Record<string, unknown>> };
   } catch (err) {
     console.error("[deferred_scope] vision call failed:", err);
