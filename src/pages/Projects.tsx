@@ -16,11 +16,14 @@ import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { useProjects, getDaysElapsed, getDaysRemaining, type Project } from "@/hooks/useProjects";
 import { useAuth } from "@/contexts/AuthContext";
 import { deleteProject } from "@/lib/delete-project";
+import { restoreProject } from "@/lib/restore-project";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
-import { Search, ChevronRight, FolderKanban, Plus, Trash2, X } from "lucide-react";
+import { Search, ChevronRight, FolderKanban, Plus, Trash2, X, Undo2 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 const filters = ["All", "Plan Review", "Inspection", "Pending", "Complete"] as const;
