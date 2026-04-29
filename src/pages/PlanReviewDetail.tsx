@@ -843,13 +843,16 @@ export default function PlanReviewDetail() {
         onConfirm={handleDeleteReview}
       />
 
-      <UploadProgressBar
-        uploading={uploading}
-        prepared={uploadProgress?.prepared ?? 0}
-        expected={uploadProgress?.expected ?? 0}
-        phase={uploadProgress?.phase}
-      />
-
+      {/* Hide the inline strip when the canvas overlay is showing the same
+          counters — two upload bars on one screen reads as a bug. */}
+      {!pipelineProcessing && (
+        <UploadProgressBar
+          uploading={uploading}
+          prepared={uploadProgress?.prepared ?? 0}
+          expected={uploadProgress?.expected ?? 0}
+          phase={uploadProgress?.phase}
+        />
+      )}
       {preparePagesErrored && (
         <div className="shrink-0 border-b border-destructive/30 bg-destructive/5 px-4 py-2 flex items-center gap-3">
           <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
