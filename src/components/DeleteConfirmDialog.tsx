@@ -107,4 +107,4 @@ export const DeleteConfirmDialog = forwardRef<HTMLDivElement, DeleteConfirmDialo
       </DialogContent>
     </Dialog>
   );
-}
+});
