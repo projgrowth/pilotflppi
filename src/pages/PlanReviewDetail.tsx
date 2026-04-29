@@ -15,9 +15,9 @@
  * shortcuts (since they cross multiple panels), and handles the actions
  * (upload, generate letter, navigate).
  */
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { streamAI } from "@/lib/ai";
@@ -80,6 +80,10 @@ export default function PlanReviewDetail() {
   const [mobileTab, setMobileTab] = useState<"plans" | "findings">("plans");
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const justCreatedState = (location.state ?? null) as
+    | { justCreated?: boolean; pendingFileCount?: number; pendingPageCount?: number }
+    | null;
   const queryClient = useQueryClient();
   const { firmSettings } = useFirmSettings();
   const { user } = useAuth();
