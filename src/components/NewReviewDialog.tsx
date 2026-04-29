@@ -213,6 +213,8 @@ export function NewReviewDialog({
 
   const backgroundAutoFill = useCallback(async (firstPdf: File) => {
     setExtracting(true);
+    setExtractDoneCount(null);
+    let timedOut = false;
     try {
       const titleBlockBase64 = await renderTitleBlock(firstPdf);
       if (!titleBlockBase64) return;
@@ -222,7 +224,7 @@ export function NewReviewDialog({
           payload: { images: [titleBlockBase64] },
         }),
         new Promise<string>((_, reject) =>
-          setTimeout(() => reject(new Error("timeout")), EXTRACTION_TIMEOUT_MS),
+          setTimeout(() => { timedOut = true; reject(new Error("timeout")); }, EXTRACTION_TIMEOUT_MS),
         ),
       ]);
       let extracted: Record<string, string | null> = {};
@@ -269,9 +271,16 @@ export function NewReviewDialog({
         if (match) setMatchedProject({ id: match.id, name: match.name });
       }
 
-      if (filledCount > 0) toast.success(`AI auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"}`);
+      setExtractDoneCount(filledCount);
+      if (filledCount > 0) {
+        toast.success(`AI auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"}`);
+      }
+      // Auto-clear the success banner after a few seconds
+      setTimeout(() => setExtractDoneCount(null), 4000);
     } catch {
-      // Silent — user can still submit manually.
+      if (timedOut) {
+        toast.warning("Auto-fill timed out — please fill the fields manually");
+      }
     } finally {
       setExtracting(false);
     }
