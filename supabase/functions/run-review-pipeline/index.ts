@@ -282,6 +282,14 @@ Deno.serve(async (req) => {
             // or another tenant's settings could leak in.
             let block = false;
             if (firmId) {
+              const { data: members } = await admin
+                .from("firm_members")
+                .select("user_id")
+                .eq("firm_id", firmId)
+                .order("created_at", { ascending: true })
+                .limit(1);
+              const ownerUserId = (members?.[0] as { user_id?: string } | undefined)?.user_id;
+
               const { data: byFirm } = await admin
                 .from("firm_settings")
                 .select("block_review_on_incomplete_submittal")
@@ -294,7 +302,7 @@ Deno.serve(async (req) => {
                 const { data: byOwner } = await admin
                   .from("firm_settings")
                   .select("block_review_on_incomplete_submittal")
-                  .eq("user_id", firmId)
+                  .eq("user_id", ownerUserId ?? "00000000-0000-0000-0000-000000000000")
                   .maybeSingle();
                 block = (byOwner as { block_review_on_incomplete_submittal?: boolean } | null)
                   ?.block_review_on_incomplete_submittal ?? false;
