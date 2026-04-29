@@ -83,7 +83,7 @@ Deno.serve(async (req) => {
     const errors: string[] = [];
 
     for (const row of (failed ?? []) as Array<{ id: string; firm_id: string | null }>) {
-      const result = await deleteReviewObjects(admin, row.id);
+      const result = await deleteReviewObjects(admin, row.id, row.firm_id);
       if (result.error) {
         errors.push(`${row.id}: ${result.error}`);
       } else if (result.deleted > 0) {
