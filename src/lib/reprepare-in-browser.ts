@@ -141,10 +141,21 @@ export async function reprepareInBrowser(reviewId: string): Promise<ReprepareRes
       .eq("plan_review_id", reviewId),
     supabase
       .from("plan_reviews")
-      .select("ai_run_progress")
+      .select("ai_run_progress, firm_id")
       .eq("id", reviewId)
       .maybeSingle(),
   ]);
+  const firmId = reviewRow?.firm_id ?? null;
+  if (!firmId) {
+    return {
+      ok: false,
+      message: "Cannot reprepare: review is missing firm context.",
+      pageAssetCount: 0,
+      pipelineStarted: false,
+      warnings,
+    };
+  }
+  const pagesPrefix = `firms/${firmId}/plan-reviews/${reviewId}/pages`;
   const existingIndices = new Set<number>(
     ((existingAssets ?? []) as Array<{ page_index: number }>).map((r) => r.page_index),
   );
