@@ -75,7 +75,7 @@ import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { deletePlanReview } from "@/lib/delete-plan-review";
 import { cancelPipelineForReview } from "@/lib/pipeline-cancel";
 
-import { Wand2, AlertTriangle, Loader2 } from "lucide-react";
+// Wand2/AlertTriangle/Loader2 previously used by inline prepare strip — now owned by ReviewNextStepRail.
 
 // RightPanelMode now imported from RightPanelTabs to keep the union in one place.
 

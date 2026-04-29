@@ -45,23 +45,28 @@ export function ReviewTopBar({
   rounds, pipelineProcessing, onBack, onRunAICheck, onNavigateRound, onNewRound,
   onPipelineComplete, onOpenDashboard, onDeleteReview, onCancelPipeline,
 }: ReviewTopBarProps) {
+  // Gate Analyze on the LIVE pipelineProcessing flag, not just `aiRunning`.
+  // Previously the button stayed clickable during the `justCreatedFresh`
+  // window and during browser-side page prep, which let users double-fire
+  // a pipeline that was already starting.
+  const analyzeBusy = aiRunning || !!pipelineProcessing;
   const button = (
     <Button
       size="sm"
       onClick={onRunAICheck}
-      disabled={aiRunning}
+      disabled={analyzeBusy}
       className={cn(
         "h-8 text-xs shrink-0 transition-all",
         aiCompleteFlash !== null
           ? "bg-success text-success-foreground"
-          : !hasFindings && !aiRunning
+          : !hasFindings && !analyzeBusy
             ? "border border-primary/60 ring-1 ring-primary/20"
             : "",
       )}
     >
       {aiCompleteFlash !== null ? (
         <><Check className="h-3.5 w-3.5 mr-1.5" /> ✓ {aiCompleteFlash} findings</>
-      ) : aiRunning ? (
+      ) : analyzeBusy ? (
         <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Analyzing...</>
       ) : (
         <><Sparkles className="h-3.5 w-3.5 mr-1.5" /> {hasFindings ? "Re-Analyze" : "Run AI Check"}</>
