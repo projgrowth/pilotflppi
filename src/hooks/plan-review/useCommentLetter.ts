@@ -42,7 +42,7 @@ interface Args {
   projectDna?: ProjectDnaContext | null | undefined;
 }
 
-export function useCommentLetter({ review, findings, firmSettings }: Args) {
+export function useCommentLetter({ review, findings, firmSettings, projectDna }: Args) {
   const [commentLetter, setCommentLetter] = useState("");
   const [generatingLetter, setGeneratingLetter] = useState(false);
   const [copied, setCopied] = useState(false);
