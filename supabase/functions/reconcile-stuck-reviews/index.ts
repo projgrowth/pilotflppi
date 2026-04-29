@@ -54,18 +54,26 @@ interface StuckRow {
   firm_id: string | null;
   ai_check_status: string;
   ai_run_progress: Record<string, unknown> | null;
+  ai_run_mode: string | null;
   updated_at: string;
 }
 
-async function findLastStage(admin: AdminLike, planReviewId: string): Promise<string | null> {
+async function findLastStage(admin: AdminLike, planReviewId: string): Promise<{
+  stage: string | null;
+  heartbeatAt: string | null;
+}> {
   const { data } = await admin
     .from("review_pipeline_status")
-    .select("stage, status, updated_at")
+    .select("stage, status, updated_at, heartbeat_at")
     .eq("plan_review_id", planReviewId)
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  return (data as { stage?: string } | null)?.stage ?? null;
+  const row = data as { stage?: string; heartbeat_at?: string | null } | null;
+  return {
+    stage: row?.stage ?? null,
+    heartbeatAt: row?.heartbeat_at ?? null,
+  };
 }
 
 async function logRecovery(admin: AdminLike, args: {
@@ -97,7 +105,7 @@ async function logRecovery(admin: AdminLike, args: {
   }
 }
 
-async function startPipeline(planReviewId: string): Promise<{ ok: boolean; message?: string }> {
+async function startPipeline(planReviewId: string, mode: string): Promise<{ ok: boolean; message?: string }> {
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/run-review-pipeline`, {
       method: "POST",
@@ -108,7 +116,8 @@ async function startPipeline(planReviewId: string): Promise<{ ok: boolean; messa
       },
       body: JSON.stringify({
         plan_review_id: planReviewId,
-        mode: "core",
+        // Persisted mode wins so a deep run isn't silently downgraded.
+        mode: mode === "deep" || mode === "full" ? mode : "core",
         _internal: true,
       }),
     });
@@ -122,7 +131,17 @@ async function startPipeline(planReviewId: string): Promise<{ ok: boolean; messa
 async function reconcileOne(admin: AdminLike, row: StuckRow, nowMs: number) {
   const idleMs = nowMs - new Date(row.updated_at).getTime();
   const minutesIdle = Math.round(idleMs / 60000);
-  const lastStage = await findLastStage(admin, row.id);
+  const { stage: lastStage, heartbeatAt } = await findLastStage(admin, row.id);
+
+  // HEARTBEAT BYPASS: if the active stage emitted a heartbeat in the last
+  // 5 minutes, it's still alive (likely a long AI chunk). Don't reset it
+  // just because plan_reviews.updated_at is older than 15 min.
+  if (heartbeatAt) {
+    const heartbeatAgeMs = nowMs - new Date(heartbeatAt).getTime();
+    if (heartbeatAgeMs < 5 * 60 * 1000) {
+      return { id: row.id, action: "alive" as const, lastStage, minutesIdle: Math.round(heartbeatAgeMs / 60000) };
+    }
+  }
 
   const progress = row.ai_run_progress ?? {};
   const recoveryCount =
@@ -235,7 +254,7 @@ async function reconcileOne(admin: AdminLike, row: StuckRow, nowMs: number) {
     })
     .eq("id", row.id);
 
-  const kick = await startPipeline(row.id);
+  const kick = await startPipeline(row.id, row.ai_run_mode ?? "core");
   await logRecovery(admin, {
     planReviewId: row.id,
     firmId: row.firm_id,
@@ -262,7 +281,7 @@ Deno.serve(async (req) => {
     // Reviews that LOOK active but haven't moved in 15+ min.
     const { data: stuck, error } = await admin
       .from("plan_reviews")
-      .select("id, firm_id, ai_check_status, ai_run_progress, updated_at")
+      .select("id, firm_id, ai_check_status, ai_run_progress, ai_run_mode, updated_at")
       .in("ai_check_status", ["pending", "running"])
       .lt("updated_at", cutoff)
       .order("updated_at", { ascending: true })

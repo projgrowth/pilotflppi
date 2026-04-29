@@ -16,7 +16,10 @@ export async function callAI({ action, payload }: AIRequestOptions): Promise<str
   return data?.content || "";
 }
 
-const STREAM_INACTIVITY_TIMEOUT_MS = 60_000;
+// Long-form letter generation can have a >60s first-token delay on a cold
+// Gemini worker. Bumped to 120s so a slow start doesn't get reported as a
+// stall on a stream that's about to start producing tokens normally.
+const STREAM_INACTIVITY_TIMEOUT_MS = 120_000;
 
 export async function streamAI({
   action,
@@ -110,7 +113,7 @@ export async function streamAI({
       }
     }
   } catch (err) {
-    if (stalled) throw new Error("AI stream stalled — no data received for 60s");
+    if (stalled) throw new Error("AI stream stalled — no data received for 120s. Try again or switch to a smaller model.");
     if ((err as Error)?.name === "AbortError") throw new Error("AI request cancelled");
     throw err;
   } finally {
