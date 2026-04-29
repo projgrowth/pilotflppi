@@ -110,10 +110,15 @@ export default function FindingProvenancePopover({ def }: Props) {
                     ? "text-destructive"
                     : def.verification_status === "modified"
                       ? "text-amber-600 dark:text-amber-400"
-                      : "text-muted-foreground"
+                      : def.verification_status === "cannot_locate"
+                        ? "text-amber-600 dark:text-amber-400"
+                        : "text-muted-foreground"
               }
             >
               {def.verification_status}
+              {def.verification_status === "cannot_locate" && (
+                <span className="ml-1 text-2xs opacity-70">(2nd-pass model couldn't find element)</span>
+              )}
             </span>
           </Row>
           {def.verification_notes && (
