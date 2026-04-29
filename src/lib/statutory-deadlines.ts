@@ -236,11 +236,13 @@ export function getStatutoryStatus(project: {
   statutory_review_days?: number | null;
   statutory_inspection_days?: number | null;
   notice_filed_at?: string | null;
+  clock_pause_history?: ClockPauseEvent[] | null;
 }): StatutoryStatus {
   const reviewDays = project.statutory_review_days ?? 30;
   const inspectionDays = project.statutory_inspection_days ?? 10;
   const clockStart = project.review_clock_started_at || project.notice_filed_at;
   const isPaused = !!project.review_clock_paused_at;
+  const history = project.clock_pause_history ?? null;
 
   const inspectionStatuses = ["inspection_scheduled", "inspection_complete"];
   const completedStatuses = ["certificate_issued", "cancelled"];
@@ -255,17 +257,18 @@ export function getStatutoryStatus(project: {
     phase = "review";
   }
 
-  // When paused, freeze the count at the moment of pause (F.S. 553.791 compliance).
-  // Pass paused_at as asOf so we count days from clockStart up to the pause timestamp,
-  // not days since the pause was set.
-  const reviewDaysUsed = phase === "review"
-    ? (isPaused
-        ? getBusinessDaysElapsed(clockStart, new Date(project.review_clock_paused_at!))
-        : getBusinessDaysElapsed(clockStart))
-    : 0;
+  // Net elapsed = gross business days from clockStart up to "now" (or to the
+  // current pause moment if currently paused), MINUS business days banked
+  // during prior pause/resume cycles. Required for F.S. 553.791 because the
+  // clock can pause when comments are sent and resume when resubmitted.
+  const asOf = isPaused ? new Date(project.review_clock_paused_at!) : new Date();
+  const reviewDaysUsed =
+    phase === "review"
+      ? getNetBusinessDaysElapsed(clockStart, asOf, history, project.review_clock_paused_at)
+      : 0;
   const reviewDaysRemaining = Math.max(0, reviewDays - reviewDaysUsed);
 
-  // Inspection phase uses dedicated inspection clock
+  // Inspection phase uses dedicated inspection clock (no pause semantics yet).
   const inspectionClockStart = project.inspection_clock_started_at || clockStart;
   const inspectionDaysUsed = phase === "inspection" ? getBusinessDaysElapsed(inspectionClockStart) : 0;
   const inspectionDaysRemaining = Math.max(0, inspectionDays - inspectionDaysUsed);
