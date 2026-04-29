@@ -33,7 +33,9 @@ export interface ReadinessCheck {
     | "affidavit_signed"
     | "reviewer_licensed"
     | "threshold_special_inspector"
-    | "coverage";
+    | "coverage"
+    | "coastal_overlay"
+    | "stale_disposition";
   severity: ReadinessSeverity;
   /** Required vs advisory — only required checks gate the export button. */
   required: boolean;
@@ -44,7 +46,7 @@ export interface ReadinessCheck {
 }
 
 export interface ReadinessInput {
-  findings: Pick<
+  findings: (Pick<
     DeficiencyV2Row,
     | "id"
     | "reviewer_disposition"
@@ -53,7 +55,13 @@ export interface ReadinessInput {
     | "citation_status"
     | "confidence_score"
     | "evidence_crop_meta"
-  >[];
+  > & {
+    /** Optional — populated by `tr_stamp_reviewer_disposition_at`. When the
+     *  finding's `updated_at` is later than this, the human decision is
+     *  stale (the finding changed after they decided). */
+    reviewer_disposition_at?: string | null;
+    updated_at?: string | null;
+  })[];
   qcStatus: string | null | undefined;
   /** True when the dashboard reviewer is the same person who ran the AI check.
    *  In single-reviewer firms there is no second pair of eyes to QC, so we
@@ -100,6 +108,16 @@ export interface ReadinessInput {
    * accidentally let stub citations through.
    */
   blockLetterOnUngrounded?: boolean;
+  /**
+   * Audit M-04 follow-up: when DNA flags `is_coastal=true` but the project's
+   * county is classified inland in `county-requirements/data.ts` (no
+   * `windBorneDebrisRegion` and no `floodZoneRequired`), surface a blocking
+   * check so the reviewer knows WBDR + flood callouts are missing from the
+   * boilerplate. Pass `null`/`undefined` to skip the check entirely.
+   */
+  dnaIsCoastal?: boolean | null;
+  /** True when the project's county registry entry covers WBDR + flood. */
+  countyAlreadyCoastal?: boolean;
 }
 
 export interface ReadinessResult {
