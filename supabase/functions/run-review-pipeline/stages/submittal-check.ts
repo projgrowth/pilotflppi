@@ -6,6 +6,7 @@
 // burn dozens of arch-only findings against an obviously incomplete set.
 
 import type { Admin } from "../_shared/supabase.ts";
+import { mergeProgress } from "../_shared/pipeline-status.ts";
 
 export async function stageSubmittalCheck(
   admin: Admin,
@@ -40,18 +41,13 @@ export async function stageSubmittalCheck(
   }
   const totalSheets = Array.from(counts.values()).reduce((a, b) => a + b, 0);
 
-  const writeProgress = async (extra: Record<string, unknown>) => {
-    await admin
-      .from("plan_reviews")
-      .update({
-        ai_run_progress: {
-          ...progress,
-          submittal_check_at: new Date().toISOString(),
-          ...extra,
-        },
-      })
-      .eq("id", planReviewId);
-  };
+  // Atomic merge so a concurrent discipline_review heartbeat or dispatch
+  // self-update can't clobber our completion marker.
+  const writeProgress = (extra: Record<string, unknown>) =>
+    mergeProgress(admin, planReviewId, {
+      submittal_check_at: new Date().toISOString(),
+      ...extra,
+    });
 
   if (useType === "residential" || totalSheets < 6) {
     await writeProgress({
