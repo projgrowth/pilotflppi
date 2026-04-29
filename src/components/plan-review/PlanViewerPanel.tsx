@@ -31,6 +31,11 @@ interface Props {
    * "Loading document…" spinner. Drives the "I can see what's happening" UX.
    */
   pipelineProcessing?: boolean;
+  /** Sub-phase to render in the overlay before the pipeline starts. */
+  processingPhase?: import("./ProcessingOverlay").ProcessingPhase;
+  preparedPages?: number;
+  expectedPages?: number;
+  pendingFileCount?: number;
   onPipelineComplete?: () => void;
   onOpenDashboard?: () => void;
 

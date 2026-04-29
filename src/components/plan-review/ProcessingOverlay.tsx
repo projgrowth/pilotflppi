@@ -101,7 +101,7 @@ export function ProcessingOverlay({
                   ? `Preparing pages — ${preparedPages} / ${expectedPages}`
                   : "Uploading & preparing pages"
               }
-              done={phase === "analyzing"}
+              done={false}
               active={phase === "uploading" || phase === "preparing"}
             />
             <PreStageItem label="Starting AI analysis" done={false} active={false} muted />
