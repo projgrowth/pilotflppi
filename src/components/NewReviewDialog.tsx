@@ -156,6 +156,8 @@ export function NewReviewDialog({
     setExtracting(false);
     setExtractDoneCount(null);
     setGeocoding(false);
+    setSubmitProgress(null);
+    setValidatingCount(null);
   };
 
   const close = () => {
