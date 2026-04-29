@@ -97,7 +97,7 @@ export async function uploadPlanReviewFiles(
   const newFilePaths: string[] = [];
   const fileHashes = new Map<string, { sha256: string; size: number }>();
   for (const file of acceptedFiles) {
-    const path = `plan-reviews/${reviewId}/round-${round}/${file.name}`;
+    const path = `${prefix}/round-${round}/${file.name}`;
     let sha256: string | null = null;
     try {
       sha256 = await sha256OfFile(file);
