@@ -1,59 +1,38 @@
-# Make AI auto-fill visible during New Plan Review
+# Fix "Failed to create review" — grant EXECUTE on `user_firm_id`
 
-## Problem
+## Root cause (confirmed in DB logs)
 
-When you drop PDFs into "New Plan Review", the AI runs in the background to extract project name, address, county, etc. from the title block. This can take up to ~20 seconds, but the only visible signal is a tiny `Sparkles` icon and the text "AI auto-filling…" wedged into the file-count line at the bottom of the file list. There's no indication on the form fields themselves that they're about to be populated, no progress, and no estimate of how long it will take. Users assume the dialog is frozen and either wait confused or start typing manually (which then blocks the AI from filling those fields).
-
-A second smaller issue: after clicking "Start review", the button shows a spinner labeled "Starting…" but the helper text below ("We'll keep uploading in the workspace — keep this browser open for ~30 sec") is small and easy to miss.
-
-## What we'll change
-
-All changes are in `src/components/NewReviewDialog.tsx`. No backend/API changes.
-
-### 1. Prominent auto-fill banner
-
-When `extracting === true`, show a full-width banner directly under the drop zone (above the form fields) instead of the tiny inline hint:
+Every attempt to create a new plan review is failing with:
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│ ✦ Reading your plans…                                    │
-│   AI is extracting the project name, address, county     │
-│   and trade from the title block. Usually 5–15 seconds.  │
-│   ▓▓▓▓▓▓▓▓░░░░░░░░░░░░  (animated indeterminate bar)    │
-└──────────────────────────────────────────────────────────┘
+ERROR: permission denied for function user_firm_id
 ```
 
-- Uses the existing accent color, `Sparkles` icon, and a Tailwind animated progress bar (no new deps).
-- After completion, briefly transitions to a green "✓ Auto-filled N field(s)" confirmation that fades out after ~3s (we already toast this — we'll keep both, but the banner makes it impossible to miss).
+The helper function `public.user_firm_id(uuid)` is called by the RLS policies on `projects`, `plan_reviews`, and ~30 other firm-scoped tables. It exists and is `SECURITY DEFINER`, but EXECUTE was only granted to `postgres`, `service_role`, and `sandbox_exec` — **not to `authenticated`**. The sibling helper `has_role` was granted correctly; `user_firm_id` was missed.
 
-### 2. Per-field "AI is filling this…" affordance
+Result: as soon as Postgres evaluates the RLS `WITH CHECK` on `INSERT INTO projects`, it can't call the function, the insert aborts, and the dialog shows "Failed to create review".
 
-While `extracting` is true, on the empty fields that AI will populate (Project Name, Address, County, Trade), show a faint shimmer/pulse on the input border and a small `Sparkles` icon inside the input on the right side. The moment a field is filled (or the user types in it), the affordance disappears for that field. This gives a visual link between "AI is working" and the specific fields it's about to touch.
+## Fix
 
-### 3. Don't reset extraction state silently on timeout
+One migration, no schema change:
 
-Today, on the 20s timeout the `catch` block is silent. We'll add a soft toast: "Auto-fill timed out — please fill the fields manually" so users know to take over. The form is otherwise unaffected.
-
-### 4. Clearer submit/handoff state
-
-Replace the small helper text under the "Start review" button with a more prominent inline status block that appears only while `saving` is true:
-
-```
-┌──────────────────────────────────────────────────────────┐
-│ ⟳ Creating review and uploading {N} file(s)…             │
-│   You'll be taken to the workspace in a moment. Keep     │
-│   this tab open for ~30 seconds while uploads finish.    │
-└──────────────────────────────────────────────────────────┘
+```sql
+GRANT EXECUTE ON FUNCTION public.user_firm_id(uuid) TO authenticated, anon;
 ```
 
-The button itself stays disabled with the existing "Starting…" spinner.
+That's it. No policy edits, no table changes, no app code changes.
 
-### 5. Disable form interaction during extraction? (No)
+## Why this is safe
 
-We considered disabling the form during extraction so users wait for AI, but the current "user can submit immediately, AI fills empty fields only" behavior is good. We'll keep it. The new banner just makes the wait *visible* rather than hidden.
+- `user_firm_id` is `SECURITY DEFINER` and only returns the caller's own `firm_id` from `firm_members` — it does not expose anyone else's data.
+- `has_role` is already granted to `authenticated` with the same pattern; this brings `user_firm_id` in line.
+- All existing RLS rules continue to enforce firm scoping; we're only allowing the policy machinery to *call* its helper.
 
-## Files touched
+## Verification after apply
 
-- `src/components/NewReviewDialog.tsx` — banner, per-field affordance, timeout toast, submit status block.
+1. Open New Plan Review, drop a PDF, click **Start review** → review should be created and the workspace should open.
+2. Re-run the DB error log query; the `permission denied for function user_firm_id` errors should stop.
 
-No new packages, no backend changes, no migrations. Nothing else in the app is affected.
+## Files
+
+- One new migration in `supabase/migrations/` containing the GRANT above. No client code changes.

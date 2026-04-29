@@ -1,0 +1,1 @@
+GRANT EXECUTE ON FUNCTION public.user_firm_id(uuid) TO authenticated, anon;
