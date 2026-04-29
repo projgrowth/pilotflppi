@@ -709,32 +709,49 @@ export function NewReviewDialog({
 
           <Button
             onClick={handleSubmit}
-            disabled={!formValid || saving}
+            disabled={!formValid || saving || !!validatingCount}
             className="w-full h-11"
           >
             {saving ? (
-              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Starting…</>
+              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> {submitProgress?.phase ?? "Starting…"}</>
+            ) : validatingCount ? (
+              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Validating {validatingCount.done}/{validatingCount.total}…</>
             ) : (
               <><Sparkles className="h-4 w-4 mr-2" /> Start review <ArrowRight className="h-4 w-4 ml-2" /></>
             )}
           </Button>
           {saving ? (
-            <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 animate-fade-in">
+            <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 animate-fade-in space-y-2">
               <div className="flex items-start gap-2.5">
                 <Loader2 className="h-4 w-4 text-accent shrink-0 mt-0.5 animate-spin" />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-foreground">
-                    Creating review and uploading {files.length} file{files.length === 1 ? "" : "s"}…
+                    {submitProgress?.phase ?? `Uploading ${files.length} file${files.length === 1 ? "" : "s"}…`}
                   </p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    You'll be taken to the workspace in a moment. Keep this tab open for ~30 seconds while uploads finish.
+                    Keep this dialog open until upload completes — we'll take you to the workspace automatically.
                   </p>
+                  {submitProgress && submitProgress.expected > 0 && (
+                    <div className="mt-2 space-y-1">
+                      <div className="h-1 w-full overflow-hidden rounded-full bg-accent/15">
+                        <div
+                          className="h-full rounded-full bg-accent transition-all"
+                          style={{
+                            width: `${Math.min(100, Math.round((submitProgress.prepared / submitProgress.expected) * 100))}%`,
+                          }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-muted-foreground tabular-nums">
+                        {submitProgress.prepared} / {submitProgress.expected} pages prepared
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           ) : (
             <p className="text-[11px] text-center text-muted-foreground leading-relaxed">
-              We'll keep uploading in the workspace — keep this browser open for ~30 sec, then it's safe to leave.
+              Upload completes in the dialog (~30s for typical sets). Then we'll open the review workspace.
             </p>
           )}
         </div>
