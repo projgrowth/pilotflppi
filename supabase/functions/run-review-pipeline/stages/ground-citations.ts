@@ -118,6 +118,14 @@ export async function stageGroundCitations(
     .neq("verification_status", "superseded");
   if (error) throw error;
 
+  // Fetch firm_id once for audit logging in citation_corrections.
+  const { data: prRow } = await admin
+    .from("plan_reviews")
+    .select("firm_id")
+    .eq("id", planReviewId)
+    .maybeSingle();
+  const firmId = (prRow?.firm_id as string | null) ?? null;
+
   const defs = (defsRaw ?? []) as GroundingRow[];
   if (defs.length === 0) {
     return {
@@ -171,7 +179,9 @@ export async function stageGroundCitations(
   const isStubCanonical = (text: string | null | undefined): boolean => {
     if (!text) return true;
     const t = text.trim().toLowerCase();
-    if (t.length < 60) return true;
+    // 80 chars: empirical minimum for token-overlap to be statistically
+    // meaningful. Below that, Jaccard over-/under-fits on tiny samples.
+    if (t.length < 80) return true;
     return STUB_MARKERS.some((m) => t.includes(m));
   };
 
@@ -359,7 +369,7 @@ export async function stageGroundCitations(
         def.finding,
         def.required_action,
       );
-      if (suggestion && suggestion.similarity >= 0.6) {
+      if (suggestion && suggestion.similarity >= 0.65) {
         const prevMeta = (update.evidence_crop_meta as Record<string, unknown>) ?? {};
         update.evidence_crop_meta = {
           ...prevMeta,
@@ -387,6 +397,20 @@ export async function stageGroundCitations(
             : status === "not_found"
               ? `Cited FBC section ${def.code_reference?.section ?? "?"} was not found — the AI suggests ${suggestion.section} (${suggestion.title}) instead. Verify and update.`
               : `No FBC section parseable — the AI suggests ${suggestion.section} (${suggestion.title}). Verify and add the citation.`;
+        // Audit trail: log every suggestion (NOT applied — reviewer must
+        // accept). Lets us measure precision over time and roll back the
+        // suggestion threshold if false-positives spike.
+        const { error: auditErr } = await admin.from("citation_corrections").insert({
+          deficiency_id: def.id,
+          plan_review_id: planReviewId,
+          firm_id: firmId,
+          original_section: def.code_reference?.section ?? null,
+          suggested_section: suggestion.section,
+          similarity_score: Number(suggestion.similarity.toFixed(3)),
+          applied: false,
+          reason: `vector_suggestion_for_${status}`,
+        });
+        if (auditErr) console.warn("[ground_citations] audit insert failed", auditErr.message);
       } else {
         update.requires_human_review = true;
         update.human_review_reason =

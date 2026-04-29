@@ -305,6 +305,45 @@ export type Database = {
         }
         Relationships: []
       }
+      citation_corrections: {
+        Row: {
+          applied: boolean
+          created_at: string
+          deficiency_id: string
+          firm_id: string | null
+          id: string
+          original_section: string | null
+          plan_review_id: string
+          reason: string
+          similarity_score: number
+          suggested_section: string
+        }
+        Insert: {
+          applied?: boolean
+          created_at?: string
+          deficiency_id: string
+          firm_id?: string | null
+          id?: string
+          original_section?: string | null
+          plan_review_id: string
+          reason?: string
+          similarity_score: number
+          suggested_section: string
+        }
+        Update: {
+          applied?: boolean
+          created_at?: string
+          deficiency_id?: string
+          firm_id?: string | null
+          id?: string
+          original_section?: string | null
+          plan_review_id?: string
+          reason?: string
+          similarity_score?: number
+          suggested_section?: string
+        }
+        Relationships: []
+      }
       comment_letter_snapshots: {
         Row: {
           chained_hash: string | null
@@ -880,6 +919,8 @@ export type Database = {
           keywords: string[]
           requirement_text: string
           section: string
+          seed_confidence: number | null
+          seed_source: string
           source_url: string | null
           title: string
           updated_at: string
@@ -895,6 +936,8 @@ export type Database = {
           keywords?: string[]
           requirement_text: string
           section: string
+          seed_confidence?: number | null
+          seed_source?: string
           source_url?: string | null
           title: string
           updated_at?: string
@@ -910,6 +953,8 @@ export type Database = {
           keywords?: string[]
           requirement_text?: string
           section?: string
+          seed_confidence?: number | null
+          seed_source?: string
           source_url?: string | null
           title?: string
           updated_at?: string

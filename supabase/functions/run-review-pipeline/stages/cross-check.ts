@@ -241,6 +241,21 @@ async function runCrossSheetConsistency(
   }));
 }
 
+async function getActivePromptVersionId(
+  admin: ReturnType<typeof createClient>,
+  promptKey: string,
+): Promise<string | null> {
+  const { data } = await admin
+    .from("prompt_versions")
+    .select("id")
+    .eq("prompt_key", promptKey)
+    .eq("is_active", true)
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as { id?: string } | null)?.id ?? null;
+}
+
 async function persistConsistencyMismatches(
   admin: ReturnType<typeof createClient>,
   planReviewId: string,
@@ -248,6 +263,8 @@ async function persistConsistencyMismatches(
   mismatches: ConsistencyMismatch[],
 ): Promise<ConsistencyMismatch[]> {
   if (mismatches.length === 0) return [];
+
+  const promptVersionId = await getActivePromptVersionId(admin, "cross_sheet_consistency");
 
   const { count: existingCount } = await admin
     .from("deficiencies_v2")
@@ -280,6 +297,7 @@ async function persistConsistencyMismatches(
     confidence_score: m.confidence_score,
     confidence_basis: "Cross-sheet vision pass",
     model_version: "google/gemini-2.5-pro",
+    prompt_version_id: promptVersionId,
     status: "open",
     citation_status: "unverified",
   }));

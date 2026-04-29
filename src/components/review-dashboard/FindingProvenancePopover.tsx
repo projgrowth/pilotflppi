@@ -7,7 +7,7 @@ import {
 import { type DeficiencyV2Row } from "@/hooks/useReviewDashboard";
 
 interface Props {
-  def: DeficiencyV2Row & { model_version?: string | null };
+  def: DeficiencyV2Row & { model_version?: string | null; prompt_version_id?: string | null };
 }
 
 /**
@@ -51,6 +51,11 @@ export default function FindingProvenancePopover({ def }: Props) {
               <span className="text-muted-foreground">unknown</span>
             )}
           </Row>
+          {def.prompt_version_id && (
+            <Row label="Prompt">
+              <span className="font-mono opacity-80">{def.prompt_version_id.slice(0, 8)}…</span>
+            </Row>
+          )}
           <Row label="Confidence">
             {typeof def.confidence_score === "number" ? (
               <span className="font-mono">{def.confidence_score.toFixed(2)}</span>
@@ -105,10 +110,15 @@ export default function FindingProvenancePopover({ def }: Props) {
                     ? "text-destructive"
                     : def.verification_status === "modified"
                       ? "text-amber-600 dark:text-amber-400"
-                      : "text-muted-foreground"
+                      : def.verification_status === "cannot_locate"
+                        ? "text-amber-600 dark:text-amber-400"
+                        : "text-muted-foreground"
               }
             >
               {def.verification_status}
+              {def.verification_status === "cannot_locate" && (
+                <span className="ml-1 text-2xs opacity-70">(2nd-pass model couldn't find element)</span>
+              )}
             </span>
           </Row>
           {def.verification_notes && (

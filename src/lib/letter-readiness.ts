@@ -26,6 +26,7 @@ export interface ReadinessCheck {
     | "triage"
     | "citations"
     | "verifier_completion"
+    | "verifier_cannot_locate"
     | "sheet_refs"
     | "qc"
     | "project_dna"
@@ -256,6 +257,33 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
       ? "Re-run Deep QA, or triage the unverified items by hand before sending."
       : `${live.length - unverified.length} of ${live.length} findings have a verifier verdict.`,
     jumpFindingId: unverified[0]?.id,
+  });
+
+  // 2c. Verifier cannot_locate — required check.
+  // The adversarial verifier returns `cannot_locate` when it can't find the
+  // cited element on the cited sheet. Per stages/verify.ts we never auto-
+  // overturn for that reason — it routes to human review. But the comment
+  // letter would still print the original AI finding text, so a reviewer who
+  // rubber-stamps would send "Door 102 is undersized" when the verifier
+  // couldn't even find Door 102. Block until the human dispositions every
+  // cannot_locate finding (confirm = "I checked by hand", reject = "remove",
+  // modify = "rewrite to what's actually there").
+  const cannotLocate = live.filter(
+    (f) => f.verification_status === "cannot_locate" && f.reviewer_disposition === null,
+  );
+  checks.push({
+    id: "verifier_cannot_locate",
+    required: true,
+    severity: cannotLocate.length === 0 ? "ok" : "block",
+    title:
+      cannotLocate.length === 0
+        ? "Verifier located every cited element"
+        : `${cannotLocate.length} finding${cannotLocate.length === 1 ? "" : "s"} the verifier couldn't locate`,
+    detail:
+      cannotLocate.length === 0
+        ? "The adversarial verifier confirmed it could see the element each finding cites on the referenced sheet."
+        : "The second-pass verifier could not see the cited element on the referenced sheet for these findings. Confirm by hand, reject, or modify before sending — kept items will be marked '[Reviewer to confirm location]' in the letter.",
+    jumpFindingId: cannotLocate[0]?.id,
   });
 
   // 3. Sheet refs resolved — Track-2 metadata flag.
