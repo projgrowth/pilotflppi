@@ -329,7 +329,7 @@ export async function reprepareInBrowser(reviewId: string): Promise<ReprepareRes
         .upload(path, blob, { upsert: true, contentType: "image/jpeg" });
       return { error: res.error ? { message: res.error.message } : null };
     },
-    { startGlobalIndex: 0 },
+    { startGlobalIndex: 0, pagesPrefix },
   );
 
   if (pageAssetRows.length === 0) {
