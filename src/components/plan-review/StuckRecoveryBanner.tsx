@@ -57,6 +57,25 @@ export function StuckRecoveryBanner({
 }: Props) {
   const [rerunning, setRerunning] = useState(false);
 
+  // Live breakdown — re-computes whenever the verifier writes back, so the
+  // "11 of 11 unverified" banner doesn't sit stale after the verifier finishes.
+  // Uses the same realtime-subscribed hook as the dashboard.
+  const { data: liveDefs = [] } = useDeficienciesV2(planReviewId);
+  const liveBreakdown = useMemo(() => {
+    const live = liveDefs.filter(
+      (d) =>
+        (d.status === "open" || d.status === "needs_info") &&
+        d.verification_status !== "superseded" &&
+        d.verification_status !== "overturned",
+    );
+    const verified = live.filter((d) => d.verification_status === "verified" || d.verification_status === "modified").length;
+    const needsHuman = live.filter((d) => d.verification_status === "needs_human").length;
+    const unverified = live.filter(
+      (d) => (d.verification_status ?? "unverified") === "unverified" && d.citation_status !== "hallucinated",
+    ).length;
+    return { total: live.length, verified, needsHuman, unverified };
+  }, [liveDefs]);
+
   const handleRerunVerify = async () => {
     setRerunning(true);
     const r = await startPipeline(planReviewId, "core", "verify");
