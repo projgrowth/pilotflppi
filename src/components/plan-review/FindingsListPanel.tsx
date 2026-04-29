@@ -330,6 +330,6 @@ export function FindingsListPanel(props: Props) {
           );
         })}
       </Accordion>
-    </>
+    </div>
   );
 }
