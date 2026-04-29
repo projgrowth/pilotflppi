@@ -286,4 +286,63 @@ describe("computeLetterReadiness", () => {
     expect(res.blockingCount).toBe(3);
     expect(res.allRequiredPassing).toBe(false);
   });
+
+  // ── Wave 6 trust hardening ────────────────────────────────────────────
+
+  it("coastal_overlay: blocks when DNA is coastal but county registry isn't", () => {
+    const res = computeLetterReadiness(
+      baseInput({ dnaIsCoastal: true, countyAlreadyCoastal: false }),
+    );
+    expect(findCheck(res, "coastal_overlay")?.severity).toBe("block");
+    expect(res.allRequiredPassing).toBe(false);
+  });
+
+  it("coastal_overlay: passes when county already covers WBDR + flood", () => {
+    const res = computeLetterReadiness(
+      baseInput({ dnaIsCoastal: true, countyAlreadyCoastal: true }),
+    );
+    // either omitted (ok) or severity ok
+    const c = findCheck(res, "coastal_overlay");
+    if (c) expect(c.severity).toBe("ok");
+    expect(res.allRequiredPassing).toBe(true);
+  });
+
+  it("coastal_overlay: omitted when DNA flag is null/false", () => {
+    const off = computeLetterReadiness(baseInput({ dnaIsCoastal: null }));
+    expect(findCheck(off, "coastal_overlay")).toBeUndefined();
+    const inland = computeLetterReadiness(baseInput({ dnaIsCoastal: false }));
+    expect(findCheck(inland, "coastal_overlay")).toBeUndefined();
+  });
+
+  it("stale_disposition: blocks when finding.updated_at > reviewer_disposition_at", () => {
+    const res = computeLetterReadiness(
+      baseInput({
+        findings: [
+          f({
+            reviewer_disposition: "confirm",
+            reviewer_disposition_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-02T00:00:00Z",
+          }),
+        ],
+      }),
+    );
+    expect(findCheck(res, "stale_disposition")?.severity).toBe("block");
+  });
+
+  it("stale_disposition: passes when disposition is fresher than the row", () => {
+    const res = computeLetterReadiness(
+      baseInput({
+        findings: [
+          f({
+            reviewer_disposition: "confirm",
+            reviewer_disposition_at: "2026-01-02T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          }),
+        ],
+      }),
+    );
+    const c = findCheck(res, "stale_disposition");
+    if (c) expect(c.severity).toBe("ok");
+    expect(res.allRequiredPassing).toBe(true);
+  });
 });
