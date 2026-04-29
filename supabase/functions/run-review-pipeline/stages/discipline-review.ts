@@ -1238,16 +1238,19 @@ export async function stageDisciplineReview(
   const expectedPages = allSheets.length;
   if (totalFindings === 0 && carryoverInserted === 0 && expectedPages > 5 && failed.length === 0) {
     const reason = `Pipeline produced 0 findings on ${expectedPages} sheets. Likely a bad upload or empty rasterize — please review manually.`;
+    // Atomic merge for ai_run_progress so concurrent stage writes can't
+    // clobber the failure_reason/low_yield_at markers the StuckRecoveryBanner
+    // reads.
+    await mergeProgress(admin, planReviewId, {
+      failure_reason: reason,
+      low_yield_at: new Date().toISOString(),
+      expected_pages: expectedPages,
+      total_findings: 0,
+    });
     await admin
       .from("plan_reviews")
       .update({
         ai_check_status: "needs_human_review",
-        ai_run_progress: {
-          failure_reason: reason,
-          low_yield_at: new Date().toISOString(),
-          expected_pages: expectedPages,
-          total_findings: 0,
-        },
         updated_at: new Date().toISOString(),
       })
       .eq("id", planReviewId);
