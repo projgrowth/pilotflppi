@@ -58,9 +58,15 @@ const MIN_RASTERIZE_RATIO = 0.8;
 export async function uploadPlanReviewFiles(
   args: UploadPlanReviewArgs,
 ): Promise<UploadPlanReviewResult> {
-  const { reviewId, round, existingFileUrls, existingPageCount, files, userId, onProgress } =
+  const { reviewId, firmId, round, existingFileUrls, existingPageCount, files, userId, onProgress } =
     args;
   const warnings: string[] = [];
+
+  if (!firmId) {
+    throw new Error("Cannot upload: missing firm context. Reload and try again.");
+  }
+
+  const prefix = `firms/${firmId}/plan-reviews/${reviewId}`;
 
   onProgress?.({ phase: "Validating PDFs…", prepared: 0, expected: 0 });
 
