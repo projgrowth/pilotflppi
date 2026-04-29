@@ -179,7 +179,9 @@ export async function stageGroundCitations(
   const isStubCanonical = (text: string | null | undefined): boolean => {
     if (!text) return true;
     const t = text.trim().toLowerCase();
-    if (t.length < 60) return true;
+    // 80 chars: empirical minimum for token-overlap to be statistically
+    // meaningful. Below that, Jaccard over-/under-fits on tiny samples.
+    if (t.length < 80) return true;
     return STUB_MARKERS.some((m) => t.includes(m));
   };
 
