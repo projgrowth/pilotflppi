@@ -119,3 +119,30 @@ export async function recordPipelineError(
     console.error("[pipeline_error_log] insert failed:", err);
   }
 }
+
+/**
+ * Lightweight heartbeat: bump only `heartbeat_at` for the active stage row.
+ * Long-running stages (discipline_review chunked AI calls, ground_citations
+ * batches) call this every chunk so the watchdog can distinguish a healthy
+ * worker that's just slow from one that has actually died.
+ *
+ * Best-effort — never throws. A missed heartbeat is not a fatal condition;
+ * the watchdog already tolerates a 15-min idle window.
+ */
+export async function heartbeat(
+  admin: Admin,
+  planReviewId: string,
+  stage: Stage,
+): Promise<void> {
+  try {
+    const now = new Date().toISOString();
+    await admin
+      .from("review_pipeline_status")
+      .update({ heartbeat_at: now, updated_at: now })
+      .eq("plan_review_id", planReviewId)
+      .eq("stage", stage)
+      .eq("status", "running");
+  } catch (err) {
+    console.warn("[heartbeat] failed:", err);
+  }
+}
