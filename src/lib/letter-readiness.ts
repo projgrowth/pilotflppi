@@ -25,6 +25,7 @@ export interface ReadinessCheck {
   id:
     | "triage"
     | "citations"
+    | "verifier_completion"
     | "sheet_refs"
     | "qc"
     | "project_dna"
@@ -205,7 +206,7 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
 
   // 2b. Verifier completion — required check (two-pair-of-eyes promise).
   checks.push({
-    id: "citations",
+    id: "verifier_completion",
     required: true,
     severity: verifierStalled ? "block" : "ok",
     title: verifierStalled

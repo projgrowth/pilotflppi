@@ -1,15 +1,63 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.74.0";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+// CORS allowlist (audit A-02). Only origins we operate from may call this
+// function from a browser. Edge-to-edge / server requests bypass CORS by
+// not sending an Origin header, so this only restricts cross-site browsers.
+const ALLOWED_ORIGINS = new Set<string>([
+  "https://projgrowth.site",
+  "https://www.projgrowth.site",
+  "https://pilotflppi.lovable.app",
+]);
+const ALLOWED_ORIGIN_PATTERNS: RegExp[] = [
+  // Lovable preview/sandbox URLs (id-preview--<uuid>.lovable.app, *.sandbox.lovable.dev, lovableproject.com)
+  /^https:\/\/[a-z0-9-]+\.lovable\.app$/i,
+  /^https:\/\/[a-z0-9-]+\.sandbox\.lovable\.dev$/i,
+  /^https:\/\/[a-z0-9-]+\.lovableproject\.com$/i,
+  // Local dev
+  /^http:\/\/localhost(:\d+)?$/i,
+  /^http:\/\/127\.0\.0\.1(:\d+)?$/i,
+];
 
-const SYSTEM_PROMPTS: Record<string, string> = {
+function corsFor(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin") ?? "";
+  const allowed = ALLOWED_ORIGINS.has(origin) || ALLOWED_ORIGIN_PATTERNS.some((p) => p.test(origin));
+  return {
+    "Access-Control-Allow-Origin": allowed ? origin : "null",
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "Vary": "Origin",
+  };
+}
 
-  extract_project_info: `You are analyzing a construction plan title block. Extract the following information from the image:
+/**
+ * Build per-action system prompts. Firm identity, FBC edition, and
+ * resubmission deadline are NEVER hardcoded — every value flows in via
+ * payload so a second firm or a project under FBC 7th Edition produces
+ * a correct letter. Defaults are explicit and labeled as fallbacks.
+ *
+ * Audit reference: C-02 (firm hardcoded), C-06 (FBC edition hardcoded),
+ * H-05 (14-day deadline hardcoded). All three resolved here.
+ */
+interface PromptContext {
+  firm_name?: string | null;
+  license_number?: string | null;
+  fbc_edition?: string | null;
+  resubmission_days?: number | null;
+}
+
+function buildSystemPrompt(action: string, ctx: PromptContext): string {
+  const firmName = (ctx.firm_name && ctx.firm_name.trim()) || "[Firm name not configured]";
+  const licenseNumber = (ctx.license_number && ctx.license_number.trim()) || "[License # not configured]";
+  const fbcEdition = (ctx.fbc_edition && ctx.fbc_edition.trim()) || "FBC 2023 (default — project FBC edition not extracted)";
+  const resubDays = typeof ctx.resubmission_days === "number" && ctx.resubmission_days > 0
+    ? ctx.resubmission_days
+    : 14;
+  const resubLabel = typeof ctx.resubmission_days === "number" && ctx.resubmission_days > 0
+    ? `${resubDays} calendar days`
+    : `${resubDays} calendar days (default — county-specific deadline not configured)`;
+  const builders: Record<string, () => string> = {
+    extract_project_info: () => `You are analyzing a construction plan title block. Extract the following information from the image:
 
 - project_name: The name of the project
 - address: The full street address
@@ -23,13 +71,13 @@ If a field is not clearly visible, set it to null.
 
 Return ONLY a JSON object with these fields, no additional text.`,
 
-  generate_comment_letter: `You are a professional plan review engineer at Florida Private Providers, Inc. (FPP), a licensed Private Provider firm (License #AR92053) operating under Florida Statute 553.791.
+    generate_comment_letter: () => `You are a professional plan review engineer at ${firmName}, a licensed Private Provider firm (License #${licenseNumber}) operating under Florida Statute 553.791.
 
 Generate a formal deficiency/comment letter with this structure:
 
 **LETTERHEAD FORMAT:**
-Florida Private Providers, Inc.
-License #AR92053
+${firmName}
+License #${licenseNumber}
 Plan Review Comment Letter
 
 **HEADER:**
@@ -44,44 +92,40 @@ Plan Review Comment Letter
 - Opening paragraph referencing F.S. 553.791 and the statutory 30-business-day review period per F.S. 553.791(4)(b)
 - Group deficiencies BY DISCIPLINE with numbered items
 - Each deficiency must include:
-  - The FBC 2023 code section or referenced standard
+  - The applicable code section per ${fbcEdition} (or referenced standard such as ASCE 7, NEC, ACI 318)
   - For county-specific items, note "Per [County] Amendment" or "HVHZ Requirement"
   - Clear description and required corrective action
 - Mark critical items with ⚠️
 
 **CLOSING:**
-- Resubmission deadline: 14 calendar days
+- Resubmission deadline: ${resubLabel}
 - Reference statutory authority
 - Contact information placeholder
 - Reviewer signature block
 
-Use professional, authoritative language. Be specific and actionable.`,
+Use professional, authoritative language. Be specific and actionable. Cite the code edition exactly as given (${fbcEdition}) — do not substitute a different edition.`,
 
-  // generate_inspection_brief, refine_finding_pin, plan_review_check, plan_review_check_visual
-  // were removed in Phase 2 audit — no callers in app or pipeline.
-
-
-  generate_outreach_email: `You are a business development specialist at Florida Private Providers (FPP), a licensed private building inspection and plan review firm. Write a personalized outreach email to a contractor who recently pulled a building permit.
+    generate_outreach_email: () => `You are a business development specialist at ${firmName}, a licensed private building inspection and plan review firm. Write a personalized outreach email to a contractor who recently pulled a building permit.
 
 The email should:
 - Be warm, professional, and concise (under 200 words)
 - Reference their specific project and permit type
-- Highlight FPP's value: faster turnaround than municipal review, 21-day guaranteed timeline
+- Highlight the firm's value: faster turnaround than municipal review, 21-day guaranteed timeline
 - Mention virtual inspections and AI-powered plan review
 - Include a clear call-to-action (schedule a call or reply)
-- Sign off as the FPP team`,
+- Sign off as the ${firmName} team`,
 
-  generate_milestone_outreach: `You are a compliance specialist at Florida Private Providers (FPP). Write a professional outreach email to a building owner/manager regarding their upcoming milestone inspection requirement under Florida Statute 553.899.
+    generate_milestone_outreach: () => `You are a compliance specialist at ${firmName}. Write a professional outreach email to a building owner/manager regarding their upcoming milestone inspection requirement under Florida Statute 553.899.
 
 The email should:
 - Reference the specific building name and address
 - Explain the milestone inspection requirement clearly
 - Note the deadline urgency if applicable
-- Offer FPP's milestone inspection services
+- Offer the firm's milestone inspection services
 - Be professional but convey urgency for overdue buildings
 - Include next steps (schedule an assessment)`,
 
-  extract_zoning_data: `You are analyzing a site plan / survey / zoning sheet image from a Florida construction project. Extract every zoning and lot data point you can find on the sheet.
+    extract_zoning_data: () => `You are analyzing a site plan / survey / zoning sheet image from a Florida construction project. Extract every zoning and lot data point you can find on the sheet.
 
 Look for:
 - Zoning district designation (e.g. C-2, R-3, PUD, etc.)
@@ -103,15 +147,15 @@ Look for:
 
 Extract numerical values as numbers, not strings. If a value is not visible or not present on the sheet, return null for that field. For occupancy_groups return an array of code strings. For notes, include any relevant zoning text you find.`,
 
-  answer_code_question: `You are an expert on the Florida Building Code (FBC) 2023 edition, including all referenced standards (ASCE 7, ACI 318, NEC, etc.). Answer code questions accurately and cite specific sections.
+    answer_code_question: () => `You are an expert on the Florida Building Code (${fbcEdition}), including all referenced standards (ASCE 7, ACI 318, NEC, etc.). Answer code questions accurately and cite specific sections.
 
 Always:
-- Cite the exact FBC section number
+- Cite the exact code section number per ${fbcEdition}
 - Note if requirements differ in the HVHZ (High Velocity Hurricane Zone)
 - Mention relevant Florida Statutes if applicable
 - Provide practical guidance for compliance`,
 
-  fbc_county_chat: `You are an expert Florida Building Code (FBC 2023, 8th Edition) consultant specializing in county-specific requirements for Private Providers operating under F.S. 553.791.
+    fbc_county_chat: () => `You are an expert Florida Building Code consultant (working under ${fbcEdition}) specializing in county-specific requirements for Private Providers operating under F.S. 553.791.
 
 You will receive the selected county's requirements as context. Use this to tailor every answer to that county's specific:
 - Wind speed design requirements (ASCE 7-22)
@@ -124,14 +168,27 @@ You will receive the selected county's requirements as context. Use this to tail
 - Building department contact information
 
 Rules:
-- Always cite specific FBC 2023 section numbers
+- Always cite specific code sections per ${fbcEdition}
 - When the county is in the HVHZ, emphasize TAS 201/202/203, NOA requirements, and FBC 1626
 - Reference county-specific amendments when relevant
 - Note differences from standard FBC requirements
 - Reference F.S. 553.791 for Private Provider procedures
 - Use markdown formatting: headers, bold for code refs, bullet lists
 - Keep answers thorough but focused — a working inspector should be able to act on your guidance immediately`,
-};
+  };
+  const builder = builders[action];
+  return builder ? builder() : "";
+}
+
+const VALID_ACTIONS = new Set([
+  "extract_project_info",
+  "generate_comment_letter",
+  "generate_outreach_email",
+  "generate_milestone_outreach",
+  "extract_zoning_data",
+  "answer_code_question",
+  "fbc_county_chat",
+]);
 
 // Tool schemas for structured output
 // Note: PLAN_REVIEW_TOOL removed in Phase 2 audit. The active multi-stage
@@ -204,6 +261,8 @@ const TOOL_CALL_ACTIONS: Record<string, any> = {
 };
 
 serve(async (req) => {
+  const corsHeaders = corsFor(req);
+
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -245,9 +304,9 @@ serve(async (req) => {
 
   try {
 
-    if (!action || !SYSTEM_PROMPTS[action]) {
+    if (!action || !VALID_ACTIONS.has(action)) {
       return new Response(
-        JSON.stringify({ error: `Invalid action. Valid actions: ${Object.keys(SYSTEM_PROMPTS).join(", ")}` }),
+        JSON.stringify({ error: `Invalid action. Valid actions: ${Array.from(VALID_ACTIONS).join(", ")}` }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -260,7 +319,15 @@ serve(async (req) => {
       );
     }
 
-    const systemPrompt = SYSTEM_PROMPTS[action];
+    // Build the per-request system prompt with firm/code/deadline injected
+    // dynamically. See PromptContext for the contract — callers pass these
+    // via payload.{firm_name, license_number, fbc_edition, resubmission_days}.
+    const systemPrompt = buildSystemPrompt(action, {
+      firm_name: payload?.firm_name ?? null,
+      license_number: payload?.license_number ?? null,
+      fbc_edition: payload?.fbc_edition ?? null,
+      resubmission_days: typeof payload?.resubmission_days === "number" ? payload.resubmission_days : null,
+    });
     const stream = payload?.stream === true;
     const isMultimodal = MULTIMODAL_ACTIONS.has(action);
     const toolDef = TOOL_CALL_ACTIONS[action];
@@ -291,6 +358,10 @@ serve(async (req) => {
       const textPayload = { ...payload };
       delete textPayload.images;
       delete textPayload.stream;
+      delete textPayload.firm_name;
+      delete textPayload.license_number;
+      delete textPayload.fbc_edition;
+      delete textPayload.resubmission_days;
       if (Object.keys(textPayload).length > 0) {
         contentParts.push({ type: "text", text: JSON.stringify(textPayload) });
       }
@@ -306,18 +377,46 @@ serve(async (req) => {
 
       messages.push({ role: "user", content: contentParts });
     } else {
-      // Text-only
-      const userMessage = typeof payload === "string" ? payload : JSON.stringify(payload);
-      messages.push({ role: "user", content: userMessage });
+      // Text-only — strip prompt-context fields before sending the user payload
+      // so they don't bloat the user message (they're already in the system prompt).
+      const userPayload = (() => {
+        if (typeof payload === "string") return payload;
+        if (!payload || typeof payload !== "object") return JSON.stringify(payload);
+        const clone = { ...payload };
+        delete clone.firm_name;
+        delete clone.license_number;
+        delete clone.fbc_edition;
+        delete clone.resubmission_days;
+        delete clone.stream;
+        return JSON.stringify(clone);
+      })();
+      messages.push({ role: "user", content: userPayload });
     }
 
-    // Select model: use gemini-2.5-pro for multimodal, gemini-3-flash-preview for text
-    const model = isMultimodal ? "google/gemini-2.5-pro" : "google/gemini-3-flash-preview";
+    // Model selection.
+    // - Multimodal (vision) → gemini-2.5-pro for higher fidelity on plan sheets.
+    // - Text-only → gemini-2.5-flash for speed/cost (matches the pipeline; see audit M-05/C-01).
+    const model = isMultimodal ? "google/gemini-2.5-pro" : "google/gemini-2.5-flash";
+
+    // Temperature policy (audit C-04). Determinism matters for legal output:
+    // letters and code answers run at 0; outreach/marketing copy runs warmer
+    // for variety. Multimodal extraction is deterministic (parse, not write).
+    const TEMPERATURE_BY_ACTION: Record<string, number> = {
+      generate_comment_letter: 0,
+      answer_code_question: 0,
+      fbc_county_chat: 0,
+      extract_project_info: 0,
+      extract_zoning_data: 0,
+      generate_outreach_email: 0.7,
+      generate_milestone_outreach: 0.7,
+    };
+    const temperature = TEMPERATURE_BY_ACTION[action] ?? 0;
 
     const requestBody: Record<string, unknown> = {
       model,
       messages,
       stream,
+      temperature,
     };
 
     if (useToolCalling) {

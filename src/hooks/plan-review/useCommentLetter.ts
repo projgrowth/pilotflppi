@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { streamAI } from "@/lib/ai";
 import { useLetterAutosave } from "@/hooks/useLetterAutosave";
+import { getCountyRequirements } from "@/lib/county-requirements";
 import type { Finding } from "@/components/FindingCard";
 import type { PlanReviewRow } from "@/types";
 
@@ -27,13 +28,21 @@ interface FirmContext {
   license_number?: string | null;
 }
 
+interface ProjectDnaContext {
+  fbc_edition?: string | null;
+}
+
 interface Args {
   review: PlanReviewRow | undefined | null;
   findings: Finding[];
   firmSettings: FirmContext | null | undefined;
+  /** Project DNA (post-extraction). Used to inject the correct FBC edition
+   *  into the letter prompt so we don't cite "FBC 2023" on a project that's
+   *  actually under FBC 7th Edition (audit C-06). */
+  projectDna?: ProjectDnaContext | null | undefined;
 }
 
-export function useCommentLetter({ review, findings, firmSettings }: Args) {
+export function useCommentLetter({ review, findings, firmSettings, projectDna }: Args) {
   const [commentLetter, setCommentLetter] = useState("");
   const [generatingLetter, setGeneratingLetter] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -69,6 +78,14 @@ export function useCommentLetter({ review, findings, firmSettings }: Args) {
       setGeneratingLetter(true);
       setCommentLetter("");
       try {
+        // Resolve county-specific resubmission deadline; defaults to 14 if
+        // the county isn't in the registry. The edge function clearly labels
+        // the value as "default" when the caller doesn't supply one.
+        const countyKey = (r.project?.county ?? "").toString();
+        const reqs = countyKey ? getCountyRequirements(countyKey) : null;
+        const resubmissionDays = reqs?.resubmissionDays ?? null;
+        const fbcEdition = projectDna?.fbc_edition ?? null;
+
         await streamAI({
           action: "generate_comment_letter",
           payload: {
@@ -81,6 +98,10 @@ export function useCommentLetter({ review, findings, firmSettings }: Args) {
             round: r.round,
             firm_name: firmSettings?.firm_name || undefined,
             license_number: firmSettings?.license_number || undefined,
+            // Audit C-06 / H-05: cite the project's actual code edition and
+            // the county's actual resubmission deadline — never hardcoded.
+            fbc_edition: fbcEdition || undefined,
+            resubmission_days: typeof resubmissionDays === "number" ? resubmissionDays : undefined,
           },
           onDelta: (chunk) => setCommentLetter((prev) => prev + chunk),
           onDone: () => setGeneratingLetter(false),
@@ -98,7 +119,7 @@ export function useCommentLetter({ review, findings, firmSettings }: Args) {
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [findings, firmSettings?.firm_name, firmSettings?.license_number],
+    [findings, firmSettings?.firm_name, firmSettings?.license_number, projectDna?.fbc_edition],
   );
 
   const cancel = useCallback(() => {
