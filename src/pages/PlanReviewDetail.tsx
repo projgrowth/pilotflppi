@@ -20,7 +20,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { streamAI } from "@/lib/ai";
+// streamAI now consumed by useCommentLetter
 import { useFirmSettings } from "@/hooks/useFirmSettings";
 import { useFindingHistory } from "@/hooks/useFindingHistory";
 import { useAuth } from "@/contexts/AuthContext";
@@ -38,7 +38,7 @@ import { LetterLintDialog } from "@/components/plan-review/LetterLintDialog";
 import { FindingsListPanel } from "@/components/plan-review/FindingsListPanel";
 import { PlanViewerPanel } from "@/components/plan-review/PlanViewerPanel";
 import { useConfirm } from "@/hooks/useConfirm";
-import { useLetterAutosave } from "@/hooks/useLetterAutosave";
+// useLetterAutosave now consumed by useCommentLetter
 import { lintCommentLetter, hasBlockingIssues, type LintIssue } from "@/lib/letter-linter";
 import { cn } from "@/lib/utils";
 import { isTypingTarget } from "@/lib/review-shortcuts";
