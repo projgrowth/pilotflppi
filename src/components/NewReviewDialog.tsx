@@ -674,9 +674,25 @@ export function NewReviewDialog({
               <><Sparkles className="h-4 w-4 mr-2" /> Start review <ArrowRight className="h-4 w-4 ml-2" /></>
             )}
           </Button>
-          <p className="text-[11px] text-center text-muted-foreground leading-relaxed">
-            We'll keep uploading in the workspace — keep this browser open for ~30 sec, then it's safe to leave.
-          </p>
+          {saving ? (
+            <div className="rounded-lg border border-accent/40 bg-accent/5 p-3 animate-fade-in">
+              <div className="flex items-start gap-2.5">
+                <Loader2 className="h-4 w-4 text-accent shrink-0 mt-0.5 animate-spin" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-foreground">
+                    Creating review and uploading {files.length} file{files.length === 1 ? "" : "s"}…
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    You'll be taken to the workspace in a moment. Keep this tab open for ~30 seconds while uploads finish.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-[11px] text-center text-muted-foreground leading-relaxed">
+              We'll keep uploading in the workspace — keep this browser open for ~30 sec, then it's safe to leave.
+            </p>
+          )}
         </div>
       </DialogContent>
     </Dialog>
