@@ -36,6 +36,9 @@ interface Props {
   preparedPages?: number;
   expectedPages?: number;
   pendingFileCount?: number;
+  /** Optional context shown on the bootstrapping overlay. */
+  projectName?: string;
+  pendingFileNames?: string[];
   onPipelineComplete?: () => void;
   onOpenDashboard?: () => void;
 
@@ -139,6 +142,8 @@ export function PlanViewerPanel(props: Props) {
           preparedPages={props.preparedPages}
           expectedPages={props.expectedPages}
           fileCount={props.pendingFileCount}
+          projectName={props.projectName}
+          fileNames={props.pendingFileNames}
           onComplete={props.onPipelineComplete}
           onOpenDashboard={props.onOpenDashboard}
         />
