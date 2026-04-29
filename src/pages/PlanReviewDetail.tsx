@@ -105,11 +105,11 @@ export default function PlanReviewDetail() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("project_dna")
-        .select("fbc_edition")
+        .select("fbc_edition, is_coastal, county")
         .eq("plan_review_id", id!)
         .maybeSingle();
       if (error) throw error;
-      return (data ?? null) as { fbc_edition: string | null } | null;
+      return (data ?? null) as { fbc_edition: string | null; is_coastal: boolean | null; county: string | null } | null;
     },
   });
 
