@@ -27,9 +27,19 @@ async function loadAdmin(): Promise<any> {
 }
 
 // deno-lint-ignore no-explicit-any
-async function deleteReviewObjects(admin: any, planReviewId: string): Promise<{ deleted: number; error?: string }> {
+async function deleteReviewObjects(
+  admin: any,
+  planReviewId: string,
+  firmId: string | null,
+): Promise<{ deleted: number; error?: string }> {
+  if (!firmId) {
+    // Pre-firm-scoping rows had no firm_id and live under the legacy
+    // `plan-reviews/<id>/...` prefix, which the recent migration moved
+    // out of existence. Nothing to clean here.
+    return { deleted: 0 };
+  }
   try {
-    const prefix = `plan-reviews/${planReviewId}`;
+    const prefix = `firms/${firmId}/plan-reviews/${planReviewId}`;
     const { data: files, error: listErr } = await admin.storage
       .from("documents")
       .list(prefix, { limit: 1000 });
