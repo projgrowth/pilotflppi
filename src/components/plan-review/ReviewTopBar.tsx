@@ -23,6 +23,12 @@ interface ReviewTopBarProps {
   aiCompleteFlash: number | null;
   hasFindings: boolean;
   rounds: Array<{ id: string; round: number; findingsCount: number }>;
+  /**
+   * When true the canvas-side ProcessingOverlay is already rendering the live
+   * stepper. We suppress the top-bar popover stepper to avoid two identical
+   * step lists on the same screen.
+   */
+  pipelineProcessing?: boolean;
   onBack: () => void;
   onRunAICheck: () => void;
   onNavigateRound: (id: string) => void;
@@ -36,7 +42,7 @@ interface ReviewTopBarProps {
 export function ReviewTopBar({
   projectName, tradeType, address, county, hvhz, contractor,
   round, reviewId, daysLeft, aiRunning, aiCompleteFlash, hasFindings,
-  rounds, onBack, onRunAICheck, onNavigateRound, onNewRound,
+  rounds, pipelineProcessing, onBack, onRunAICheck, onNavigateRound, onNewRound,
   onPipelineComplete, onOpenDashboard, onDeleteReview, onCancelPipeline,
 }: ReviewTopBarProps) {
   const button = (
@@ -117,7 +123,7 @@ export function ReviewTopBar({
 
         <DeadlineRing daysElapsed={30 - daysLeft} totalDays={30} size={30} />
 
-        {aiRunning ? (
+        {aiRunning && !pipelineProcessing ? (
           <Popover open={aiRunning} onOpenChange={() => { /* allow user-dismiss; pipeline keeps running */ }} modal={false}>
             <PopoverTrigger asChild>{button}</PopoverTrigger>
             <PopoverContent align="end" className="w-80 p-3" sideOffset={8} onOpenAutoFocus={(e) => e.preventDefault()}>
