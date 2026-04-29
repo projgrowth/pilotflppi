@@ -9,6 +9,7 @@ import {
   PIPELINE_STAGES,
   CORE_STAGE_KEYS,
   DEEP_STAGE_KEYS,
+  subscribeShared,
   type PipelineStage,
   type PipelineMode,
 } from "@/hooks/useReviewDashboard";
@@ -94,24 +95,34 @@ function useDisciplineReviewProgress(planReviewId: string): DisciplineReviewProg
       setProgress(p ?? null);
     };
     void fetchOnce();
-    const channel = supabase
-      .channel(`pr-progress-${planReviewId}`)
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "plan_reviews", filter: `id=eq.${planReviewId}` },
-        (payload) => {
-          const next = (payload.new as { ai_run_progress?: Record<string, unknown> | null } | null)
-            ?.ai_run_progress;
-          const p = (next as Record<string, unknown> | null)?.discipline_review_progress as
-            | DisciplineReviewProgress
-            | undefined;
-          setProgress(p ?? null);
-        },
-      )
-      .subscribe();
+    // Use the shared subscription registry so a remount (StrictMode dev
+    // double-mount, route transition, parent rerender) doesn't try to call
+    // .on() twice on the same channel — that throws "cannot add
+    // postgres_changes callbacks ... after subscribe()" and crashes the
+    // whole route into RouteBoundary.
+    const unsubscribe = subscribeShared(
+      `pr-progress-${planReviewId}`,
+      "plan_reviews",
+      `id=eq.${planReviewId}`,
+      (payload) => {
+        if (cancelled) return;
+        const next = (payload?.new as { ai_run_progress?: Record<string, unknown> | null } | undefined)
+          ?.ai_run_progress;
+        if (next === undefined) {
+          // No payload (defensive) — fall back to a one-shot refetch so the
+          // chunk counter still updates on the rare malformed event.
+          void fetchOnce();
+          return;
+        }
+        const p = (next as Record<string, unknown> | null)?.discipline_review_progress as
+          | DisciplineReviewProgress
+          | undefined;
+        setProgress(p ?? null);
+      },
+    );
     return () => {
       cancelled = true;
-      void supabase.removeChannel(channel);
+      unsubscribe();
     };
   }, [planReviewId]);
   return progress;
