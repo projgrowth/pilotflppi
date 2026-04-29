@@ -22,6 +22,9 @@ export interface PipelineErrorRow {
 /**
  * All recent pipeline errors for the active firm. Used by the Pipeline
  * Activity Errors tab. Defaults to the last 24h.
+ *
+ * Filters by `severity in ('warn','error')` so cost metrics and progress
+ * markers (info) don't drown out real failures.
  */
 export function useRecentPipelineErrors(hours = 24) {
   return useQuery({
@@ -32,6 +35,7 @@ export function useRecentPipelineErrors(hours = 24) {
         .from("pipeline_error_log")
         .select("*")
         .gte("created_at", since)
+        .in("severity", ["warn", "error"])
         .order("created_at", { ascending: false })
         .limit(100);
       if (error) throw error;
