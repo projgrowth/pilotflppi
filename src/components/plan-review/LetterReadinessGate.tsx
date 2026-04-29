@@ -48,6 +48,8 @@ export default function LetterReadinessGate({
   coveragePct,
   blockLetterOnLowCoverage,
   blockLetterOnUngrounded,
+  dnaIsCoastal,
+  countyAlreadyCoastal,
   onJumpToFinding,
   onCompute,
   className,
@@ -69,6 +71,8 @@ export default function LetterReadinessGate({
         coveragePct,
         blockLetterOnLowCoverage,
         blockLetterOnUngrounded,
+        dnaIsCoastal,
+        countyAlreadyCoastal,
       }),
     [
       findings,
@@ -85,6 +89,8 @@ export default function LetterReadinessGate({
       coveragePct,
       blockLetterOnLowCoverage,
       blockLetterOnUngrounded,
+      dnaIsCoastal,
+      countyAlreadyCoastal,
     ],
   );
 

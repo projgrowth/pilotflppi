@@ -33,7 +33,9 @@ export interface ReadinessCheck {
     | "affidavit_signed"
     | "reviewer_licensed"
     | "threshold_special_inspector"
-    | "coverage";
+    | "coverage"
+    | "coastal_overlay"
+    | "stale_disposition";
   severity: ReadinessSeverity;
   /** Required vs advisory — only required checks gate the export button. */
   required: boolean;
@@ -44,7 +46,7 @@ export interface ReadinessCheck {
 }
 
 export interface ReadinessInput {
-  findings: Pick<
+  findings: (Pick<
     DeficiencyV2Row,
     | "id"
     | "reviewer_disposition"
@@ -53,7 +55,13 @@ export interface ReadinessInput {
     | "citation_status"
     | "confidence_score"
     | "evidence_crop_meta"
-  >[];
+  > & {
+    /** Optional — populated by `tr_stamp_reviewer_disposition_at`. When the
+     *  finding's `updated_at` is later than this, the human decision is
+     *  stale (the finding changed after they decided). */
+    reviewer_disposition_at?: string | null;
+    updated_at?: string | null;
+  })[];
   qcStatus: string | null | undefined;
   /** True when the dashboard reviewer is the same person who ran the AI check.
    *  In single-reviewer firms there is no second pair of eyes to QC, so we
@@ -100,6 +108,16 @@ export interface ReadinessInput {
    * accidentally let stub citations through.
    */
   blockLetterOnUngrounded?: boolean;
+  /**
+   * Audit M-04 follow-up: when DNA flags `is_coastal=true` but the project's
+   * county is classified inland in `county-requirements/data.ts` (no
+   * `windBorneDebrisRegion` and no `floodZoneRequired`), surface a blocking
+   * check so the reviewer knows WBDR + flood callouts are missing from the
+   * boilerplate. Pass `null`/`undefined` to skip the check entirely.
+   */
+  dnaIsCoastal?: boolean | null;
+  /** True when the project's county registry entry covers WBDR + flood. */
+  countyAlreadyCoastal?: boolean;
 }
 
 export interface ReadinessResult {
@@ -382,6 +400,41 @@ export function computeLetterReadiness(input: ReadinessInput): ReadinessResult {
       detail: covOk
         ? "All expected sheets were examined by each discipline assigned to this review."
         : `Some sheets were skipped by one or more disciplines. Re-run the AI check or attach the missing sheets before sending.`,
+    });
+  }
+
+  // 11. Coastal overlay (Audit M-04 follow-up). DNA flagged the project as
+  // coastal but the county's static registry doesn't cover WBDR + flood —
+  // boilerplate WBDR/flood callouts will be missing. Block until the
+  // reviewer reclassifies the county or escalates manually.
+  if (input.dnaIsCoastal === true && input.countyAlreadyCoastal === false) {
+    checks.push({
+      id: "coastal_overlay",
+      required: true,
+      severity: "block",
+      title: "Project is coastal but county is classified inland",
+      detail:
+        "DNA marked this project as coastal (barrier island, WBDR strip, or coastline frontage), but the county registry doesn't carry Wind-Borne Debris Region + flood-zone boilerplate. Reclassify the county to coastal in the registry, or add WBDR/flood comments by hand before sending.",
+    });
+  }
+
+  // 12. Stale dispositions (audit follow-up risk #6). Any finding whose
+  // `updated_at` advanced after the reviewer marked it confirm/reject/modify
+  // means the human's decision no longer reflects the current finding text.
+  // Force them to re-decide before the letter goes out.
+  const stale = live.filter((f) => {
+    if (!f.reviewer_disposition || !f.reviewer_disposition_at || !f.updated_at) return false;
+    return new Date(f.updated_at).getTime() - new Date(f.reviewer_disposition_at).getTime() > 1000;
+  });
+  if (stale.length > 0) {
+    checks.push({
+      id: "stale_disposition",
+      required: true,
+      severity: "block",
+      title: `${stale.length} finding${stale.length === 1 ? " was" : "s were"} edited after triage`,
+      detail:
+        "These findings changed (text, citation, sheet, etc.) after the reviewer last marked them confirm/reject/modify. Re-triage so the recorded human decision matches the current finding before sending.",
+      jumpFindingId: stale[0]?.id,
     });
   }
 

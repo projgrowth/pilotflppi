@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS public.try_acquire_pipeline_lock(uuid);

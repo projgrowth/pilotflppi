@@ -717,6 +717,7 @@ export type Database = {
           required_action: string
           requires_human_review: boolean
           reviewer_disposition: string | null
+          reviewer_disposition_at: string | null
           reviewer_notes: string | null
           round_diff_status: string | null
           sheet_refs: string[] | null
@@ -758,6 +759,7 @@ export type Database = {
           required_action: string
           requires_human_review?: boolean
           reviewer_disposition?: string | null
+          reviewer_disposition_at?: string | null
           reviewer_notes?: string | null
           round_diff_status?: string | null
           sheet_refs?: string[] | null
@@ -799,6 +801,7 @@ export type Database = {
           required_action?: string
           requires_human_review?: boolean
           reviewer_disposition?: string | null
+          reviewer_disposition_at?: string | null
           reviewer_notes?: string | null
           round_diff_status?: string | null
           sheet_refs?: string[] | null

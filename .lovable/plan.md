@@ -1,95 +1,68 @@
-## External audit triage — what's real, what's wrong, and the fix order
+## Audit reconciliation — what shipped vs. what didn't
 
-I cross-checked every claim in `fpp_audit_report.html` against the live code. **18 of 21 findings are accurate**, 2 are partially correct, and 1 is wrong. Below is the verified status, then a staged remediation plan grouped so we don't lose the thread.
+The original `fpp_audit_report.html` is no longer in the sandbox (uploads are ephemeral), but every claim from it is captured verbatim in `.lovable/plan.md`'s verification table. I cross-checked each against live code.
 
----
+### Audit findings — final status (21 items)
 
-### Verification results
-
-| ID | Claim | Verdict | Evidence |
+| ID | Item | Shipped? | Where to verify |
 |---|---|---|---|
-| **C-01** | `gemini-3-flash-preview` is hallucinated | ⚠ **Partially wrong** | The model name *is* in our supported list (per system prompt). However, mixing model families across surfaces (pipeline uses `gemini-2.5-flash`, ai fn uses `gemini-3`) is still a real consistency risk. Reclassify as Medium. |
-| **C-02** | Firm name + license # hardcoded in 3 prompts | ✅ Confirmed | `ai/index.ts:26-32, 64, 74` |
-| **C-03** | Resume after pause double-counts paused days | ✅ Confirmed | `statutory-deadlines.ts:173` — when not paused, no banked-days subtraction exists |
-| **C-04** | No `temperature` set on pipeline AI calls | ✅ Confirmed | `_shared/ai.ts` has zero temperature references |
-| **C-05** | Two checks share `id: "citations"` | ✅ Confirmed | `letter-readiness.ts:171, 208` |
-| **C-06** | "FBC 2023" hardcoded in letter prompt | ✅ Confirmed | `ai/index.ts:47, 114, 127` |
-| **C-07** | `occupant_load` missing from DNA schema but read by threshold logic | ✅ Confirmed | `threshold-building.ts:53` reads it; `dna.ts` schema doesn't extract it |
-| **H-01** | Broward `2023-XX` placeholder ordinance | ✅ Confirmed | `county-requirements/data.ts:95` |
-| **H-02** | `verified_stub` blocking is opt-out via misleading flag | ✅ Confirmed | `letter-readiness.ts:149` — `!== false` default-true is correct but flag name is ambiguous |
-| **H-03** | Single AI gateway = SPOF | ✅ Confirmed (architectural) | All AI routes through `ai.gateway.lovable.dev` |
-| **H-04** | No concurrent-run guard in `startPipeline` | ✅ Confirmed | `pipeline-run.ts` has no "running" check |
-| **H-05** | 14-day resubmission hardcoded | ✅ Confirmed | `ai/index.ts:53` literal; county data has the field but it's unused in the prompt |
-| **H-06** | License check doesn't verify with DBPR | ✅ Confirmed | Trust-on-input only |
-| **M-01** | False positive threshold for Assembly >5k sf | ✅ Confirmed (caused by C-07) |
-| **M-02** | Single pause/resume slot only | ✅ Confirmed | Schema has one nullable timestamp |
-| **M-03** | No tests for `letter-readiness.ts` | ✅ Confirmed | Only 5 test files exist; none cover the readiness gate |
-| **M-04** | Hillsborough classified inland, ignoring coastal strip | ✅ Confirmed |
-| **M-05** | `gemini-2.5-flash-lite` for correction matching | ✅ Confirmed | `get-similar-corrections/index.ts:106`, `process-correction/index.ts:106` |
-| **A-01** | README is default placeholder | ✅ Confirmed |
-| **A-02** | CORS wildcard on AI fn | ✅ Confirmed | `ai/index.ts:5` |
-| **A-03** | `firm_settings` falls back to any row | ✅ Confirmed | `index.ts:261-266` — `.limit(1)` with no WHERE |
+| C-01 | Mixed AI model families | ✅ | `_shared/ai.ts` default `gemini-2.5-flash`; corrections promoted off `flash-lite` |
+| C-02 | Firm name/license hardcoded | ✅ | `ai/index.ts:42-58` `PromptContext` injected |
+| C-03 | Pause/resume double-counts | ✅ | `statutory-deadlines.ts:187` `getNetBusinessDaysElapsed` |
+| C-04 | No `temperature` on AI calls | ✅ | `_shared/ai.ts:11` required arg, default 0 |
+| C-05 | Duplicate `id: "citations"` | ✅ | `letter-readiness.ts:222` renamed to `verifier_completion` |
+| C-06 | "FBC 2023" hardcoded | ✅ | `ai/index.ts:52, 95, 106, 150` use `${fbcEdition}` |
+| C-07 | `occupant_load` missing from DNA | ✅ | `stages/dna.ts:43, 274` |
+| H-01 | Broward `2023-XX` placeholder | ✅ | `data.ts:95` real ordinance ref |
+| H-02 | `blockLetterOnUngrounded` ambiguous | ⚠ partial | JSDoc warning added; column rename deferred |
+| H-03 | Lovable AI gateway = SPOF | ❌ deferred | No fallback provider |
+| H-04 | No concurrent-run guard | ✅ | `run-review-pipeline/index.ts:185` returns 409 |
+| H-05 | 14-day resubmission hardcoded | ✅ | `ai/index.ts:53-58` `resubmission_days` from county |
+| H-06 | DBPR license verification | ❌ deferred | Documented in README + UI |
+| M-01 | False-positive Assembly threshold | ✅ | `threshold-building.ts:55-71` |
+| M-02 | Single pause/resume slot | ✅ | `clock_pause_history` JSONB + `buildPausedIntervals` |
+| M-03 | No `letter-readiness` tests | ✅ | `src/test/letter-readiness.test.ts` (23 cases) |
+| M-04 | Hillsborough mis-classified inland | ✅ | `data.ts:203` `coastal()` |
+| M-05 | Correction matching on `flash-lite` | ✅ | both correction edge fns on `gemini-2.5-flash` |
+| A-01 | Default README | ✅ | rewritten |
+| A-02 | CORS wildcard | ✅ | `ai/index.ts:7-31` allowlist + Vary: Origin |
+| A-03 | Cross-firm `firm_settings` leak | ✅ | `index.ts:283-302` firm-scoped lookup |
 
-**Disagreements with the audit:**
-1. **C-01** is overstated — `gemini-3-flash-preview` is supported. Treat as Medium model-consistency hygiene, not a Critical outage.
-2. **H-02** is correctly defaulted (`!== false` means default-blocking) but the flag name *is* confusing and should be renamed.
+**Closed: 18. Intentionally deferred: 3 (H-02 column rename, H-03 gateway fallback, H-06 DBPR API).**
 
----
+### Latent risks the audit didn't catch
 
-### Remediation plan (4 waves)
+These are real issues I found while verifying the audit. Each is small but worth a sweep before calling the review system "production-trustworthy."
 
-Ordered by **legal exposure → trust erosion → multi-tenant safety → polish**. Each wave is a single deploy unit; verify between waves.
+1. **`projects.review_clock_paused_at` and `clock_pause_history` can drift.** The legacy column is now a "derived view of the open entry" but nothing enforces that. If two clients race a pause/resume, the column and JSON can disagree and `getStatutoryStatus` will quietly use the wrong one. Fix: a Postgres trigger that keeps the column in sync with the last entry of the JSONB array, or drop the column entirely after a backfill.
 
-#### Wave 1 — Citation & letter integrity (legal blast radius)
-Goal: every comment letter that leaves the system has correct firm letterhead, correct FBC edition, correct resubmission deadline, deterministic findings, and a sound readiness gate.
+2. **DNA `is_coastal` is extracted but no readiness check enforces it.** We added the field and flipped Hillsborough to coastal, but if the AI returns `is_coastal: true` on an inland-classified county, nothing in `letter-readiness.ts` overlays WBDR/flood requirements as the plan promised (plan item 13). The data lands; the logic gate is missing.
 
-1. **C-02** Inject `firm_settings.firm_name` + `license_number` into the three prompts in `ai/index.ts`. Caller passes them in payload; prompt template uses `${firmName}` placeholders. Drop the hardcoded literals.
-2. **C-06 + H-05** Pass `fbc_edition` (from `project_dna`) and `resubmissionDays` (from `county_requirements` for the project's county) into the `generate_comment_letter` payload. Replace literals in the prompt with template variables. Default to FBC 2023 / 14d only when project values are missing, and have the prompt explicitly say "default" when it falls back.
-3. **C-04** Add a required `temperature` parameter to `callAI()` in `_shared/ai.ts` (no default). Set `0` for: discipline_review, critic, challenger, cross_check, verify, dedupe, ground-citations. Set `0.3` for any narrative/letter generation. This is a TS signature change so the compiler enforces it everywhere.
-4. **C-05** Rename second check to `id: "verifier_completion"` in `letter-readiness.ts`. Add a unit test asserting all returned check IDs are unique (covers M-03 partially).
-5. **H-02** Rename `blockLetterOnUngrounded` → `allowStubCitations` (inverted semantics, default `false`). Update the firm setting and all callers. Surface stub count in the readiness UI.
+3. **`signed_url` lifetime vs. DNA vision call.** `stages/dna.ts:162` uses `signedSheetUrls` then sends URLs to the model. If signed URL TTL is short and the gateway retries, the second attempt may 403. Worth a 60s minimum TTL audit across all vision stages.
 
-#### Wave 2 — Statutory clock correctness (deemed-approved risk)
-Goal: pause/resume math is right under multiple cycles.
+4. **Concurrency guard is single-region only.** `H-04` is satisfied at the application layer (`pipeline_already_running`), but with no Postgres advisory lock a true race (two workers within the same millisecond) can still slip through. Plan said "add a Postgres advisory lock on the plan_review_id UUID hash" — that part wasn't implemented. Add `pg_try_advisory_xact_lock(hashtext(plan_review_id))` at the top of the stage runner.
 
-6. **C-03 + M-02** Migration: add `clock_pauses jsonb default '[]'` to `projects` (array of `{paused_at, resumed_at}`). On pause: append `{paused_at: now}`. On resume: set `resumed_at` on the last entry. Update `getStatutoryStatus` to sum total banked business days across all entries and subtract from elapsed. Keep `review_clock_paused_at` as a derived view of the open entry for backward compat. Add tests covering: 0 pauses, 1 closed pause, 1 open pause, 2 closed pauses, mixed.
+5. **CORS allowlist excludes the Lovable id-preview pattern host.** The regex `/^https:\/\/[a-z0-9-]+\.lovable\.app$/i` matches `pilotflppi.lovable.app` and `id-preview--6396bf6f-...lovable.app`, but the user's custom domain `projgrowth.site` is correctly explicit. Confirm the pattern also matches `*--*.lovable.app` (it does — `-` is in the character class). No fix needed; flagging because the audit's A-02 would have caught a typo here.
 
-#### Wave 3 — Multi-tenant safety & operational guards
-Goal: make this safe for a second firm and survive double-clicks/outages.
+6. **Letter readiness gate trusts `reviewer_disposition !== null` to mean "human decided."** A reviewer who saves a draft and walks away can leave a stale disposition that no longer matches the current finding. Consider checking `reviewer_disposition_at >= finding.updated_at` so a finding edited after disposition re-blocks the letter.
 
-7. **A-03** Fix the `firm_settings` fallback in `run-review-pipeline/index.ts:261`. Remove the `.limit(1)` cross-firm fallback entirely; if no row exists for the user, treat as "block = false" (current default behavior) — never read another firm's setting.
-8. **H-04** In `pipeline-run.ts:startPipeline`, before invoking, query `review_pipeline_status` for any stage `status = 'running'` for that `plan_review_id`. If found, return `{ ok: false, message: "Pipeline already in progress" }`. Add a Postgres advisory lock on the `plan_review_id` UUID hash inside the edge function for true concurrency protection.
-9. **C-07 + M-01** Add `occupant_load: { type: ["integer", "null"] }` to `DNA_SCHEMA.parameters.properties` in `stages/dna.ts`. Update `threshold-building.ts` to add a "definitively not threshold" branch when OL is extracted and ≤500 (skip the advisory entirely).
-10. **A-02** Replace CORS wildcard with allowlist: `https://projgrowth.site`, `https://www.projgrowth.site`, `https://pilotflppi.lovable.app`, plus the preview pattern. Echo back the request `Origin` only if it matches.
+### Recommended next moves (ordered)
 
-#### Wave 4 — Test coverage, data hygiene, model consistency, docs
-Goal: lock the wins in and clean up the long tail.
+**Wave 6 — Trust hardening (recommended).** ~1 evening of work. Closes the highest-impact gaps from the latent list.
+- Add a DB trigger to keep `review_clock_paused_at` in sync with `clock_pause_history` (risk #1).
+- Add an `is_coastal` overlay in `letter-readiness.ts` so inland-classified coastal jobs pick up WBDR/flood requirements (risk #2 — completes plan item 13).
+- Add `pg_try_advisory_xact_lock(hashtext(plan_review_id))` at the top of the stage runner (risk #4).
+- Stale-disposition check in `letter-readiness.ts` (risk #6).
 
-11. **M-03** Comprehensive test suite for `computeLetterReadiness()`: pass + fail per check (triage, citations, sheet_refs, qc, notice_filed, affidavit, reviewer_licensed, threshold, coverage, verifier_completion). Pure function — easy.
-12. **H-01** Replace Broward `2023-XX` with the actual ordinance number, or remove the entry. Grep the rest of `county-requirements/data.ts` for any other `-XX`/`TBD`/`TODO` placeholder patterns.
-13. **M-04** Add `isCoastal` (boolean) to DNA schema. When true, override Hillsborough (and any future inland-classified coastal county) with WBDR + flood requirements at letter-readiness time.
-14. **M-05 + C-01** Standardize models. Promote correction functions from `gemini-2.5-flash-lite` → `gemini-2.5-flash`. Decide one model family for non-multimodal text generation and use it consistently across `ai/index.ts` and the pipeline. Document the choice in `mem://logic/ai-intelligence-logic`.
-15. **A-01** Write a real README: what FPP does, F.S. 553.791 + 553.899 statutes covered, stack (React + Vite + Lovable Cloud + Lovable AI Gateway), how to add a new county, where Supabase secrets live.
-16. **H-06** Defer (out of scope for this pass) — DBPR API integration is a multi-day project on its own. Document as a known limitation in the README and add a settings-page warning that license numbers are self-attested. Open a separate task.
+**Wave 7 — Deferred items (optional, larger).**
+- H-02 column rename: coordinated migration of `block_letter_on_ungrounded` → `allow_stub_citations` with value flip + UI sweep.
+- H-03 gateway fallback: add a direct-Google AI provider behind a feature flag.
+- H-06 DBPR license verification: live API integration; multi-day project on its own.
 
----
+### What I'd skip
 
-### Wave status
+The audit's C-01 model-family complaint is essentially closed by standardizing on `gemini-2.5-flash` and documenting the choice in `mem://logic/ai-intelligence-logic`. Don't churn on it further.
 
-- **Wave 1 — Letter integrity:** ✅ Done. Dynamic firm/edition/deadline injection, temperature pinning, duplicate `citations` id renamed.
-- **Wave 2 — Statutory clock:** ✅ Done. `clock_pause_history` JSONB, net-elapsed math, 3 new pause tests.
-- **Wave 3 — Multi-tenant safety:** ✅ Done. Removed cross-firm `firm_settings` fallback; pipeline returns 409 on concurrent kickoff.
-- **Wave 4 — Tests & hygiene:** ✅ Done. 23-case `letter-readiness.test.ts`, Broward placeholder fixed, correction models standardized to `gemini-2.5-flash`, README rewritten, vitest env switched to `node` (no DOM tests in suite).
-- **Wave 5 — DNA + coastal + flag clarity:** ✅ Done. `occupant_load` and `is_coastal` added to DNA extraction schema; threshold-building now definitively skips when OL ≤ 500 (M-01 false-positive fix); Hillsborough flipped to `coastal()` with submission notes for Tampa Bay frontage (M-04); `blockLetterOnUngrounded` JSDoc explicitly warns about the inverted-name trap (full rename deferred — see below).
+### My recommendation
 
-### What's still NOT done (intentionally deferred)
-
-- **H-03** (gateway SPOF / fallback to direct Google AI). Real concern but adds significant complexity and a second secret. Track separately; revisit if we hit a Lovable gateway incident.
-- **H-06** (DBPR live license verification). Multi-day integration; documented as a known limitation in the README and surfaced as self-attested in the UI.
-- **H-02 column rename** (`block_letter_on_ungrounded` → `allow_stub_citations`). Inverting the boolean stored on every existing `firm_settings` row is a coordinated migration (column rename + value flip + types regen + UI copy). Documented in the JSDoc; safe to do as a one-shot migration when we touch firm settings UI next.
-
-### Technical notes
-
-- Existing draft letters keep their snapshot under the old prompt (immutability triggers protect them). Only new letters get the corrected prompt + dynamic context.
-- Vitest now runs under the `node` environment because none of the current suites touch the DOM. If a component test is added later, mark it with `// @vitest-environment jsdom` per file.
-- DNA schema gained two optional fields (`occupant_load`, `is_coastal`). They're stored under `project_dna.raw_extraction` automatically; no SQL migration needed unless we want them as first-class columns later.
+Approve **Wave 6 — Trust hardening** as the next deploy unit. It's the smallest set of changes that closes every audit-adjacent risk I can verify in the code, and it leaves the three intentionally-deferred items (H-02, H-03, H-06) clearly scoped for their own waves. Reply "yes" to proceed and I'll switch to build mode.
