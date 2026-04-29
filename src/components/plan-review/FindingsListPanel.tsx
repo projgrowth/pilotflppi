@@ -101,10 +101,43 @@ interface Props {
   hasDocuments: boolean;
   fileUrls: string[];
   onOpenDashboard: () => void;
+  /** True while the AI pipeline is still running. When true we show a
+   *  locked "Analyzing…" state instead of the partial findings list so
+   *  reviewers don't mistake an in-flight result set for the final output. */
+  pipelineProcessing?: boolean;
 }
 
 export function FindingsListPanel(props: Props) {
   const hasFindings = props.findings.length > 0;
+
+  // While the pipeline is still working, hide the partial list entirely.
+  // Streaming findings as they arrive made early discipline runs look like
+  // the final answer ("only one thing to review"). Lock the panel until
+  // analysis completes — the left canvas already shows live progress.
+  if (props.pipelineProcessing) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 px-4">
+        <div className="text-center space-y-3 max-w-[260px]">
+          <div className="mx-auto w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center">
+            <Sparkles className="h-5 w-5 text-accent animate-pulse" />
+          </div>
+          <p className="text-sm font-medium">Analyzing your plans</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Findings will appear here once the first pass finishes. Live
+            progress is on the left.
+            {hasFindings && (
+              <>
+                <br />
+                <span className="text-2xs text-muted-foreground/80">
+                  {props.findings.length} so far · still verifying
+                </span>
+              </>
+            )}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (!hasFindings) {
     return (
