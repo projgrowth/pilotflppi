@@ -91,6 +91,7 @@ export function NewReviewDialog({
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [extracting, setExtracting] = useState(false);
+  const [extractDoneCount, setExtractDoneCount] = useState<number | null>(null);
   const [geocoding, setGeocoding] = useState(false);
 
   const [files, setFiles] = useState<UploadedFile[]>([]);
