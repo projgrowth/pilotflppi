@@ -86,14 +86,20 @@ function hash32(s: string): number {
 }
 
 /**
- * Deterministic pin placement on a page (normalized 0–1 coords).
- * Keeps pins inside a 0.10–0.90 inset so they never hug the trim edge.
+ * Deterministic pin placement on a page. Returns coordinates as PERCENTAGES
+ * (0–100) to match what `PlanMarkupViewer` expects (it renders annotations
+ * with `left: ${x}%`). Historical bug: this function used to return 0–1
+ * floats, which rendered every pin within ~1% of the top-left corner.
+ *
+ * Keeps pins inside a 10–90% inset so they never hug the trim edge.
+ * Pin size matches the user-reposition default (3% × 3%) so click targets
+ * are consistent.
  */
 function deterministicPin(seed: string): Pick<MarkupData, "x" | "y" | "width" | "height"> {
   const h = hash32(seed);
-  const x = 0.1 + ((h % 800) / 1000); // 0.10–0.90
-  const y = 0.1 + (((h >>> 10) % 800) / 1000);
-  return { x, y, width: 0.06, height: 0.04 };
+  const x = 10 + ((h % 800) / 10); // 10.0–90.0 (percent)
+  const y = 10 + (((h >>> 10) % 800) / 10);
+  return { x, y, width: 3, height: 3 };
 }
 
 /**
