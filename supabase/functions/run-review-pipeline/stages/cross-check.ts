@@ -297,6 +297,7 @@ async function persistConsistencyMismatches(
     confidence_score: m.confidence_score,
     confidence_basis: "Cross-sheet vision pass",
     model_version: "google/gemini-2.5-pro",
+    prompt_version_id: promptVersionId,
     status: "open",
     citation_status: "unverified",
   }));
