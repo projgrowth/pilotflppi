@@ -165,6 +165,33 @@ Deno.serve(async (req) => {
         await setStage(admin, plan_review_id, firmId, s, { status: "pending" });
       }
     } else {
+      // H-04: Concurrency guard — fresh runs only. If a live run already
+      // exists on this plan_review_id (a stage marked running with a
+      // recent heartbeat), reject instead of double-billing AI tokens.
+      // Stale runs (heartbeat > 2 min old) are reaped by the watchdog and
+      // will not block a new attempt.
+      const HEARTBEAT_FRESH_MS = 2 * 60 * 1000;
+      const cutoffIso = new Date(Date.now() - HEARTBEAT_FRESH_MS).toISOString();
+      const { data: liveStages } = await admin
+        .from("review_pipeline_status")
+        .select("stage, heartbeat_at, updated_at")
+        .eq("plan_review_id", plan_review_id)
+        .eq("status", "running")
+        .gte("heartbeat_at", cutoffIso);
+      if (liveStages && liveStages.length > 0) {
+        const stages = (liveStages as Array<{ stage: string }>).map((s) => s.stage).join(", ");
+        return new Response(
+          JSON.stringify({
+            error: "pipeline_already_running",
+            message: `A pipeline run is already in progress for this review (stages: ${stages}). Cancel it first or wait for it to finish.`,
+          }),
+          {
+            status: 409,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+
       stageToRun = effectiveChain[0];
       for (const s of effectiveChain) {
         await setStage(admin, plan_review_id, firmId, s, { status: "pending" });
@@ -249,23 +276,29 @@ Deno.serve(async (req) => {
         if (stageToRun === "submittal_check") {
           const m = meta as { complete?: boolean; missing?: string[] };
           if (m.complete === false) {
-            const { data: settingsRow } = await admin
-              .from("firm_settings")
-              .select("block_review_on_incomplete_submittal")
-              .eq("user_id", firmId ?? "00000000-0000-0000-0000-000000000000")
-              .maybeSingle();
-            // firm_settings is keyed by user_id (firm owner), so fall back to
-            // any row in the firm if the owner row isn't present.
-            let block = (settingsRow as { block_review_on_incomplete_submittal?: boolean } | null)
-              ?.block_review_on_incomplete_submittal ?? false;
-            if (!settingsRow && firmId) {
-              const { data: anyRow } = await admin
+            // Multi-tenant safety (A-03): always scope firm_settings to the
+            // current firm. Prefer firm_id (tenant key); fall back to user_id
+            // (firm owner) for legacy rows. NEVER query without a firm filter
+            // or another tenant's settings could leak in.
+            let block = false;
+            if (firmId) {
+              const { data: byFirm } = await admin
                 .from("firm_settings")
                 .select("block_review_on_incomplete_submittal")
-                .limit(1)
+                .eq("firm_id", firmId)
                 .maybeSingle();
-              block = (anyRow as { block_review_on_incomplete_submittal?: boolean } | null)
-                ?.block_review_on_incomplete_submittal ?? false;
+              if (byFirm) {
+                block = (byFirm as { block_review_on_incomplete_submittal?: boolean })
+                  ?.block_review_on_incomplete_submittal ?? false;
+              } else {
+                const { data: byOwner } = await admin
+                  .from("firm_settings")
+                  .select("block_review_on_incomplete_submittal")
+                  .eq("user_id", firmId)
+                  .maybeSingle();
+                block = (byOwner as { block_review_on_incomplete_submittal?: boolean } | null)
+                  ?.block_review_on_incomplete_submittal ?? false;
+              }
             }
             if (block) {
               const missingLabel = (m.missing ?? []).join(", ") || "required disciplines";
