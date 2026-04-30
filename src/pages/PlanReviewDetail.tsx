@@ -762,7 +762,18 @@ export default function PlanReviewDetail() {
         hasFindings={hasFindings}
         rounds={projectRounds}
         pipelineProcessing={pipelineProcessing}
-        onBack={() => navigate("/plan-review")}
+        analyzeBlocked={(() => {
+          const exp = typeof aiRunProgress?.expected_pages === "number" ? aiRunProgress.expected_pages : null;
+          if (!exp || exp <= 0) return false;
+          return pageAssetCount < exp * 0.95;
+        })()}
+        analyzeBlockedReason={(() => {
+          const exp = typeof aiRunProgress?.expected_pages === "number" ? aiRunProgress.expected_pages : null;
+          if (!exp || exp <= 0) return null;
+          return pageAssetCount < exp * 0.95
+            ? `Only ${pageAssetCount} of ${exp} pages prepared — finish preparation before analyzing.`
+            : null;
+        })()}
         onRunAICheck={runAICheck}
         onNavigateRound={(rid) => navigate(`/plan-review/${rid}`)}
         onNewRound={createNewRound}
