@@ -75,6 +75,7 @@ import { useFirmId } from "@/hooks/useFirmId";
 import type { ReadinessResult } from "@/lib/letter-readiness";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { deletePlanReview } from "@/lib/delete-plan-review";
+import { UploadFailureRecoveryDialog } from "@/components/plan-review/UploadFailureRecoveryDialog";
 import { cancelPipelineForReview } from "@/lib/pipeline-cancel";
 
 // Wand2/AlertTriangle/Loader2 previously used by inline prepare strip — now owned by ReviewNextStepRail.
@@ -803,6 +804,30 @@ export default function PlanReviewDetail() {
         ]}
         loading={deleting}
         onConfirm={handleDeleteReview}
+      />
+
+      {/* Hard-failure recovery surface: opened only when upload + one auto-retry
+          both produce <80% page coverage. Replaces the historical four stacked
+          toasts with no recovery CTA on the workspace. */}
+      <UploadFailureRecoveryDialog
+        open={recovery.open}
+        onOpenChange={(o) => { if (!o) closeRecovery(); }}
+        prepared={recovery.prepared}
+        expected={recovery.expected}
+        failedFiles={recovery.failedFiles}
+        retrying={reprepping}
+        onRetry={async () => {
+          await handleReprepareInBrowser();
+          closeRecovery();
+        }}
+        onReupload={() => {
+          closeRecovery();
+          fileInputRef.current?.click();
+        }}
+        onDelete={() => {
+          closeRecovery();
+          setDeleteOpen(true);
+        }}
       />
 
       {/* Hide the inline strip when the canvas overlay is showing the same
