@@ -161,12 +161,38 @@ export async function renderPDFPagesToImages(
   return images;
 }
 
+/**
+ * Lightweight per-page text item shape for `plan_review_page_text.items`.
+ * Coordinates are in the PDF's native user-space (origin = bottom-left,
+ * units = points). Width is from pdf.js; height is approximated from the
+ * transform matrix scale.
+ */
+export interface PageTextItem {
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface PageTextExtraction {
+  pageIndex: number;
+  items: PageTextItem[];
+  fullText: string;
+  hasTextLayer: boolean;
+}
+
 async function renderPDFPagesToJpegs(
   file: File,
   maxPages: number = Infinity,
   dpi = 110,
   quality = 0.75,
-  opts: { startPage?: number; onPage?: (pageIndex: number, total: number) => void } = {},
+  opts: {
+    startPage?: number;
+    onPage?: (pageIndex: number, total: number) => void;
+    /** Called once per page with the extracted vector text layer (best-effort). */
+    onText?: (extraction: PageTextExtraction) => void;
+  } = {},
 ): Promise<Array<{ pageIndex: number; blob: Blob }>> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -190,6 +216,46 @@ async function renderPDFPagesToJpegs(
         else reject(new Error(`Failed to encode page ${i + 1} as JPEG`));
       }, "image/jpeg", quality);
     });
+
+    // Best-effort vector text extraction. Wrapped so a malformed text stream
+    // never poisons the rasterize path — image is the contract; text is bonus.
+    if (opts.onText) {
+      try {
+        const content = await page.getTextContent();
+        const items: PageTextItem[] = [];
+        const parts: string[] = [];
+        for (const raw of content.items as Array<{
+          str?: string;
+          transform?: number[];
+          width?: number;
+          height?: number;
+        }>) {
+          const str = (raw.str ?? "").trim();
+          if (!str) continue;
+          const t = raw.transform ?? [1, 0, 0, 1, 0, 0];
+          const x = Number(t[4] ?? 0);
+          const y = Number(t[5] ?? 0);
+          const scaleY = Math.hypot(Number(t[2] ?? 0), Number(t[3] ?? 1)) || 1;
+          items.push({
+            text: str,
+            x,
+            y,
+            w: Number(raw.width ?? 0),
+            h: Number(raw.height ?? scaleY),
+          });
+          parts.push(str);
+        }
+        opts.onText({
+          pageIndex: i,
+          items,
+          fullText: parts.join(" "),
+          hasTextLayer: items.length > 0,
+        });
+      } catch {
+        // Scanned PDFs with no text layer raise here — record empty extraction.
+        opts.onText({ pageIndex: i, items: [], fullText: "", hasTextLayer: false });
+      }
+    }
 
     pages.push({ pageIndex: i, blob });
     // Release canvas memory before the next page.
@@ -279,6 +345,16 @@ export async function rasterizeAndUploadPagesResilient(
     /** Called after each successfully uploaded page so callers can persist incrementally. */
     onPageReady?: (asset: PreparedPageAsset) => void | Promise<void>;
     /**
+     * Called with the extracted vector text layer for each page that was
+     * successfully rendered. `globalPageIndex` matches the asset's
+     * `page_index` so the caller can upsert directly into
+     * `plan_review_page_text`. Best-effort — not invoked for failed renders.
+     */
+    onPageText?: (extraction: PageTextExtraction & {
+      globalPageIndex: number;
+      sourceFilePath: string;
+    }) => void | Promise<void>;
+    /**
      * Required for firm-scoped storage: page JPEGs are written to
      * `<pagesPrefix>/<basename>/p-NNN.jpg`. Callers should pass
      * `firms/<firmId>/plan-reviews/<reviewId>/pages` so the new
@@ -331,9 +407,21 @@ export async function rasterizeAndUploadPagesResilient(
 
       const chunkLen = Math.min(batchSize, uf.pageCount - chunkStart);
       let pageJpegs: Array<{ pageIndex: number; blob: Blob }> = [];
+      // Map of file-local pageIndex → extracted text. Populated synchronously
+      // by `renderPDFPagesToJpegs` via its `onText` callback so we can replay
+      // it after the JPEG upload settles (and only for pages that uploaded
+      // cleanly — there's no point persisting text for a missing image).
+      const textByLocalIndex = new Map<number, PageTextExtraction>();
       try {
         pageJpegs = await Promise.race<Array<{ pageIndex: number; blob: Blob }>>([
-          renderPDFPagesToJpegs(uf.file, chunkLen, dpi, quality, { startPage: chunkStart }),
+          renderPDFPagesToJpegs(uf.file, chunkLen, dpi, quality, {
+            startPage: chunkStart,
+            onText: opts.onPageText
+              ? (extraction) => {
+                  textByLocalIndex.set(extraction.pageIndex, extraction);
+                }
+              : undefined,
+          }),
           new Promise<Array<{ pageIndex: number; blob: Blob }>>((_, reject) =>
             setTimeout(() => reject(new Error(`chunk render timed out after ${chunkTimeoutMs}ms`)), chunkTimeoutMs),
           ),
@@ -384,6 +472,20 @@ export async function rasterizeAndUploadPagesResilient(
           succeeded.push(asset);
           if (opts.onPageReady) {
             try { await opts.onPageReady(asset); } catch { /* incremental persist is best-effort */ }
+          }
+          // Persist the page text alongside the asset using the same global
+          // page_index, so downstream stages can join 1:1.
+          if (opts.onPageText) {
+            const extraction = textByLocalIndex.get(page.pageIndex);
+            if (extraction) {
+              try {
+                await opts.onPageText({
+                  ...extraction,
+                  globalPageIndex: nextGlobalPageIndex,
+                  sourceFilePath: uf.storagePath,
+                });
+              } catch { /* best-effort; image upload already succeeded */ }
+            }
           }
         } else {
           failures.push({

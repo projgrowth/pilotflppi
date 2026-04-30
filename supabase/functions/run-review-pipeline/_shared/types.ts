@@ -5,6 +5,7 @@ export type Stage =
   | "upload"
   | "prepare_pages"
   | "sheet_map"
+  | "callout_graph"
   | "submittal_check"
   | "dna_extract"
   | "discipline_review"
@@ -25,6 +26,7 @@ export const STAGES: Stage[] = [
   "upload",
   "prepare_pages",
   "sheet_map",
+  "callout_graph",
   "submittal_check",
   "dna_extract",
   "discipline_review",
@@ -62,6 +64,10 @@ export const CORE_STAGES: Stage[] = [
   "upload",
   "prepare_pages",
   "sheet_map",
+  // callout_graph is deterministic (regex over plan_review_page_text). It
+  // produces verified cross_sheet findings BEFORE any AI runs and gives
+  // submittal_check + discipline_review a richer view of what's missing.
+  "callout_graph",
   "submittal_check",
   "dna_extract",
   "discipline_review",
@@ -69,9 +75,7 @@ export const CORE_STAGES: Stage[] = [
   "dedupe",
   "ground_citations",
   // verify runs in CORE so every finding gets an adversarial verdict before
-  // the letter-readiness gate is evaluated. Without this, default `core`
-  // runs land on `needs_human_review` with 100% unverified findings and
-  // the user can never send the letter.
+  // the letter-readiness gate is evaluated.
   "verify",
   "challenger",
   "complete",

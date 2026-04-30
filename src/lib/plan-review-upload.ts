@@ -126,6 +126,17 @@ export async function uploadPlanReviewFiles(
   let pageAssetRows: PreparedPageAsset[] = [];
   let totalExpectedPages = 0;
   let allFailures: Array<{ fileName: string; pageIndex: number; reason: string }> = [];
+  // Hoisted so step 5a can persist them after the manifest upsert succeeds.
+  type PageTextRow = {
+    plan_review_id: string;
+    firm_id: string;
+    page_index: number;
+    items: { text: string; x: number; y: number; w: number; h: number }[];
+    full_text: string;
+    has_text_layer: boolean;
+    char_count: number;
+  };
+  const textRows: PageTextRow[] = [];
   if (typeof window !== "undefined") {
     try {
       const pairs: Array<{
@@ -154,6 +165,7 @@ export async function uploadPlanReviewFiles(
         prepared: 0,
         expected: totalExpectedPages,
       });
+      // Text rows are accumulated into the hoisted `textRows` array above.
       const { succeeded, failures } = await rasterizeAndUploadPagesResilient(
         reviewId,
         pairs,
@@ -167,6 +179,19 @@ export async function uploadPlanReviewFiles(
           startGlobalIndex: existingPageCount ?? 0,
           batchSize: 4,
           pagesPrefix: `${prefix}/pages`,
+          onPageText: (extraction) => {
+            const fullText = extraction.fullText.slice(0, 200_000);
+            textRows.push({
+              plan_review_id: reviewId,
+              firm_id: firmId,
+              page_index: extraction.globalPageIndex,
+              // Cap at 4000 items per page — 99th percentile sheet has < 2000.
+              items: extraction.items.slice(0, 4000),
+              full_text: fullText,
+              has_text_layer: extraction.hasTextLayer,
+              char_count: fullText.length,
+            });
+          },
         },
       );
       pageAssetRows = succeeded;
@@ -239,6 +264,29 @@ export async function uploadPlanReviewFiles(
       .from("plan_review_page_assets")
       .upsert(pageAssetRows, { onConflict: "plan_review_id,page_index" });
     if (assetErr) warnings.push(`page_assets: ${assetErr.message}`);
+  }
+
+  // 5a. plan_review_page_text upsert — vector text layer per page. Best effort:
+  // a failure here doesn't block the pipeline, but the AI will fall back to
+  // image-only reading on those pages.
+  if (textRows.length > 0) {
+    try {
+      // Chunk to stay well under the request payload cap.
+      for (let i = 0; i < textRows.length; i += 50) {
+        const chunk = textRows.slice(i, i + 50);
+        const { error: textErr } = await supabase
+          .from("plan_review_page_text")
+          .upsert(chunk, { onConflict: "plan_review_id,page_index" });
+        if (textErr) {
+          warnings.push(`page_text: ${textErr.message}`);
+          break;
+        }
+      }
+    } catch (err) {
+      warnings.push(
+        `page_text persist: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   // 5b. Persist per-page rasterize failures so they survive the upload toast.

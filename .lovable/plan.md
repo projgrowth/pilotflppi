@@ -1,74 +1,122 @@
+# Tier 1: Close the Input-Layer Gap
 
-# Pre-publish reliability fixes
+The reasoning chain is solid. Every remaining accuracy loss traces back to one fact: **we feed Gemini a downsampled PNG and nothing else**. pdf.js is already loaded in the browser and we already call `getTextContent` for evidence cropping — we're throwing the result away after one use. This plan persists that text, parses it for callouts, tiles large sheets, and broadens submittal completeness.
 
-After auditing recent runs, the database tells a sharp story: **almost every recent review ends in `needs_human_review` with 100% unverified findings** — including ones from today (8/8, 7/7, 18/18, 12/12 unverified). The letter-readiness gate then blocks delivery, so the pipeline effectively never finishes for the user. There are also a few smaller potholes worth filling before publishing.
+Four changes, all additive. Nothing in the existing 7-stage pipeline gets removed.
 
-## What's actually breaking
+---
 
-### 1. Verifier never runs in `core` mode (CRITICAL — root cause of "needs_human_review" epidemic)
+## 1. Persist the PDF text layer per page
 
-`CORE_STAGES` in `supabase/functions/run-review-pipeline/_shared/types.ts` is:
+**Where:** Browser-side rasterizer in `src/lib/pdf-utils.ts` and the wizard upload path that calls it.
 
+**What:** When we already render a page for rasterization, also extract `page.getTextContent()` items and write them to a new `plan_review_page_text` table:
+
+```text
+plan_review_page_text
+  plan_review_id  uuid
+  page_index      int
+  sheet_ref       text     (joined from sheet_coverage)
+  items           jsonb    [{ text, x, y, w, h, rotation, fontSize }]
+  full_text       text     (concatenated, for embedding/search)
+  has_text_layer  bool     (false = scanned, future OCR hook)
+  PRIMARY KEY (plan_review_id, page_index)
 ```
-upload → prepare_pages → sheet_map → submittal_check → dna_extract →
-discipline_review → critic → dedupe → ground_citations → challenger → complete
+
+RLS: same firm_id pattern as `plan_review_page_assets`.
+
+**Why:** Right now every dimension, sheet number, room label, and code reference goes through Gemini's OCR. Persisting the vector text layer means:
+- The discipline_review prompt receives `{image + extracted_text_for_this_sheet}` instead of just the image. Hallucinated sheet numbers and dimensions drop sharply.
+- ground_citations gets exact code-section strings to match against `fbc_code_sections` (no more "I think it said R301.6").
+- Evidence quotes become verifiable — we can confirm the AI's quote actually appears on the page before accepting the finding.
+
+## 2. Parse callouts and build a cross-reference graph
+
+**Where:** New deterministic stage `callout_graph` inserted in `CORE_STAGES` between `sheet_map` and `submittal_check`. Pure regex/text — zero AI cost.
+
+**What:** Scan `plan_review_page_text.full_text` for the standard callout patterns:
+- Detail bubbles: `\d+/[A-Z]+-?\d+(\.\d+)?` (e.g. `4/A5.2`, `12/S-301`)
+- Section marks: `SECTION\s+[A-Z\d-]+`
+- Sheet refs in notes: `SEE SHEET ([A-Z]-?\d+)`
+- Schedule refs: `SCHEDULE [A-Z\d-]+`
+
+Persist to a new `callout_references` table:
+
+```text
+callout_references
+  plan_review_id   uuid
+  source_page      int
+  source_sheet_ref text
+  raw_text         text       ("4/A5.2")
+  target_sheet_ref text       ("A5.2")
+  target_detail    text       ("4")
+  resolved         bool       (does target_sheet_ref exist in sheet_coverage?)
+  detail_found     bool       (does target page actually contain detail "4"?)
 ```
 
-**`verify` is only in `DEEP_STAGES`.** Default runs are `core`, so the verifier is skipped, every finding stays `verification_status='unverified'`, and the readiness gate produces `"Verifier stalled — N of N findings never reached a verdict"`. Result: even a clean run looks broken.
+Emit one finding per `resolved=false` row as a `cross_sheet` discipline deficiency: *"Sheet A2.1 references detail 4/A5.2 but sheet A5.2 was not submitted."* These are the cheapest, most defensible findings we can produce and reviewers love them.
 
-Fix: insert `verify` into CORE_STAGES between `ground_citations` and `challenger` (challenger is the adversarial pass and benefits from verifier verdicts being present). Remove it from DEEP_STAGES so it isn't double-run on `mode=full`.
+## 3. Tile large sheets for the discipline_review pass
 
-### 2. `submittal_check` is missing from the stuck-recovery allowlist
+**Where:** `signedSheetUrls` consumer in `discipline-review.ts` and the browser rasterizer in `pdf-utils.ts`.
 
-`pipeline_error_log` shows: `Stuck at unknown stage 'submittal_check' for 19 min — cannot auto-recover.` The reconciler's `SERVER_RECOVERABLE_STAGES` set in `supabase/functions/reconcile-stuck-reviews/index.ts` lists every stage **except** `submittal_check` and `challenger`. Both of these run server-side and should be retryable.
+**What:** When a page asset is rasterized at >4000px on its long edge, also render four overlapping crops (top-left/top-right/bottom-left/bottom-right at 60% overlap) and store them as `tile_index` 1–4 alongside the full-page asset (`tile_index = 0`).
 
-Fix: add `"submittal_check"` and `"challenger"` to `SERVER_RECOVERABLE_STAGES`.
+For the discipline_review chunk loop, when a sheet has tiles, send the full page **plus** the 4 tiles in the same call. Token cost goes up ~3× per large sheet, but small-text findings (notes blocks, dimension stacks) stop being missed.
 
-### 3. Reviews stuck in browser stages can never recover on their own
+Gate behind a feature flag (`feature_flags.tile_large_sheets`) so we can A/B against current accuracy before forcing it on.
 
-For `upload` and `prepare_pages` the reconciler flips status to `needs_user_action` and waits for the user to re-open the project. But the `StuckRecoveryBanner` only shows the "Prepare pages now" CTA when `needsPreparation` is true based on missing page assets — it does not key off `ai_check_status='needs_user_action'`. So the user opens the project, sees a vague warning banner with no button, and bounces.
+## 4. Expand submittal_check matrix per occupancy class
 
-Fix: when `ai_check_status='needs_user_action'` AND the stage was `prepare_pages`, surface the existing "Prepare pages now" button (it already calls `useUploadAndPrepare`'s rasterizer). When the stage was `upload`, surface a "Re-upload files" CTA that scrolls to / opens the upload dialog.
+**Where:** `stages/submittal-check.ts`. The current check only looks for the trade buckets S/M/P/E/FP. Real Florida commercial submittals expect specific document categories.
 
-### 4. "Re-run verifier" button does nothing useful in core-mode runs
+**What:** Replace the flat `expected = [...]` list with a per-`use_type` matrix that also checks for documents (not just sheets):
 
-Today the banner offers `startPipeline(planReviewId, "core", "verify")`, but `verify` isn't in `CORE_STAGES`. After fix #1 it will be, so the button starts working — no code change beyond #1.
+```text
+For commercial / business / mercantile (FBC Ch.3 Group B/M):
+  required sheets:    A, S, M, P, E, FP, C, L
+  required documents: structural calcs, energy compliance form,
+                      product approval forms, soil report, fire alarm
+                      narrative, accessibility checklist
+  required schedules: door, window, finish, lighting, panel
+```
 
-## Smaller hygiene items worth shipping at the same time
+Source the matrix from the existing `county_requirements/data.ts` seed where possible; fall back to a hard-coded FBC default. Each missing item raises one `permit_blocker` finding tagged `administrative` so reviewers see the gap before any AI runs.
 
-### 5. Hallucinated-citation auto-hide is missing on some runs
+---
 
-Two recent reviews show `has_hallucinated_citations: true` with `with_evidence_crop_pct: 0`. These are findings the AI invented. They currently still count toward "12 of 12 unverified" in the banner. The `liveBreakdown` in `StuckRecoveryBanner.tsx` already filters by `citation_status !== 'hallucinated'` for the unverified count, but the **denominator** (`total`) still includes them. Quick fix: also exclude hallucinated from `total` and add a separate "N hidden as hallucinated" line.
+## Files affected
 
-### 6. `cost_metric` errors are noisy (≈300 in 14 days) but cosmetic
+**New / changed:**
+- `src/lib/pdf-utils.ts` — emit `{items, full_text, has_text_layer}` from rasterizer
+- `src/components/plan-review/wizard/...` (wherever `uploadPlanReviewFiles` lives) — write to new table after upload
+- `supabase/functions/run-review-pipeline/stages/callout-graph.ts` — new stage
+- `supabase/functions/run-review-pipeline/stages/discipline-review.ts` — accept `pageText` context, support tiles
+- `supabase/functions/run-review-pipeline/stages/submittal-check.ts` — replace flat list with matrix
+- `supabase/functions/run-review-pipeline/_shared/types.ts` — add `callout_graph` to CORE_STAGES
+- `supabase/functions/run-review-pipeline/discipline-experts.ts` — prompt update to consume page text
 
-These come from `_shared/cost.ts` failing to record per-stage cost. They don't affect output but they crowd `pipeline_error_log` and make real failures harder to spot. Wrap the cost insert in a try/catch and downgrade to a single `console.warn` — no DB write — when it fails.
+**New tables (one migration):**
+- `plan_review_page_text`
+- `callout_references`
 
-### 7. ExternalDataPanel error UX
+**No changes to:** verify, challenger, ground_citations, dedupe, prioritize, learning loop, UI.
 
-`fetch-fema-flood` and `fetch-asce-hazard` both return JSON errors (rate limit, no coverage, geocode miss) but the panel currently shows a generic spinner→empty state. Add a small inline error chip with a retry button so reviewers know whether to trust "no flood zone" vs. "we couldn't reach FEMA".
+## Rollout safety
 
-## Out of scope (already healthy)
+- Each change is independent — ship in 4 separate runs if needed.
+- Tile rendering is feature-flagged (`feature_flags.tile_large_sheets`).
+- Callout graph stage is purely additive; if it errors it's added to `SERVER_RECOVERABLE_STAGES` and skipped.
+- Text-layer table is read-optional — discipline_review falls back to image-only if the row is missing (handles legacy reviews uploaded before this change).
 
-- DNA extract, sheet_map, discipline_review chunking (resumes correctly via heartbeat path).
-- Auto-recovery success banner.
-- Beta feature flag plumbing (just shipped).
+## What this should move
 
-## Files to change
+| Metric | Today | Target after Tier 1 |
+|---|---|---|
+| Unverified findings (post-verify) | ~40–60% | <20% |
+| Hallucinated sheet/code refs | common | rare (text-layer grounding) |
+| Cross-sheet findings caught | 0 | All broken refs |
+| Submittal-incomplete catches | trade-level only | Doc + schedule level |
+| Tokens per discipline call | baseline | -25% (less OCR work for the LLM, even with tiles) |
 
-- `supabase/functions/run-review-pipeline/_shared/types.ts` — move `verify` into CORE_STAGES, drop from DEEP_STAGES.
-- `supabase/functions/reconcile-stuck-reviews/index.ts` — add `submittal_check`, `challenger` to recoverable set.
-- `src/components/plan-review/StuckRecoveryBanner.tsx` — wire `needs_user_action` to existing `Prepare pages now` / new `Re-upload files` CTAs; exclude hallucinated from `total`.
-- `src/pages/PlanReviewDetail.tsx` — pass `recoveredFromStage` and an `onReupload` handler to the banner.
-- `supabase/functions/run-review-pipeline/_shared/cost.ts` — silence cost-metric insert failures.
-- `src/components/plan-review/ExternalDataPanel.tsx` — inline error + retry.
-
-## Verification after the fix
-
-1. Trigger a fresh review on a clean PDF → confirm `verify` stage appears in `review_pipeline_status` and `verification_status` flips to `verified`/`modified`/`needs_human` for each finding (no more 100% unverified).
-2. Confirm `ai_check_status` lands on `complete` (not `needs_human_review`) when verifier verdicts pass thresholds.
-3. Force a stuck `submittal_check` (cancel mid-run) → wait 15 min → reconciler retries it instead of failing.
-4. Open a review with `ai_check_status='needs_user_action'` and stage `prepare_pages` → "Prepare pages now" button appears and runs the in-browser rasterizer.
-5. Check `pipeline_error_log` 24 h later — `cost_metric` rows should be near zero.
-
-Approve and I'll apply these in one pass.
+After Tier 1 lands cleanly, Tier 2 (vector geometry + symbol detection) becomes the next pass.
