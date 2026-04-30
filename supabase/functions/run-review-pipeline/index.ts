@@ -204,6 +204,7 @@ Deno.serve(async (req) => {
       prepare_pages: () => stagePreparePages(admin, plan_review_id, firmId),
       sheet_map: () => stageSheetMap(admin, plan_review_id, firmId),
       submittal_check: () => stageSubmittalCheck(admin, plan_review_id, firmId),
+      callout_graph: () => stageCalloutGraph(admin, plan_review_id, firmId),
       dna_extract: () =>
         startFrom && STAGES.indexOf(startFrom) > 0 && stageToRun === "dna_extract"
           ? stageDnaReevaluate(admin, plan_review_id)
