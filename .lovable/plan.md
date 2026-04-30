@@ -1,122 +1,119 @@
-# Tier 1: Close the Input-Layer Gap
 
-The reasoning chain is solid. Every remaining accuracy loss traces back to one fact: **we feed Gemini a downsampled PNG and nothing else**. pdf.js is already loaded in the browser and we already call `getTextContent` for evidence cropping — we're throwing the result away after one use. This plan persists that text, parses it for callouts, tiles large sheets, and broadens submittal completeness.
+# Plan Review user-flow audit
 
-Four changes, all additive. Nothing in the existing 7-stage pipeline gets removed.
+I traced the flow from `NewReviewDialog` → `uploadPlanReviewFiles` → `PlanReviewDetail` → pipeline → letter, and replayed your most recent session. Here is what I found, ranked by how badly it hurts users today.
 
----
+## What I observed in your session (2283 Ringling Blvd)
 
-## 1. Persist the PDF text layer per page
+You created the review, upload started, then within ~70 seconds the UI fired **four stacked toasts**:
 
-**Where:** Browser-side rasterizer in `src/lib/pdf-utils.ts` and the wizard upload path that calls it.
+1. `Document2.pdf: 6 of its pages failed to rasterize.`
+2. `Rasterized 0 of 6 pages — 6 failed.`
+3. `Pipeline NOT started — Only 0 of 6 pages prepared. Use "Prepare pages now" to retry the gaps before analyzing.`
+4. `Only 0/6 pages prepared. Use "Prepare pages now" in the workspace.`
 
-**What:** When we already render a page for rasterization, also extract `page.getTextContent()` items and write them to a new `plan_review_page_text` table:
-
-```text
-plan_review_page_text
-  plan_review_id  uuid
-  page_index      int
-  sheet_ref       text     (joined from sheet_coverage)
-  items           jsonb    [{ text, x, y, w, h, rotation, fontSize }]
-  full_text       text     (concatenated, for embedding/search)
-  has_text_layer  bool     (false = scanned, future OCR hook)
-  PRIMARY KEY (plan_review_id, page_index)
-```
-
-RLS: same firm_id pattern as `plan_review_page_assets`.
-
-**Why:** Right now every dimension, sheet number, room label, and code reference goes through Gemini's OCR. Persisting the vector text layer means:
-- The discipline_review prompt receives `{image + extracted_text_for_this_sheet}` instead of just the image. Hallucinated sheet numbers and dimensions drop sharply.
-- ground_citations gets exact code-section strings to match against `fbc_code_sections` (no more "I think it said R301.6").
-- Evidence quotes become verifiable — we can confirm the AI's quote actually appears on the page before accepting the finding.
-
-## 2. Parse callouts and build a cross-reference graph
-
-**Where:** New deterministic stage `callout_graph` inserted in `CORE_STAGES` between `sheet_map` and `submittal_check`. Pure regex/text — zero AI cost.
-
-**What:** Scan `plan_review_page_text.full_text` for the standard callout patterns:
-- Detail bubbles: `\d+/[A-Z]+-?\d+(\.\d+)?` (e.g. `4/A5.2`, `12/S-301`)
-- Section marks: `SECTION\s+[A-Z\d-]+`
-- Sheet refs in notes: `SEE SHEET ([A-Z]-?\d+)`
-- Schedule refs: `SCHEDULE [A-Z\d-]+`
-
-Persist to a new `callout_references` table:
-
-```text
-callout_references
-  plan_review_id   uuid
-  source_page      int
-  source_sheet_ref text
-  raw_text         text       ("4/A5.2")
-  target_sheet_ref text       ("A5.2")
-  target_detail    text       ("4")
-  resolved         bool       (does target_sheet_ref exist in sheet_coverage?)
-  detail_found     bool       (does target page actually contain detail "4"?)
-```
-
-Emit one finding per `resolved=false` row as a `cross_sheet` discipline deficiency: *"Sheet A2.1 references detail 4/A5.2 but sheet A5.2 was not submitted."* These are the cheapest, most defensible findings we can produce and reviewers love them.
-
-## 3. Tile large sheets for the discipline_review pass
-
-**Where:** `signedSheetUrls` consumer in `discipline-review.ts` and the browser rasterizer in `pdf-utils.ts`.
-
-**What:** When a page asset is rasterized at >4000px on its long edge, also render four overlapping crops (top-left/top-right/bottom-left/bottom-right at 60% overlap) and store them as `tile_index` 1–4 alongside the full-page asset (`tile_index = 0`).
-
-For the discipline_review chunk loop, when a sheet has tiles, send the full page **plus** the 4 tiles in the same call. Token cost goes up ~3× per large sheet, but small-text findings (notes blocks, dimension stacks) stop being missed.
-
-Gate behind a feature flag (`feature_flags.tile_large_sheets`) so we can A/B against current accuracy before forcing it on.
-
-## 4. Expand submittal_check matrix per occupancy class
-
-**Where:** `stages/submittal-check.ts`. The current check only looks for the trade buckets S/M/P/E/FP. Real Florida commercial submittals expect specific document categories.
-
-**What:** Replace the flat `expected = [...]` list with a per-`use_type` matrix that also checks for documents (not just sheets):
-
-```text
-For commercial / business / mercantile (FBC Ch.3 Group B/M):
-  required sheets:    A, S, M, P, E, FP, C, L
-  required documents: structural calcs, energy compliance form,
-                      product approval forms, soil report, fire alarm
-                      narrative, accessibility checklist
-  required schedules: door, window, finish, lighting, panel
-```
-
-Source the matrix from the existing `county_requirements/data.ts` seed where possible; fall back to a hard-coded FBC default. Each missing item raises one `permit_blocker` finding tagged `administrative` so reviewers see the gap before any AI runs.
+Then the toasts vanished and you sat on the workspace doing nothing for ~3 minutes. **That is the entire failure** — we surfaced a catastrophic problem in a transient toast and offered no in-page recovery on the route the user was actually on.
 
 ---
 
-## Files affected
+## Tier 1 — Hard blockers in the current flow
 
-**New / changed:**
-- `src/lib/pdf-utils.ts` — emit `{items, full_text, has_text_layer}` from rasterizer
-- `src/components/plan-review/wizard/...` (wherever `uploadPlanReviewFiles` lives) — write to new table after upload
-- `supabase/functions/run-review-pipeline/stages/callout-graph.ts` — new stage
-- `supabase/functions/run-review-pipeline/stages/discipline-review.ts` — accept `pageText` context, support tiles
-- `supabase/functions/run-review-pipeline/stages/submittal-check.ts` — replace flat list with matrix
-- `supabase/functions/run-review-pipeline/_shared/types.ts` — add `callout_graph` to CORE_STAGES
-- `supabase/functions/run-review-pipeline/discipline-experts.ts` — prompt update to consume page text
+### 1. The "0 of N pages" cliff has no recovery surface
 
-**New tables (one migration):**
-- `plan_review_page_text`
-- `callout_references`
+**Why it matters:** When `MIN_RASTERIZE_RATIO` (80%) isn't met, `uploadPlanReviewFiles` writes `ai_check_status = 'needs_user_action'` to the DB and returns. The workspace then relies on `StuckRecoveryBanner` + `ReviewNextStepRail` to surface recovery — but on a *brand new* review, both can render before the page-asset poll has caught up, so the user sees the empty drop-zone with no banner. Toasts disappear in 8s. Recovery is gone.
 
-**No changes to:** verify, challenger, ground_citations, dedupe, prioritize, learning loop, UI.
+**Fixes**
+- After `partialRasterize === true`, **immediately** call `handleReprepareInBrowser()` once (with a confirmation toast) instead of dumping the user back to the workspace. The browser already has the file in memory and we already proved pdf.js works there.
+- If auto-retry still produces 0 pages, surface a **modal** (not a toast) that says "We couldn't render this PDF. Common causes: scanned image PDF, password-protected, or corrupt header. [Try a different file] [Contact support]".
+- Stop firing 4 toasts for the same event. Replace with **one** toast: "0 of 6 pages prepared — opening recovery." All the per-file/per-page detail belongs in an expandable "Show details" inside the recovery modal, not in the toast queue.
 
-## Rollout safety
+### 2. `pdfjsLib.GlobalWorkerOptions.workerSrc` points to a CDN
 
-- Each change is independent — ship in 4 separate runs if needed.
-- Tile rendering is feature-flagged (`feature_flags.tile_large_sheets`).
-- Callout graph stage is purely additive; if it errors it's added to `SERVER_RECOVERABLE_STAGES` and skipped.
-- Text-layer table is read-optional — discipline_review falls back to image-only if the row is missing (handles legacy reviews uploaded before this change).
+`src/lib/pdf-utils.ts:4` uses `https://cdnjs.cloudflare.com/.../pdf.worker.min.mjs`. If the user is on a restricted network (county VPN, hospital wifi — common for our buyers) the worker fails to load and **every page rasterizes to 0**. This is the most likely root cause of what you just hit.
 
-## What this should move
+**Fix:** Bundle `pdfjs-dist/build/pdf.worker.min.mjs` via Vite (`new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url)`) so the worker ships with the app.
 
-| Metric | Today | Target after Tier 1 |
-|---|---|---|
-| Unverified findings (post-verify) | ~40–60% | <20% |
-| Hallucinated sheet/code refs | common | rare (text-layer grounding) |
-| Cross-sheet findings caught | 0 | All broken refs |
-| Submittal-incomplete catches | trade-level only | Doc + schedule level |
-| Tokens per discipline call | baseline | -25% (less OCR work for the LLM, even with tiles) |
+### 3. Auto-render runs on every mount, ignores deps
 
-After Tier 1 lands cleanly, Tier 2 (vector geometry + symbol detection) becomes the next pass.
+`PlanReviewDetail.tsx` lines 250–261: the auto-render effect has `[review]` as its dep array but reads `pageImages.length`, `renderingPages`, `hasAutoRendered.current`. ESLint disable is implicit. On a fresh upload + navigation, this re-fires before `pageImages` propagates and can race the upload's `resetPages()`.
+
+**Fix:** Move the guard into a single `useEffect` keyed on `review.id` only, and gate inside the body.
+
+---
+
+## Tier 2 — Confusing journey moments
+
+### 4. "Just-created" sticky window is 3 minutes — too long
+
+`justCreatedFresh` (line 211) keeps the ProcessingOverlay up for 3 min even when the upload has already errored. A user who hits the rasterize cliff sees "Analyzing your plans…" for minutes while the real state is "needs_user_action."
+
+**Fix:** Drop the sticky window the moment `ai_check_status` becomes `needs_user_action` OR `partialRasterize` resolves. Cap remaining cases at 60s.
+
+### 5. Two competing "next step" surfaces
+
+The page renders both `StuckRecoveryBanner` (with `needsPreparation`/`needs_user_action` variants) **and** `ReviewNextStepRail` (whose selector emits `needs_preparation` / `partial_rasterize`). They overlap on every recovery scenario — risk of two banners with two CTAs.
+
+**Fix:** Delete the `needsPreparation` and `needs_user_action` variants from `StuckRecoveryBanner` and let `ReviewNextStepRail` own them exclusively. Keep `StuckRecoveryBanner` for `needs_human_review` + auto-recovery only.
+
+### 6. NextStepBar (dashboard) and ReviewNextStepRail (workspace) drift
+
+Both compute "what's next" but with different ladders. Reviewers see "Triage 5 findings" on the dashboard while the workspace says "Confirm DNA". Pick one source of truth.
+
+**Fix:** Have `NextStepBar` consume `selectNextStep()` from `src/lib/review-next-step.ts`. Delete its inline ladder.
+
+### 7. The "Analyze" button doesn't know about partial state
+
+If the user manually clicks Analyze when only 4 of 6 pages are prepared, the pipeline starts and silently runs against a partial sheet set. The Top Bar's button has no awareness of `pageAssetCount < expectedPages`.
+
+**Fix:** In `ReviewTopBar`, disable Analyze (with tooltip) when `pageAssetCount < expectedPages * 0.95`.
+
+---
+
+## Tier 3 — Polish that compounds trust
+
+### 8. Upload progress phases say "Preparing pages in your browser…" with no per-page counter
+
+The session shows a single phase string for ~60s. Users assume it's hung.
+
+**Fix:** Change `UploadProgressBar` to render `prepared / expected` from the existing `onProgress` callback (the data is already passed, just not displayed numerically).
+
+### 9. `beforeunload` guard fires forever if upload hangs
+
+If `uploading` stays true (e.g. network drop mid-rasterize), the user can't close the tab without an OS confirm dialog.
+
+**Fix:** Add a 5-min timeout that flips `uploading=false` and shows an error toast.
+
+### 10. No "I uploaded the wrong file" exit
+
+After the bad upload, there is no in-page action to delete the just-uploaded file and try again — the user has to delete the entire review.
+
+**Fix:** When `partialRasterize` or `aiCheckStatus === 'needs_user_action' && stage === 'upload'`, surface a `[Re-upload] [Delete this PDF]` pair in the recovery modal.
+
+---
+
+## Technical notes
+
+- `uploadPlanReviewFiles`'s 80% threshold is correct — don't lower it; instead make recovery automatic.
+- `reprepareInBrowser` already handles re-running rasterization against existing `plan_review_files`, so auto-recovery can call it without re-uploading bytes.
+- `selectNextStep` already has `partial_rasterize` and `upload_failed` kinds — we just need to actually route the page to act on them on first render, not after a poll.
+- Keep `StuckRecoveryBanner`'s `needs_human_review` variant — it's distinct (post-pipeline quality concern, not pre-pipeline blocker).
+
+## Files to change
+
+- `src/lib/pdf-utils.ts` — bundle worker, not CDN.
+- `src/lib/plan-review-upload.ts` — emit a single result with structured failure detail; drop redundant warnings.
+- `src/hooks/plan-review/useUploadAndPrepare.ts` — auto-trigger `handleReprepareInBrowser` on `partialRasterize`; collapse 4 toasts to 1; add 5-min upload watchdog.
+- `src/pages/PlanReviewDetail.tsx` — fix auto-render effect deps; tighten `justCreatedFresh`; mount a recovery modal.
+- `src/components/plan-review/StuckRecoveryBanner.tsx` — remove `needsPreparation`/`needs_user_action` variants.
+- `src/components/plan-review/ReviewTopBar.tsx` — disable Analyze on partial manifest.
+- `src/components/plan-review/UploadProgressBar.tsx` — show numeric `prepared / expected`.
+- `src/components/review-dashboard/NextStepBar.tsx` — consume `selectNextStep`.
+- New `src/components/plan-review/UploadFailureRecoveryDialog.tsx`.
+
+## Out of scope
+
+- Pipeline-stage logic (Tier 1 input-layer changes already shipped).
+- Letter generation / readiness gate (separate audit).
+- Mobile layout (workspace is desktop-first by design).
+
+Approve and I'll implement Tier 1 + 2 first; Tier 3 can ship in the same pass.

@@ -10,14 +10,15 @@
  *    recovery path when the edge function bails)
  *  - `handleReprepareInBrowser` + its `reprepping` flag
  *  - the `beforeunload` guard so closing the tab mid-rasterize is hard
+ *  - 5-minute upload watchdog so a hung network drop doesn't strand the user
+ *  - automatic single-shot reprepare on partial rasterize, escalating to a
+ *    recovery modal only if that retry also fails
  *
  * Extracted from `PlanReviewDetail.tsx` because the upload state machine
  * (uploading → preparing → pipeline → fail/recover) was tangled into a
- * page that also owns triage, letter, and viewer state. Keeping it here
- * makes the recovery flow easier to test and prevents the file-input
- * handler from accidentally racing the auto-render effect.
+ * page that also owns triage, letter, and viewer state.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -37,6 +38,13 @@ interface PipelineLikeRow {
   metadata?: { error_class?: string } | null;
 }
 
+export interface RecoveryState {
+  open: boolean;
+  prepared: number;
+  expected: number;
+  failedFiles: Array<{ fileName: string; failedPages: number; sampleReason: string | null }>;
+}
+
 interface Args {
   reviewId: string | undefined;
   review: PlanReviewRow | undefined | null;
@@ -47,6 +55,9 @@ interface Args {
   /** Imperative navigate for the "Pipeline did not start" toast action. */
   navigateToDashboard: (reviewId: string) => void;
 }
+
+const UPLOAD_WATCHDOG_MS = 5 * 60_000;
+const MIN_RASTERIZE_RATIO = 0.8;
 
 export function useUploadAndPrepare({
   reviewId,
@@ -61,6 +72,13 @@ export function useUploadAndPrepare({
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [reprepping, setReprepping] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [recovery, setRecovery] = useState<RecoveryState>({
+    open: false,
+    prepared: 0,
+    expected: 0,
+    failedFiles: [],
+  });
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Live page-asset count drives the "needs preparation" banner. 5s poll is
   // cheap and avoids a realtime channel for a value that only matters
@@ -109,7 +127,12 @@ export function useUploadAndPrepare({
       } else {
         toast.error(result.message);
       }
-      for (const w of result.warnings) toast.warning(w);
+      // Single consolidated warning toast (≤1) — never the historical "N+2 stack".
+      if (result.warnings.length > 0) {
+        toast.warning(`${result.warnings.length} page${result.warnings.length === 1 ? "" : "s"} still couldn't render`, {
+          description: result.warnings.slice(0, 3).join(" · "),
+        });
+      }
     } catch (e) {
       toast.dismiss(t);
       toast.error(e instanceof Error ? e.message : "Re-prepare failed");
@@ -123,8 +146,18 @@ export function useUploadAndPrepare({
       if (!files || !review) return;
       setUploading(true);
       setUploadProgress({ phase: "Starting…", prepared: 0, expected: 0 });
+
+      // Watchdog: if the upload+rasterize loop is still flagged 5 minutes
+      // later, force-clear so the user can close the tab without an OS
+      // confirm dialog. The actual rasterizer surfaces its own errors.
+      if (watchdogRef.current) clearTimeout(watchdogRef.current);
+      watchdogRef.current = setTimeout(() => {
+        setUploading(false);
+        setUploadProgress(null);
+        toast.error("Upload took too long — likely a network problem. Please retry.");
+      }, UPLOAD_WATCHDOG_MS);
+
       try {
-        // Lazy-loaded so the upload bundle stays out of the dashboard's first paint.
         const { uploadPlanReviewFiles } = await import("@/lib/plan-review-upload");
         const { count: existingPageCount } = await supabase
           .from("plan_review_page_assets")
@@ -145,15 +178,46 @@ export function useUploadAndPrepare({
           onProgress: (p) => setUploadProgress(p),
         });
 
-        // Surface every meaningful issue. Earlier code swallowed pipeline-invoke
-        // failures with console.warn, so the user thought upload had succeeded
-        // when nothing was actually running downstream.
-        for (const w of result.warnings) toast.warning(w);
+        // ── Triage the outcome into ONE primary signal ──
+        // Three terminal states: (a) success, (b) recoverable partial, (c) hard failure.
         if (result.partialRasterize) {
-          toast.error(
-            `Only ${result.pageAssetCount} of ${result.expectedPages} pages prepared. Click "Prepare pages now" to retry the gaps before analyzing.`,
-            { duration: 8000 },
+          // (b)/(c): try ONE automatic browser-side re-rasterize before bothering
+          // the user. The browser is our last resort; if it can't do it now, the
+          // recovery dialog is the right surface — not a transient toast.
+          toast.message(
+            result.hardRasterFailure
+              ? "Couldn't render pages — auto-retrying in your browser…"
+              : `Only ${result.pageAssetCount} of ${result.expectedPages} pages prepared — auto-retrying gaps…`,
           );
+          queryClient.invalidateQueries({ queryKey: ["plan-review", review.id] });
+          // Fire-and-await so we know whether to open the recovery modal.
+          let postRetryCount = result.pageAssetCount;
+          try {
+            const retry = await reprepareInBrowser(review.id);
+            if (retry.ok) postRetryCount = retry.pageAssetCount;
+          } catch {
+            /* swallow — postRetryCount stays at original value */
+          }
+          queryClient.invalidateQueries({ queryKey: ["plan-review", review.id] });
+          queryClient.invalidateQueries({
+            queryKey: ["plan-review-page-asset-count", review.id],
+          });
+          const retrySuccess =
+            result.expectedPages > 0 &&
+            postRetryCount / result.expectedPages >= MIN_RASTERIZE_RATIO;
+          if (retrySuccess) {
+            toast.success(
+              `Auto-recovery worked — ${postRetryCount} of ${result.expectedPages} pages prepared. Pipeline starting.`,
+            );
+          } else {
+            // Final failure — open the modal. ONE toast, not four.
+            setRecovery({
+              open: true,
+              prepared: postRetryCount,
+              expected: result.expectedPages,
+              failedFiles: result.failedFiles,
+            });
+          }
         } else if (!result.pipelineStarted) {
           toast.error("Pipeline did not start — click Re-run on the dashboard.", {
             action: {
@@ -163,7 +227,7 @@ export function useUploadAndPrepare({
           });
         } else {
           toast.success(
-            `Uploaded ${result.acceptedCount} file(s). Pipeline started — ${result.pageAssetCount} page(s) prepared in the browser.`,
+            `Uploaded ${result.acceptedCount} file(s). Pipeline started — ${result.pageAssetCount} page(s) prepared.`,
           );
         }
 
@@ -177,6 +241,10 @@ export function useUploadAndPrepare({
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Upload failed");
       } finally {
+        if (watchdogRef.current) {
+          clearTimeout(watchdogRef.current);
+          watchdogRef.current = null;
+        }
         setUploading(false);
         setUploadProgress(null);
       }
@@ -208,5 +276,7 @@ export function useUploadAndPrepare({
     reprepping,
     handleFileUpload,
     handleReprepareInBrowser,
+    recovery,
+    closeRecovery: () => setRecovery((r) => ({ ...r, open: false })),
   };
 }

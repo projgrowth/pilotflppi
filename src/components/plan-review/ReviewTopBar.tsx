@@ -29,6 +29,11 @@ interface ReviewTopBarProps {
    * step lists on the same screen.
    */
   pipelineProcessing?: boolean;
+  /** When true (manifest is incomplete), Analyze is disabled with a tooltip
+   *  so we don't silently run the pipeline against a partial sheet set. */
+  analyzeBlocked?: boolean;
+  /** Tooltip / hint text describing why Analyze is blocked. */
+  analyzeBlockedReason?: string | null;
   onBack: () => void;
   onRunAICheck: () => void;
   onNavigateRound: (id: string) => void;
@@ -42,24 +47,27 @@ interface ReviewTopBarProps {
 export function ReviewTopBar({
   projectName, tradeType, address, county, hvhz, contractor,
   round, reviewId, daysLeft, aiRunning, aiCompleteFlash, hasFindings,
-  rounds, pipelineProcessing, onBack, onRunAICheck, onNavigateRound, onNewRound,
+  rounds, pipelineProcessing, analyzeBlocked, analyzeBlockedReason,
+  onBack, onRunAICheck, onNavigateRound, onNewRound,
   onPipelineComplete, onOpenDashboard, onDeleteReview, onCancelPipeline,
 }: ReviewTopBarProps) {
-  // Gate Analyze on the LIVE pipelineProcessing flag, not just `aiRunning`.
-  // Previously the button stayed clickable during the `justCreatedFresh`
-  // window and during browser-side page prep, which let users double-fire
-  // a pipeline that was already starting.
+  // Gate Analyze on the LIVE pipelineProcessing flag PLUS the partial-manifest
+  // flag, not just `aiRunning`. Previously the button stayed clickable during
+  // the `justCreatedFresh` window AND while pages were still missing, which
+  // let users start a pipeline against an incomplete sheet set.
   const analyzeBusy = aiRunning || !!pipelineProcessing;
+  const analyzeDisabled = analyzeBusy || !!analyzeBlocked;
   const button = (
     <Button
       size="sm"
       onClick={onRunAICheck}
-      disabled={analyzeBusy}
+      disabled={analyzeDisabled}
+      title={analyzeBlocked ? analyzeBlockedReason ?? "Pages still preparing" : undefined}
       className={cn(
         "h-8 text-xs shrink-0 transition-all",
         aiCompleteFlash !== null
           ? "bg-success text-success-foreground"
-          : !hasFindings && !analyzeBusy
+          : !hasFindings && !analyzeDisabled
             ? "border border-primary/60 ring-1 ring-primary/20"
             : "",
       )}

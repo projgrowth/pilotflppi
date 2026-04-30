@@ -75,6 +75,7 @@ import { useFirmId } from "@/hooks/useFirmId";
 import type { ReadinessResult } from "@/lib/letter-readiness";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { deletePlanReview } from "@/lib/delete-plan-review";
+import { UploadFailureRecoveryDialog } from "@/components/plan-review/UploadFailureRecoveryDialog";
 import { cancelPipelineForReview } from "@/lib/pipeline-cancel";
 
 // Wand2/AlertTriangle/Loader2 previously used by inline prepare strip — now owned by ReviewNextStepRail.
@@ -153,6 +154,8 @@ export default function PlanReviewDetail() {
     reprepping,
     handleFileUpload,
     handleReprepareInBrowser,
+    recovery,
+    closeRecovery,
   } = useUploadAndPrepare({
     reviewId: id,
     review,
@@ -205,11 +208,19 @@ export default function PlanReviewDetail() {
   // The "just created" flag stays sticky until pipeline rows appear OR ~3min
   // pass (whichever comes first) so a slow upload doesn't drop the user back
   // into the empty drop zone.
+  // The "just created" flag stays sticky until pipeline rows appear OR
+  // ai_check_status flips to a terminal/error state OR ~60s pass — whichever
+  // comes first. Previously this was 3 minutes which kept "Analyzing your
+  // plans…" up long after upload had already errored.
   const [justCreatedAt] = useState<number | null>(() =>
     justCreatedState?.justCreated ? Date.now() : null,
   );
   const justCreatedFresh =
-    !!justCreatedAt && pipeRows.length === 0 && Date.now() - justCreatedAt < 3 * 60_000;
+    !!justCreatedAt &&
+    pipeRows.length === 0 &&
+    review?.ai_check_status !== "needs_user_action" &&
+    review?.ai_check_status !== "needs_human_review" &&
+    Date.now() - justCreatedAt < 60_000;
   const pipelineProcessing =
     aiRunning ||
     justCreatedFresh ||
@@ -245,20 +256,18 @@ export default function PlanReviewDetail() {
     [],
   );
 
-  // Auto-render pages when review loads with files. (hasAutoRendered ref is
-  // declared earlier so the upload-complete callback can reset it.)
+  // Auto-render pages when review loads with files. Keyed on review.id so we
+  // re-arm exactly once per review; the body re-checks live state to avoid
+  // racing the upload's `resetPages()`.
   useEffect(() => {
-    if (
-      review &&
-      review.file_urls?.length > 0 &&
-      pageImages.length === 0 &&
-      !renderingPages &&
-      !hasAutoRendered.current
-    ) {
-      hasAutoRendered.current = true;
-      renderDocumentPages(review);
-    }
-  }, [review]);
+    if (!review) return;
+    if (!review.file_urls?.length) return;
+    if (hasAutoRendered.current) return;
+    if (pageImages.length > 0 || renderingPages) return;
+    hasAutoRendered.current = true;
+    renderDocumentPages(review);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [review?.id]);
 
   // (handleFileUpload + beforeunload guard moved to useUploadAndPrepare.)
 
@@ -753,6 +762,18 @@ export default function PlanReviewDetail() {
         hasFindings={hasFindings}
         rounds={projectRounds}
         pipelineProcessing={pipelineProcessing}
+        analyzeBlocked={(() => {
+          const exp = typeof aiRunProgress?.expected_pages === "number" ? aiRunProgress.expected_pages : null;
+          if (!exp || exp <= 0) return false;
+          return pageAssetCount < exp * 0.95;
+        })()}
+        analyzeBlockedReason={(() => {
+          const exp = typeof aiRunProgress?.expected_pages === "number" ? aiRunProgress.expected_pages : null;
+          if (!exp || exp <= 0) return null;
+          return pageAssetCount < exp * 0.95
+            ? `Only ${pageAssetCount} of ${exp} pages prepared — finish preparation before analyzing.`
+            : null;
+        })()}
         onBack={() => navigate("/plan-review")}
         onRunAICheck={runAICheck}
         onNavigateRound={(rid) => navigate(`/plan-review/${rid}`)}
@@ -795,6 +816,30 @@ export default function PlanReviewDetail() {
         ]}
         loading={deleting}
         onConfirm={handleDeleteReview}
+      />
+
+      {/* Hard-failure recovery surface: opened only when upload + one auto-retry
+          both produce <80% page coverage. Replaces the historical four stacked
+          toasts with no recovery CTA on the workspace. */}
+      <UploadFailureRecoveryDialog
+        open={recovery.open}
+        onOpenChange={(o) => { if (!o) closeRecovery(); }}
+        prepared={recovery.prepared}
+        expected={recovery.expected}
+        failedFiles={recovery.failedFiles}
+        retrying={reprepping}
+        onRetry={async () => {
+          await handleReprepareInBrowser();
+          closeRecovery();
+        }}
+        onReupload={() => {
+          closeRecovery();
+          fileInputRef.current?.click();
+        }}
+        onDelete={() => {
+          closeRecovery();
+          setDeleteOpen(true);
+        }}
       />
 
       {/* Hide the inline strip when the canvas overlay is showing the same
