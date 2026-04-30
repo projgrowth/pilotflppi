@@ -77,6 +77,11 @@ interface DisciplineRunCtx {
   /** Disciplines absent from the submittal — passed through to the expert
    * prompt so it doesn't fabricate findings against missing trades. */
   missingDisciplines?: string[];
+  /** Vector-text snippets keyed by sheet_ref (uppercased). Provides the
+   * model with deterministic OCR — exact dimensions, code references,
+   * note text — so it doesn't have to squint at the raster. Empty when
+   * the upload predates the text-layer extraction (legacy reviews). */
+  sheetTextByRef?: Record<string, string>;
 }
 
 // Per-worker cache so we don't refetch the active prompt id once per chunk.
@@ -174,6 +179,30 @@ async function runDisciplineChecks(
   const sheetIndex = ctx.disciplineSheets
     .map((s) => `${s.sheet_ref}${s.sheet_title ? ` — ${s.sheet_title}` : ""}`)
     .join("\n");
+
+  // Vector-text grounding: feed the model exact text strings extracted
+  // from the PDF (dimensions, FBC citations, note text) so it doesn't
+  // have to OCR the raster. Cap each sheet at 2.5k chars to keep total
+  // prompt size sane on full-discipline batches.
+  const TEXT_PER_SHEET_CAP = 2500;
+  const TEXT_TOTAL_CAP = 18_000;
+  let textBudget = TEXT_TOTAL_CAP;
+  const textSnippets: string[] = [];
+  for (const s of ctx.disciplineSheets) {
+    if (textBudget <= 0) break;
+    const raw = ctx.sheetTextByRef?.[(s.sheet_ref ?? "").toUpperCase().trim()];
+    if (!raw) continue;
+    const trimmed = raw.length > TEXT_PER_SHEET_CAP
+      ? raw.slice(0, TEXT_PER_SHEET_CAP) + " …[truncated]"
+      : raw;
+    const block = `### ${s.sheet_ref}\n${trimmed}`;
+    if (block.length > textBudget) break;
+    textSnippets.push(block);
+    textBudget -= block.length;
+  }
+  const sheetTextBlock = textSnippets.length > 0
+    ? `\n\n## Vector text extracted from the attached sheets (authoritative — quote these strings verbatim in evidence[] when citing dimensions, notes, or code references)\n${textSnippets.join("\n\n")}\n`
+    : "";
 
   // -------- Reviewer Memory: inject learned correction patterns --------
   const occupancy = (ctx.dna?.occupancy_classification as string | null) ?? null;
@@ -317,6 +346,7 @@ ${sheetIndex || "(none)"}
 ` +
     `## Mandatory ${ctx.discipline} checklist
 ${checklistText}` +
+    sheetTextBlock +
     memoryBlock +
     `\n\n## Citation discipline (HARD RULE)
 Every finding MUST cite an FBC section you are confident exists in the Florida Building Code (e.g. "1010.1.1", "Table 1004.5"). If you are not sure the section exists or applies, do NOT guess — instead set requires_human_review=true with human_review_reason="Citation needs human verification". Hallucinated citations get auto-suppressed downstream and waste reviewer time.\n\n` +
@@ -713,6 +743,32 @@ export async function stageDisciplineReview(
       .maybeSingle(),
   ]);
 
+  // Vector text extracted at upload time (Tier 1 input-layer upgrade).
+  // Best-effort: legacy reviews uploaded before the text-layer change
+  // simply have no rows here, and the prompt falls back to raster-only.
+  const sheetTextByRef: Record<string, string> = {};
+  try {
+    const sheetRows = (sheets.data ?? []) as Array<{ sheet_ref: string; page_index: number | null }>;
+    const pageIndexToSheet = new Map<number, string>();
+    for (const r of sheetRows) {
+      if (typeof r.page_index === "number" && r.sheet_ref) {
+        pageIndexToSheet.set(r.page_index, r.sheet_ref.toUpperCase().trim());
+      }
+    }
+    if (pageIndexToSheet.size > 0) {
+      const { data: textRows } = await admin
+        .from("plan_review_page_text")
+        .select("page_index, full_text")
+        .eq("plan_review_id", planReviewId);
+      for (const row of (textRows ?? []) as Array<{ page_index: number; full_text: string | null }>) {
+        const ref = pageIndexToSheet.get(row.page_index);
+        if (ref && row.full_text) sheetTextByRef[ref] = row.full_text;
+      }
+    }
+  } catch (_e) {
+    // Non-fatal — proceed without text grounding.
+  }
+
   // Pull the missing-disciplines list written by the submittal-check stage
   // so each discipline expert can avoid fabricating findings against trades
   // that aren't in the submittal.
@@ -1076,6 +1132,7 @@ export async function stageDisciplineReview(
                   jurisdiction,
                   useType,
                   missingDisciplines,
+                  sheetTextByRef,
                 });
                 return { chunkIdx, cs, chunkSheets, inserted };
               }),
