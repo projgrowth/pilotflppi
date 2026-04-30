@@ -59,6 +59,8 @@ export function StuckRecoveryBanner({
   needsPreparation,
   onPrepareNow,
   preparingNow,
+  needsUserActionStage,
+  onReuploadFiles,
 }: Props) {
   const [rerunning, setRerunning] = useState(false);
 
@@ -73,12 +75,17 @@ export function StuckRecoveryBanner({
         d.verification_status !== "superseded" &&
         d.verification_status !== "overturned",
     );
-    const verified = live.filter((d) => d.verification_status === "verified" || d.verification_status === "modified").length;
-    const needsHuman = live.filter((d) => d.verification_status === "needs_human").length;
-    const unverified = live.filter(
-      (d) => (d.verification_status ?? "unverified") === "unverified" && d.citation_status !== "hallucinated",
+    // Hallucinated citations are auto-hidden from reviewers; exclude them
+    // from the denominator too so we don't show "12 of 12 unverified" when
+    // every one of those 12 is a fabrication that's already filtered out.
+    const real = live.filter((d) => d.citation_status !== "hallucinated");
+    const hallucinated = live.length - real.length;
+    const verified = real.filter((d) => d.verification_status === "verified" || d.verification_status === "modified").length;
+    const needsHuman = real.filter((d) => d.verification_status === "needs_human").length;
+    const unverified = real.filter(
+      (d) => (d.verification_status ?? "unverified") === "unverified",
     ).length;
-    return { total: live.length, verified, needsHuman, unverified };
+    return { total: real.length, verified, needsHuman, unverified, hallucinated };
   }, [liveDefs]);
 
   const handleRerunVerify = async () => {
