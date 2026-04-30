@@ -38,6 +38,7 @@ import { EditProjectDialog } from "@/components/EditProjectDialog";
 import { ScheduleInspectionDialog } from "@/components/ScheduleInspectionDialog";
 import { NewReviewDialog } from "@/components/NewReviewDialog";
 import PipelineHealthChip from "@/components/plan-review/PipelineHealthChip";
+import { routeForReview } from "@/lib/review-route";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";

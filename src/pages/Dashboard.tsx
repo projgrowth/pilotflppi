@@ -197,7 +197,11 @@ export default function Dashboard() {
                 hasActive={pipeline?.hasActive ?? false}
                 stageStartedAt={pipeline?.current?.started_at ?? null}
                 onClick={() =>
-                  navigate(reviewId ? `/plan-review/${reviewId}` : `/projects/${project.id}`)
+                  navigate(
+                    reviewId
+                      ? routeForReview(reviewId, { pipelineActive: pipeline?.hasActive ?? false })
+                      : `/projects/${project.id}`,
+                  )
                 }
               />
             ))}
