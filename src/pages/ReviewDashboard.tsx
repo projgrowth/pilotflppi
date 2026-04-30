@@ -478,6 +478,40 @@ export default function ReviewDashboard() {
       {/* Single-slot alert stack — replaces 4 stacked banners */}
       <DashboardAlertStack alerts={alerts} />
 
+      {/* In-flight hero — primary surface for users who just landed from
+          NewReviewDialog or whose pipeline is still running. Owns the live
+          stage stepper so the user sees continuous motion without ever
+          wondering whether the run is done. */}
+      {(() => {
+        const justCreatedFresh =
+          !!justCreatedAt &&
+          pipeRows.length === 0 &&
+          Date.now() - justCreatedAt < 60_000;
+        const showHero = isPipelineActive || justCreatedFresh;
+        if (!showHero) return null;
+        const prepRow = pipeRows.find((r) => r.stage === "prepare_pages");
+        const prepMeta = (prepRow as unknown as {
+          metadata?: { prepared?: number; expected?: number };
+        } | undefined)?.metadata;
+        return (
+          <AnalyzingHero
+            planReviewId={id}
+            pendingFileCount={justCreatedState?.pendingFileCount}
+            pendingPageCount={justCreatedState?.pendingPageCount}
+            preparedPages={prepMeta?.prepared}
+            expectedPages={prepMeta?.expected ?? justCreatedState?.pendingPageCount}
+            pipelineActive={isPipelineActive}
+            onComplete={() => qc.invalidateQueries({ queryKey: ["pipeline_status", id] })}
+          />
+        );
+      })()}
+
+      {/* Success CTA — once the run is complete and we have findings, hand
+          the user off to the workspace with a clear primary action. */}
+      {!isPipelineActive && defs.length > 0 && (
+        <ReviewReadyCta planReviewId={id} findingCount={defs.length} />
+      )}
+
       {/* Sticky health strip — always reachable */}
       {review?.project && (
         <div className="sticky top-0 z-20 -mx-6 bg-background/95 px-6 py-1 backdrop-blur">
