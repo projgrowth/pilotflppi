@@ -239,6 +239,48 @@ export type Database = {
         }
         Relationships: []
       }
+      callout_references: {
+        Row: {
+          callout_kind: string
+          created_at: string
+          firm_id: string | null
+          id: string
+          plan_review_id: string
+          raw_text: string
+          resolved: boolean
+          source_page: number
+          source_sheet_ref: string | null
+          target_detail: string | null
+          target_sheet_ref: string | null
+        }
+        Insert: {
+          callout_kind?: string
+          created_at?: string
+          firm_id?: string | null
+          id?: string
+          plan_review_id: string
+          raw_text: string
+          resolved?: boolean
+          source_page: number
+          source_sheet_ref?: string | null
+          target_detail?: string | null
+          target_sheet_ref?: string | null
+        }
+        Update: {
+          callout_kind?: string
+          created_at?: string
+          firm_id?: string | null
+          id?: string
+          plan_review_id?: string
+          raw_text?: string
+          resolved?: boolean
+          source_page?: number
+          source_sheet_ref?: string | null
+          target_detail?: string | null
+          target_sheet_ref?: string | null
+        }
+        Relationships: []
+      }
       certificates_of_compliance: {
         Row: {
           ahj_recipient: string | null
@@ -1920,6 +1962,48 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      plan_review_page_text: {
+        Row: {
+          char_count: number
+          created_at: string
+          firm_id: string | null
+          full_text: string
+          has_text_layer: boolean
+          id: string
+          items: Json
+          page_index: number
+          plan_review_id: string
+          sheet_ref: string | null
+          updated_at: string
+        }
+        Insert: {
+          char_count?: number
+          created_at?: string
+          firm_id?: string | null
+          full_text?: string
+          has_text_layer?: boolean
+          id?: string
+          items?: Json
+          page_index: number
+          plan_review_id: string
+          sheet_ref?: string | null
+          updated_at?: string
+        }
+        Update: {
+          char_count?: number
+          created_at?: string
+          firm_id?: string | null
+          full_text?: string
+          has_text_layer?: boolean
+          id?: string
+          items?: Json
+          page_index?: number
+          plan_review_id?: string
+          sheet_ref?: string | null
+          updated_at?: string
+        }
+        Relationships: []
       }
       plan_reviews: {
         Row: {
