@@ -774,6 +774,7 @@ export default function PlanReviewDetail() {
             ? `Only ${pageAssetCount} of ${exp} pages prepared — finish preparation before analyzing.`
             : null;
         })()}
+        onBack={() => navigate("/plan-review")}
         onRunAICheck={runAICheck}
         onNavigateRound={(rid) => navigate(`/plan-review/${rid}`)}
         onNewRound={createNewRound}
