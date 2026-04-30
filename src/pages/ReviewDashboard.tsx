@@ -489,19 +489,28 @@ export default function ReviewDashboard() {
           Date.now() - justCreatedAt < 60_000;
         const showHero = isPipelineActive || justCreatedFresh;
         if (!showHero) return null;
+        // prepare_pages writes `prepared_pages` in stage metadata; expected
+        // page count lives on plan_reviews.ai_run_progress (stamped at upload).
         const prepRow = pipeRows.find((r) => r.stage === "prepare_pages");
         const prepMeta = (prepRow as unknown as {
-          metadata?: { prepared?: number; expected?: number };
+          metadata?: { prepared_pages?: number };
         } | undefined)?.metadata;
+        // Earliest started_at across all rows = true run start.
+        const earliestStart = pipeRows
+          .map((r) => r.started_at)
+          .filter((s): s is string => !!s)
+          .sort()[0] ?? null;
         return (
           <AnalyzingHero
             planReviewId={id}
             pendingFileCount={justCreatedState?.pendingFileCount}
             pendingPageCount={justCreatedState?.pendingPageCount}
-            preparedPages={prepMeta?.prepared}
-            expectedPages={prepMeta?.expected ?? justCreatedState?.pendingPageCount}
+            preparedPages={prepMeta?.prepared_pages}
+            expectedPages={justCreatedState?.pendingPageCount}
             pipelineActive={isPipelineActive}
+            pipelineStartedAt={earliestStart}
             onComplete={() => qc.invalidateQueries({ queryKey: ["pipeline_status", id] })}
+            onCancel={cancelPipeline}
           />
         );
       })()}
