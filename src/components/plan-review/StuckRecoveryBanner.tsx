@@ -142,18 +142,51 @@ export function StuckRecoveryBanner({
 
   // ---- needs_user_action variant (not dismissible — blocks progress) ----
   if (aiCheckStatus === "needs_user_action") {
+    const stage = needsUserActionStage ?? recoveredFromStage ?? null;
+    const isUpload = stage === "upload";
+    const isPrepare = stage === "prepare_pages";
+    const title = isUpload
+      ? "Action needed: finish uploading files"
+      : "Action needed: finish preparing pages";
+    const defaultMsg = isUpload
+      ? "Upload didn't finish. Re-upload the plan PDF to continue."
+      : "Page preparation didn't finish. Click below so your browser can finish rendering the plan pages.";
     return (
       <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs">
         <AlertTriangle className="h-4 w-4 flex-shrink-0 text-warning" />
         <div className="min-w-0 flex-1">
-          <div className="font-medium text-warning-foreground">
-            Action needed: finish preparing pages
-          </div>
+          <div className="font-medium text-warning-foreground">{title}</div>
           <div className="mt-0.5 text-muted-foreground">
-            {failureReason ??
-              "Page preparation didn't finish. Re-open this project so your browser can finish rendering the plan pages."}
+            {failureReason ?? defaultMsg}
           </div>
         </div>
+        {isPrepare && onPrepareNow && (
+          <Button
+            size="sm"
+            variant="default"
+            onClick={onPrepareNow}
+            disabled={preparingNow}
+            className="h-7 shrink-0 text-2xs"
+          >
+            {preparingNow ? (
+              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            ) : (
+              <Wand2 className="mr-1 h-3 w-3" />
+            )}
+            {preparingNow ? "Preparing…" : "Prepare pages now"}
+          </Button>
+        )}
+        {isUpload && onReuploadFiles && (
+          <Button
+            size="sm"
+            variant="default"
+            onClick={onReuploadFiles}
+            className="h-7 shrink-0 text-2xs"
+          >
+            <Wand2 className="mr-1 h-3 w-3" />
+            Re-upload files
+          </Button>
+        )}
       </div>
     );
   }
