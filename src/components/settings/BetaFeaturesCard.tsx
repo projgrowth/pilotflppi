@@ -31,7 +31,7 @@ const FLAGS: FlagDef[] = [
 
 export default function BetaFeaturesCard() {
   const { firmSettings } = useFirmSettings();
-  const { isAdmin } = useIsAdmin();
+  const isAdmin = useIsAdmin();
   const [pending, setPending] = useState<string | null>(null);
 
   if (!firmSettings) return null;

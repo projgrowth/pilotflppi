@@ -24,7 +24,7 @@ interface Props {
 }
 
 export default function ExternalDataPanel({ planReviewId, address }: Props) {
-  const { isAdmin } = useIsAdmin();
+  const isAdmin = useIsAdmin();
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [geoLoading, setGeoLoading] = useState(false);
   const [geoErr, setGeoErr] = useState<string | null>(null);
