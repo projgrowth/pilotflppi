@@ -407,9 +407,21 @@ export async function rasterizeAndUploadPagesResilient(
 
       const chunkLen = Math.min(batchSize, uf.pageCount - chunkStart);
       let pageJpegs: Array<{ pageIndex: number; blob: Blob }> = [];
+      // Map of file-local pageIndex → extracted text. Populated synchronously
+      // by `renderPDFPagesToJpegs` via its `onText` callback so we can replay
+      // it after the JPEG upload settles (and only for pages that uploaded
+      // cleanly — there's no point persisting text for a missing image).
+      const textByLocalIndex = new Map<number, PageTextExtraction>();
       try {
         pageJpegs = await Promise.race<Array<{ pageIndex: number; blob: Blob }>>([
-          renderPDFPagesToJpegs(uf.file, chunkLen, dpi, quality, { startPage: chunkStart }),
+          renderPDFPagesToJpegs(uf.file, chunkLen, dpi, quality, {
+            startPage: chunkStart,
+            onText: opts.onPageText
+              ? (extraction) => {
+                  textByLocalIndex.set(extraction.pageIndex, extraction);
+                }
+              : undefined,
+          }),
           new Promise<Array<{ pageIndex: number; blob: Blob }>>((_, reject) =>
             setTimeout(() => reject(new Error(`chunk render timed out after ${chunkTimeoutMs}ms`)), chunkTimeoutMs),
           ),
@@ -460,6 +472,20 @@ export async function rasterizeAndUploadPagesResilient(
           succeeded.push(asset);
           if (opts.onPageReady) {
             try { await opts.onPageReady(asset); } catch { /* incremental persist is best-effort */ }
+          }
+          // Persist the page text alongside the asset using the same global
+          // page_index, so downstream stages can join 1:1.
+          if (opts.onPageText) {
+            const extraction = textByLocalIndex.get(page.pageIndex);
+            if (extraction) {
+              try {
+                await opts.onPageText({
+                  ...extraction,
+                  globalPageIndex: nextGlobalPageIndex,
+                  sourceFilePath: uf.storagePath,
+                });
+              } catch { /* best-effort; image upload already succeeded */ }
+            }
           }
         } else {
           failures.push({
