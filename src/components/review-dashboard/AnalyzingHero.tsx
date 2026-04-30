@@ -6,22 +6,36 @@
  * Wraps the existing PipelineProgressStepper so the dashboard has ONE
  * authoritative live view of the run instead of relying on the workspace's
  * canvas overlay.
+ *
+ * Design rules respected:
+ *  - No animate-spin inside the persistent surface (memory: "static accent
+ *    borders for urgent notifications, never animations"). A static dot +
+ *    the stage stepper's own progress communicate liveness.
+ *  - Elapsed/ETA anchored on the earliest pipeline_status.started_at so
+ *    navigating back doesn't reset the clock to 0:00.
  */
 import { useEffect, useState } from "react";
-import { Loader2, ShieldCheck, FileText } from "lucide-react";
+import { ShieldCheck, FileText, XCircle } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { PipelineProgressStepper } from "@/components/plan-review/PipelineProgressStepper";
 
 interface Props {
   planReviewId: string;
-  /** Summary text under the headline. */
   pendingFileCount?: number;
   pendingPageCount?: number;
   preparedPages?: number;
   expectedPages?: number;
   /** True when the pipeline has at least one stage row writing progress. */
   pipelineActive: boolean;
+  /**
+   * Earliest pipeline_status.started_at across all rows for this run.
+   * When provided we anchor the elapsed/remaining clock here so that
+   * remounting the hero (e.g. via tab change) doesn't restart the timer.
+   * When null, we fall back to the time the component first mounted.
+   */
+  pipelineStartedAt?: string | null;
   onComplete?: () => void;
+  onCancel?: () => void;
 }
 
 const ANALYZE_TARGET_MS = 3 * 60_000;
@@ -33,16 +47,25 @@ export function AnalyzingHero({
   preparedPages,
   expectedPages,
   pipelineActive,
+  pipelineStartedAt,
   onComplete,
+  onCancel,
 }: Props) {
-  const [startedAt] = useState<number>(() => Date.now());
+  // Anchor on the DB timestamp when available so a back-nav doesn't reset
+  // the elapsed counter. Mount-time is only the fallback for the brief
+  // "just-created" window before any stage row exists.
+  const [mountAnchor] = useState<number>(() => Date.now());
+  const startedAt = pipelineStartedAt
+    ? new Date(pipelineStartedAt).getTime()
+    : mountAnchor;
+
   const [, setTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, []);
 
-  const elapsed = Date.now() - startedAt;
+  const elapsed = Math.max(0, Date.now() - startedAt);
   const remaining = Math.max(0, ANALYZE_TARGET_MS - elapsed);
   const fmt = (ms: number) => {
     const s = Math.round(ms / 1000);
@@ -66,9 +89,14 @@ export function AnalyzingHero({
   })();
 
   return (
-    <div className="rounded-xl border border-accent/30 bg-accent/5 p-5 shadow-sm">
+    <div className="rounded-xl border border-accent/40 bg-accent/5 p-5 shadow-sm">
       <div className="flex items-start gap-3">
-        <Loader2 className="h-5 w-5 shrink-0 animate-spin text-accent" />
+        {/* Static accent dot — communicates "live" without the anxiety
+            of a 3-minute spinner. */}
+        <span
+          className="mt-1 inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-accent"
+          aria-hidden
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-3">
             <h2 className="text-sm font-semibold text-foreground">
@@ -108,10 +136,22 @@ export function AnalyzingHero({
         </div>
       )}
 
-      <p className="mt-4 flex items-center gap-1.5 rounded-md border border-border/60 bg-card/60 px-2 py-1.5 text-2xs text-muted-foreground">
-        <ShieldCheck className="h-3 w-3 text-accent" />
-        Findings will appear below as soon as they're ready — no need to refresh.
-      </p>
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <p className="flex items-center gap-1.5 rounded-md border border-border/60 bg-card/60 px-2 py-1.5 text-2xs text-muted-foreground">
+          <ShieldCheck className="h-3 w-3 text-accent" />
+          Findings will appear below as soon as they're ready — no need to refresh.
+        </p>
+        {pipelineActive && onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex items-center gap-1 text-2xs font-medium text-muted-foreground transition-colors hover:text-destructive"
+          >
+            <XCircle className="h-3 w-3" />
+            Cancel run
+          </button>
+        )}
+      </div>
     </div>
   );
 }
