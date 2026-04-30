@@ -1,44 +1,74 @@
-# Fix: "Site Data panel" toggle doesn't reveal the tab
 
-## What's happening
+# Pre-publish reliability fixes
 
-When you flip the **Site Data panel** switch in **Settings → Firm Info → Beta features**, the row saves successfully (you saw the "external_data_v1 enabled" toast), but the **Site Data** entry never appears in the **More** dropdown of an open plan review. A full page reload would make it appear.
+After auditing recent runs, the database tells a sharp story: **almost every recent review ends in `needs_human_review` with 100% unverified findings** — including ones from today (8/8, 7/7, 18/18, 12/12 unverified). The letter-readiness gate then blocks delivery, so the pipeline effectively never finishes for the user. There are also a few smaller potholes worth filling before publishing.
 
-## Root cause
+## What's actually breaking
 
-`BetaFeaturesCard` writes the new flag value directly with `supabase.from("firm_settings").update(...)` instead of going through the `useFirmSettings` mutation. After saving, it dispatches a `window` event (`firm-settings:refetch`) — but **no code is listening for that event**, so the React Query cache (`["firm-settings", user.id]`) is never invalidated.
+### 1. Verifier never runs in `core` mode (CRITICAL — root cause of "needs_human_review" epidemic)
 
-Result: `useFeatureFlag("external_data_v1")` keeps reading the stale cached row where `feature_flags` is still `{}` (or missing), so `RightPanelTabs` never adds the Site Data item.
+`CORE_STAGES` in `supabase/functions/run-review-pipeline/_shared/types.ts` is:
 
-A second, smaller issue: the `FirmSettings` TypeScript interface in `useFirmSettings.ts` does not declare `feature_flags`, so any consumer that relies on the typed shape sees it as undefined even after the cache updates.
+```
+upload → prepare_pages → sheet_map → submittal_check → dna_extract →
+discipline_review → critic → dedupe → ground_citations → challenger → complete
+```
 
-## The fix
+**`verify` is only in `DEEP_STAGES`.** Default runs are `core`, so the verifier is skipped, every finding stays `verification_status='unverified'`, and the readiness gate produces `"Verifier stalled — N of N findings never reached a verdict"`. Result: even a clean run looks broken.
 
-Three small, surgical changes — no schema or pipeline impact.
+Fix: insert `verify` into CORE_STAGES between `ground_citations` and `challenger` (challenger is the adversarial pass and benefits from verifier verdicts being present). Remove it from DEEP_STAGES so it isn't double-run on `mode=full`.
 
-1. **`src/components/settings/BetaFeaturesCard.tsx`**
-   - Use `useQueryClient().invalidateQueries({ queryKey: ["firm-settings"] })` directly after a successful update, instead of dispatching the unused `firm-settings:refetch` window event.
-   - This forces the cached firm settings (and therefore `useFeatureFlag`) to refresh immediately, so the Site Data tab appears the moment the switch flips on.
+### 2. `submittal_check` is missing from the stuck-recovery allowlist
 
-2. **`src/hooks/useFirmSettings.ts`**
-   - Add `feature_flags?: Record<string, boolean> | null` to the `FirmSettings` interface so flag readers are properly typed (no more `as { feature_flags?: ... }` casts).
-   - No runtime change — `select("*")` already returns the column.
+`pipeline_error_log` shows: `Stuck at unknown stage 'submittal_check' for 19 min — cannot auto-recover.` The reconciler's `SERVER_RECOVERABLE_STAGES` set in `supabase/functions/reconcile-stuck-reviews/index.ts` lists every stage **except** `submittal_check` and `challenger`. Both of these run server-side and should be retryable.
 
-3. **`src/hooks/useFeatureFlag.ts` & `src/components/settings/BetaFeaturesCard.tsx`**
-   - Drop the now-unnecessary `as { feature_flags?: ... }` casts and read `firmSettings.feature_flags` directly via the typed field.
+Fix: add `"submittal_check"` and `"challenger"` to `SERVER_RECOVERABLE_STAGES`.
 
-## Verification steps after the fix
+### 3. Reviews stuck in browser stages can never recover on their own
 
-1. Open **Settings → Firm Info**, flip **Site Data panel** off, save. Confirm the toggle persists (refresh — should remain off).
-2. Open any plan review → **More** dropdown → confirm Site Data is **not** listed.
-3. Go back to Settings, flip the toggle **on**. No reload.
-4. Return to the plan review → click **More** → **Site Data** should now appear and open the panel.
-5. Flip the toggle **off** again → Site Data disappears from More within a second (cache invalidation refetch).
+For `upload` and `prepare_pages` the reconciler flips status to `needs_user_action` and waits for the user to re-open the project. But the `StuckRecoveryBanner` only shows the "Prepare pages now" CTA when `needsPreparation` is true based on missing page assets — it does not key off `ai_check_status='needs_user_action'`. So the user opens the project, sees a vague warning banner with no button, and bounces.
 
-## Out of scope
+Fix: when `ai_check_status='needs_user_action'` AND the stage was `prepare_pages`, surface the existing "Prepare pages now" button (it already calls `useUploadAndPrepare`'s rasterizer). When the stage was `upload`, surface a "Re-upload files" CTA that scrolls to / opens the upload dialog.
 
-- No database changes (flag column already exists).
-- No edge function changes.
-- No changes to the FEMA/ASCE fetchers or `ExternalDataPanel` itself.
+### 4. "Re-run verifier" button does nothing useful in core-mode runs
 
-Approve and I'll apply the three edits.
+Today the banner offers `startPipeline(planReviewId, "core", "verify")`, but `verify` isn't in `CORE_STAGES`. After fix #1 it will be, so the button starts working — no code change beyond #1.
+
+## Smaller hygiene items worth shipping at the same time
+
+### 5. Hallucinated-citation auto-hide is missing on some runs
+
+Two recent reviews show `has_hallucinated_citations: true` with `with_evidence_crop_pct: 0`. These are findings the AI invented. They currently still count toward "12 of 12 unverified" in the banner. The `liveBreakdown` in `StuckRecoveryBanner.tsx` already filters by `citation_status !== 'hallucinated'` for the unverified count, but the **denominator** (`total`) still includes them. Quick fix: also exclude hallucinated from `total` and add a separate "N hidden as hallucinated" line.
+
+### 6. `cost_metric` errors are noisy (≈300 in 14 days) but cosmetic
+
+These come from `_shared/cost.ts` failing to record per-stage cost. They don't affect output but they crowd `pipeline_error_log` and make real failures harder to spot. Wrap the cost insert in a try/catch and downgrade to a single `console.warn` — no DB write — when it fails.
+
+### 7. ExternalDataPanel error UX
+
+`fetch-fema-flood` and `fetch-asce-hazard` both return JSON errors (rate limit, no coverage, geocode miss) but the panel currently shows a generic spinner→empty state. Add a small inline error chip with a retry button so reviewers know whether to trust "no flood zone" vs. "we couldn't reach FEMA".
+
+## Out of scope (already healthy)
+
+- DNA extract, sheet_map, discipline_review chunking (resumes correctly via heartbeat path).
+- Auto-recovery success banner.
+- Beta feature flag plumbing (just shipped).
+
+## Files to change
+
+- `supabase/functions/run-review-pipeline/_shared/types.ts` — move `verify` into CORE_STAGES, drop from DEEP_STAGES.
+- `supabase/functions/reconcile-stuck-reviews/index.ts` — add `submittal_check`, `challenger` to recoverable set.
+- `src/components/plan-review/StuckRecoveryBanner.tsx` — wire `needs_user_action` to existing `Prepare pages now` / new `Re-upload files` CTAs; exclude hallucinated from `total`.
+- `src/pages/PlanReviewDetail.tsx` — pass `recoveredFromStage` and an `onReupload` handler to the banner.
+- `supabase/functions/run-review-pipeline/_shared/cost.ts` — silence cost-metric insert failures.
+- `src/components/plan-review/ExternalDataPanel.tsx` — inline error + retry.
+
+## Verification after the fix
+
+1. Trigger a fresh review on a clean PDF → confirm `verify` stage appears in `review_pipeline_status` and `verification_status` flips to `verified`/`modified`/`needs_human` for each finding (no more 100% unverified).
+2. Confirm `ai_check_status` lands on `complete` (not `needs_human_review`) when verifier verdicts pass thresholds.
+3. Force a stuck `submittal_check` (cancel mid-run) → wait 15 min → reconciler retries it instead of failing.
+4. Open a review with `ai_check_status='needs_user_action'` and stage `prepare_pages` → "Prepare pages now" button appears and runs the in-browser rasterizer.
+5. Check `pipeline_error_log` 24 h later — `cost_metric` rows should be near zero.
+
+Approve and I'll apply these in one pass.
