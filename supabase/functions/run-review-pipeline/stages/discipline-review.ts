@@ -743,6 +743,32 @@ export async function stageDisciplineReview(
       .maybeSingle(),
   ]);
 
+  // Vector text extracted at upload time (Tier 1 input-layer upgrade).
+  // Best-effort: legacy reviews uploaded before the text-layer change
+  // simply have no rows here, and the prompt falls back to raster-only.
+  const sheetTextByRef: Record<string, string> = {};
+  try {
+    const sheetRows = (sheets.data ?? []) as Array<{ sheet_ref: string; page_index: number | null }>;
+    const pageIndexToSheet = new Map<number, string>();
+    for (const r of sheetRows) {
+      if (typeof r.page_index === "number" && r.sheet_ref) {
+        pageIndexToSheet.set(r.page_index, r.sheet_ref.toUpperCase().trim());
+      }
+    }
+    if (pageIndexToSheet.size > 0) {
+      const { data: textRows } = await admin
+        .from("plan_review_page_text")
+        .select("page_index, full_text")
+        .eq("plan_review_id", planReviewId);
+      for (const row of (textRows ?? []) as Array<{ page_index: number; full_text: string | null }>) {
+        const ref = pageIndexToSheet.get(row.page_index);
+        if (ref && row.full_text) sheetTextByRef[ref] = row.full_text;
+      }
+    }
+  } catch (_e) {
+    // Non-fatal — proceed without text grounding.
+  }
+
   // Pull the missing-disciplines list written by the submittal-check stage
   // so each discipline expert can avoid fabricating findings against trades
   // that aren't in the submittal.
