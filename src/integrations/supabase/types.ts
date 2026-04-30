@@ -907,6 +907,45 @@ export type Database = {
         }
         Relationships: []
       }
+      external_data_snapshots: {
+        Row: {
+          created_at: string
+          expires_at: string | null
+          fetched_at: string
+          fetched_by: string | null
+          firm_id: string | null
+          id: string
+          payload: Json
+          plan_review_id: string
+          source: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at?: string | null
+          fetched_at?: string
+          fetched_by?: string | null
+          firm_id?: string | null
+          id?: string
+          payload?: Json
+          plan_review_id: string
+          source: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string | null
+          fetched_at?: string
+          fetched_by?: string | null
+          firm_id?: string | null
+          id?: string
+          payload?: Json
+          plan_review_id?: string
+          source?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       fbc_code_sections: {
         Row: {
           code: string
@@ -1089,6 +1128,7 @@ export type Database = {
           eo_coverage_amount: number | null
           eo_expires_on: string | null
           eo_policy_number: string | null
+          feature_flags: Json
           firm_id: string | null
           firm_name: string
           id: string
@@ -1111,6 +1151,7 @@ export type Database = {
           eo_coverage_amount?: number | null
           eo_expires_on?: string | null
           eo_policy_number?: string | null
+          feature_flags?: Json
           firm_id?: string | null
           firm_name?: string
           id?: string
@@ -1133,6 +1174,7 @@ export type Database = {
           eo_coverage_amount?: number | null
           eo_expires_on?: string | null
           eo_policy_number?: string | null
+          feature_flags?: Json
           firm_id?: string | null
           firm_name?: string
           id?: string

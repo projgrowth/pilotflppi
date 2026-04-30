@@ -18,6 +18,7 @@ import {
   setPipelineNotifyEnabled,
 } from "@/hooks/usePipelineCompleteNotifications";
 import { FeeScheduleSettings } from "@/components/FeeScheduleSettings";
+import BetaFeaturesCard from "@/components/settings/BetaFeaturesCard";
 import { CanonicalCodeLibrary } from "@/components/CanonicalCodeLibrary";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { toast } from "sonner";
@@ -401,8 +402,11 @@ export default function SettingsPage() {
  </Button>
  </>
  )}
- </CardContent>
+  </CardContent>
  </Card>
+ <div className="mt-4">
+  <BetaFeaturesCard />
+ </div>
  </TabsContent>
 
  <TabsContent value="jurisdictions">
