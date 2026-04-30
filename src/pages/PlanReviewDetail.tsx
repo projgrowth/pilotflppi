@@ -999,15 +999,6 @@ export default function PlanReviewDetail() {
                 renderProgress={renderProgress}
                 uploading={uploading}
                 uploadSuccess={uploadSuccess}
-                pipelineProcessing={pipelineProcessing}
-                processingPhase={processingPhase}
-                preparedPages={uploadProgress?.prepared ?? pageAssetCount}
-                expectedPages={uploadProgress?.expected ?? justCreatedState?.pendingPageCount ?? 0}
-                pendingFileCount={justCreatedState?.pendingFileCount ?? fileUrls.length}
-                projectName={review.project?.name}
-                pendingFileNames={fileUrls.map((u) => decodeURIComponent(u.split("/").pop() || ""))}
-                onPipelineComplete={handlePipelineComplete}
-                onOpenDashboard={openDashboard}
                 planReviewId={review.id}
                 findings={findings}
                 activeFindingIndex={activeFindingIndex}
@@ -1090,15 +1081,6 @@ export default function PlanReviewDetail() {
                 renderProgress={renderProgress}
                 uploading={uploading}
                 uploadSuccess={uploadSuccess}
-                pipelineProcessing={pipelineProcessing}
-                processingPhase={processingPhase}
-                preparedPages={uploadProgress?.prepared ?? pageAssetCount}
-                expectedPages={uploadProgress?.expected ?? justCreatedState?.pendingPageCount ?? 0}
-                pendingFileCount={justCreatedState?.pendingFileCount ?? fileUrls.length}
-                projectName={review.project?.name}
-                pendingFileNames={fileUrls.map((u) => decodeURIComponent(u.split("/").pop() || ""))}
-                onPipelineComplete={handlePipelineComplete}
-                onOpenDashboard={openDashboard}
                 findings={findings}
                 activeFindingIndex={activeFindingIndex}
                 onAnnotationClick={handleAnnotationClick}
