@@ -842,6 +842,14 @@ export default function PlanReviewDetail() {
         }}
       />
 
+      {/* Slim banner: when the user lands on the workspace mid-run with no
+          findings yet, point them to the run dashboard instead of leaving
+          them staring at "Run AI Check" / empty findings (which reads as
+          "you're done"). The dashboard owns the live stepper + ETA. */}
+      {pipelineProcessing && !hasFindings && (
+        <StillAnalyzingBanner planReviewId={review.id} />
+      )}
+
       {/* Hide the inline strip when the canvas overlay is showing the same
           counters — two upload bars on one screen reads as a bug. */}
       {!pipelineProcessing && (
