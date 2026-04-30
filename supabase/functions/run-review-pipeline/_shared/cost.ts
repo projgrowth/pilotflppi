@@ -52,11 +52,17 @@ export async function withCostCtx<T>(
   }
 }
 
+// Module-level guard so we log at most ONE warning per function instance
+// when cost telemetry inserts fail. Otherwise a misconfigured table/RLS
+// generates hundreds of pipeline_error_log rows that drown out real failures.
+let costMetricInsertFailed = false;
+
 export async function recordCostMetric(metadata: Record<string, unknown>): Promise<void> {
   const ctx = CURRENT_COST_CTX;
   if (!ctx.admin || !ctx.planReviewId) return;
+  if (costMetricInsertFailed) return; // already broken; don't keep retrying
   try {
-    await ctx.admin.from("pipeline_error_log").insert({
+    const { error } = await ctx.admin.from("pipeline_error_log").insert({
       plan_review_id: ctx.planReviewId,
       firm_id: ctx.firmId,
       stage: ctx.stage ?? "unknown",
@@ -72,8 +78,13 @@ export async function recordCostMetric(metadata: Record<string, unknown>): Promi
         ...metadata,
       },
     });
+    if (error) {
+      costMetricInsertFailed = true;
+      console.warn("[cost_metric] insert disabled for this instance:", error.message ?? error);
+    }
   } catch (err) {
     // Best-effort — never let telemetry mask a real error.
-    console.error("[cost_metric] insert failed:", err);
+    costMetricInsertFailed = true;
+    console.warn("[cost_metric] insert disabled for this instance:", err instanceof Error ? err.message : String(err));
   }
 }
