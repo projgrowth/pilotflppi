@@ -1,7 +1,10 @@
 import * as pdfjsLib from "pdfjs-dist";
+// Bundle the worker via Vite (`?url`) so it ships with the app instead of
+// loading from a CDN. Buyers on county VPNs / hospital wifi routinely block
+// cdnjs, which previously caused every page to silently rasterize to 0.
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-// Use the CDN worker for pdfjs-dist v4
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 export interface PDFPageImage {
   pageIndex: number;
