@@ -77,6 +77,7 @@ import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { deletePlanReview } from "@/lib/delete-plan-review";
 import { UploadFailureRecoveryDialog } from "@/components/plan-review/UploadFailureRecoveryDialog";
 import { cancelPipelineForReview } from "@/lib/pipeline-cancel";
+import { StillAnalyzingBanner } from "@/components/plan-review/StillAnalyzingBanner";
 
 // Wand2/AlertTriangle/Loader2 previously used by inline prepare strip — now owned by ReviewNextStepRail.
 
@@ -841,6 +842,14 @@ export default function PlanReviewDetail() {
           setDeleteOpen(true);
         }}
       />
+
+      {/* Slim banner: when the user lands on the workspace mid-run with no
+          findings yet, point them to the run dashboard instead of leaving
+          them staring at "Run AI Check" / empty findings (which reads as
+          "you're done"). The dashboard owns the live stepper + ETA. */}
+      {pipelineProcessing && !hasFindings && (
+        <StillAnalyzingBanner planReviewId={review.id} />
+      )}
 
       {/* Hide the inline strip when the canvas overlay is showing the same
           counters — two upload bars on one screen reads as a bug. */}

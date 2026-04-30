@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useLocation, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -54,6 +54,8 @@ import { usePipelineErrorStream } from "@/hooks/usePipelineErrors";
 import { reprepareInBrowser } from "@/lib/reprepare-in-browser";
 import type { ChipFilter } from "@/hooks/useFilteredDeficiencies";
 import { getCountyRequirements } from "@/lib/county-requirements/utils";
+import { AnalyzingHero } from "@/components/review-dashboard/AnalyzingHero";
+import { ReviewReadyCta } from "@/components/review-dashboard/ReviewReadyCta";
 
 interface ReviewWithProject {
   id: string;
@@ -76,6 +78,13 @@ interface ReviewWithProject {
 
 export default function ReviewDashboard() {
   const { id } = useParams<{ id: string }>();
+  const location = useLocation();
+  const justCreatedState = (location.state ?? null) as
+    | { justCreated?: boolean; pendingFileCount?: number; pendingPageCount?: number }
+    | null;
+  const [justCreatedAt] = useState<number | null>(() =>
+    justCreatedState?.justCreated ? Date.now() : null,
+  );
   const qc = useQueryClient();
   const [running, setRunning] = useState(false);
   const [runningDeep, setRunningDeep] = useState(false);
@@ -403,7 +412,7 @@ export default function ReviewDashboard() {
       {/* Header — primary action right, secondary in a Re-run dropdown */}
       <div className="flex items-center justify-between gap-3">
         <PageHeader
-          title="Review dashboard"
+          title="Plan review run"
           subtitle={
             review?.project
               ? `${review.project.name} · Round ${review.round}`
@@ -456,7 +465,7 @@ export default function ReviewDashboard() {
           </DropdownMenu>
           <Button asChild size="sm" variant="outline">
             <Link to={`/plan-review/${id}`}>
-              <ArrowLeft className="mr-1 h-4 w-4" /> Workspace
+              <ArrowLeft className="mr-1 h-4 w-4" /> View on plan
             </Link>
           </Button>
           <Button size="sm" onClick={handleGenerateReport} disabled={!review?.project}>
@@ -468,6 +477,40 @@ export default function ReviewDashboard() {
 
       {/* Single-slot alert stack — replaces 4 stacked banners */}
       <DashboardAlertStack alerts={alerts} />
+
+      {/* In-flight hero — primary surface for users who just landed from
+          NewReviewDialog or whose pipeline is still running. Owns the live
+          stage stepper so the user sees continuous motion without ever
+          wondering whether the run is done. */}
+      {(() => {
+        const justCreatedFresh =
+          !!justCreatedAt &&
+          pipeRows.length === 0 &&
+          Date.now() - justCreatedAt < 60_000;
+        const showHero = isPipelineActive || justCreatedFresh;
+        if (!showHero) return null;
+        const prepRow = pipeRows.find((r) => r.stage === "prepare_pages");
+        const prepMeta = (prepRow as unknown as {
+          metadata?: { prepared?: number; expected?: number };
+        } | undefined)?.metadata;
+        return (
+          <AnalyzingHero
+            planReviewId={id}
+            pendingFileCount={justCreatedState?.pendingFileCount}
+            pendingPageCount={justCreatedState?.pendingPageCount}
+            preparedPages={prepMeta?.prepared}
+            expectedPages={prepMeta?.expected ?? justCreatedState?.pendingPageCount}
+            pipelineActive={isPipelineActive}
+            onComplete={() => qc.invalidateQueries({ queryKey: ["pipeline_status", id] })}
+          />
+        );
+      })()}
+
+      {/* Success CTA — once the run is complete and we have findings, hand
+          the user off to the workspace with a clear primary action. */}
+      {!isPipelineActive && defs.length > 0 && (
+        <ReviewReadyCta planReviewId={id} findingCount={defs.length} />
+      )}
 
       {/* Sticky health strip — always reachable */}
       {review?.project && (

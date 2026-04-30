@@ -11,7 +11,7 @@
  */
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useAllActivePipelines } from "@/hooks/useAllActivePipelines";
 
 const PREF_KEY = "pipeline-complete-notify";
@@ -34,6 +34,7 @@ export function setPipelineNotifyEnabled(on: boolean) {
 export function usePipelineCompleteNotifications() {
   const { data: activities } = useAllActivePipelines();
   const navigate = useNavigate();
+  const location = useLocation();
   const lastStatusRef = useRef<Map<string, string>>(new Map());
   const initializedRef = useRef(false);
 
@@ -52,6 +53,9 @@ export function usePipelineCompleteNotifications() {
       if (prev === status) continue;
       if (status !== "complete") continue;
       if (!enabled) continue;
+      // Suppress toast if the user is already viewing this review's dashboard
+      // — the in-page ReviewReadyCta replaces it.
+      if (location.pathname === `/plan-review/${activity.planReviewId}/dashboard`) continue;
 
       const projectName = activity.meta?.project?.name ?? "A plan review";
       const round = activity.meta?.round ?? null;
@@ -64,7 +68,7 @@ export function usePipelineCompleteNotifications() {
         description: body,
         action: {
           label: "Open",
-          onClick: () => navigate(`/plan-review/${activity.planReviewId}`),
+          onClick: () => navigate(`/plan-review/${activity.planReviewId}/dashboard`),
         },
       });
 
@@ -78,7 +82,7 @@ export function usePipelineCompleteNotifications() {
           const n = new Notification(title, { body, tag: activity.planReviewId });
           n.onclick = () => {
             window.focus();
-            navigate(`/plan-review/${activity.planReviewId}`);
+            navigate(`/plan-review/${activity.planReviewId}/dashboard`);
             n.close();
           };
         }
