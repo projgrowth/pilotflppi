@@ -48,7 +48,11 @@ export interface UploadPlanReviewResult {
   pipelineStarted: boolean;
   /** True when rasterization succeeded for <80% of expected pages. */
   partialRasterize: boolean;
+  /** True when zero pages rasterized — almost always a worker/network/PDF problem. */
+  hardRasterFailure: boolean;
   expectedPages: number;
+  /** Aggregated per-file failure summary for the recovery dialog. */
+  failedFiles: Array<{ fileName: string; failedPages: number; sampleReason: string | null }>;
   warnings: string[];
 }
 
