@@ -69,7 +69,7 @@ export function useExternalData<S extends ExternalSource>({
   });
 
   const refresh = useMutation({
-    mutationFn: async (force = false) => {
+    mutationFn: async (force: boolean) => {
       if (!planReviewId) throw new Error("Missing plan review");
       if (typeof lat !== "number" || typeof lng !== "number") {
         throw new Error("Address has no coordinates yet");
