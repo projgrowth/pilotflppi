@@ -64,7 +64,7 @@ export function usePipelineCompleteNotifications() {
         description: body,
         action: {
           label: "Open",
-          onClick: () => navigate(`/plan-review/${activity.planReviewId}`),
+          onClick: () => navigate(`/plan-review/${activity.planReviewId}/dashboard`),
         },
       });
 
@@ -78,7 +78,7 @@ export function usePipelineCompleteNotifications() {
           const n = new Notification(title, { body, tag: activity.planReviewId });
           n.onclick = () => {
             window.focus();
-            navigate(`/plan-review/${activity.planReviewId}`);
+            navigate(`/plan-review/${activity.planReviewId}/dashboard`);
             n.close();
           };
         }
