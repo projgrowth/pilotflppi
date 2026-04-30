@@ -161,12 +161,38 @@ export async function renderPDFPagesToImages(
   return images;
 }
 
+/**
+ * Lightweight per-page text item shape for `plan_review_page_text.items`.
+ * Coordinates are in the PDF's native user-space (origin = bottom-left,
+ * units = points). Width is from pdf.js; height is approximated from the
+ * transform matrix scale.
+ */
+export interface PageTextItem {
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface PageTextExtraction {
+  pageIndex: number;
+  items: PageTextItem[];
+  fullText: string;
+  hasTextLayer: boolean;
+}
+
 async function renderPDFPagesToJpegs(
   file: File,
   maxPages: number = Infinity,
   dpi = 110,
   quality = 0.75,
-  opts: { startPage?: number; onPage?: (pageIndex: number, total: number) => void } = {},
+  opts: {
+    startPage?: number;
+    onPage?: (pageIndex: number, total: number) => void;
+    /** Called once per page with the extracted vector text layer (best-effort). */
+    onText?: (extraction: PageTextExtraction) => void;
+  } = {},
 ): Promise<Array<{ pageIndex: number; blob: Blob }>> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -190,6 +216,46 @@ async function renderPDFPagesToJpegs(
         else reject(new Error(`Failed to encode page ${i + 1} as JPEG`));
       }, "image/jpeg", quality);
     });
+
+    // Best-effort vector text extraction. Wrapped so a malformed text stream
+    // never poisons the rasterize path — image is the contract; text is bonus.
+    if (opts.onText) {
+      try {
+        const content = await page.getTextContent();
+        const items: PageTextItem[] = [];
+        const parts: string[] = [];
+        for (const raw of content.items as Array<{
+          str?: string;
+          transform?: number[];
+          width?: number;
+          height?: number;
+        }>) {
+          const str = (raw.str ?? "").trim();
+          if (!str) continue;
+          const t = raw.transform ?? [1, 0, 0, 1, 0, 0];
+          const x = Number(t[4] ?? 0);
+          const y = Number(t[5] ?? 0);
+          const scaleY = Math.hypot(Number(t[2] ?? 0), Number(t[3] ?? 1)) || 1;
+          items.push({
+            text: str,
+            x,
+            y,
+            w: Number(raw.width ?? 0),
+            h: Number(raw.height ?? scaleY),
+          });
+          parts.push(str);
+        }
+        opts.onText({
+          pageIndex: i,
+          items,
+          fullText: parts.join(" "),
+          hasTextLayer: items.length > 0,
+        });
+      } catch {
+        // Scanned PDFs with no text layer raise here — record empty extraction.
+        opts.onText({ pageIndex: i, items: [], fullText: "", hasTextLayer: false });
+      }
+    }
 
     pages.push({ pageIndex: i, blob });
     // Release canvas memory before the next page.
