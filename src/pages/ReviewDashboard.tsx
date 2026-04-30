@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useLocation, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -54,6 +54,8 @@ import { usePipelineErrorStream } from "@/hooks/usePipelineErrors";
 import { reprepareInBrowser } from "@/lib/reprepare-in-browser";
 import type { ChipFilter } from "@/hooks/useFilteredDeficiencies";
 import { getCountyRequirements } from "@/lib/county-requirements/utils";
+import { AnalyzingHero } from "@/components/review-dashboard/AnalyzingHero";
+import { ReviewReadyCta } from "@/components/review-dashboard/ReviewReadyCta";
 
 interface ReviewWithProject {
   id: string;
