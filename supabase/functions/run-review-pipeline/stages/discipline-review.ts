@@ -1132,6 +1132,7 @@ export async function stageDisciplineReview(
                   jurisdiction,
                   useType,
                   missingDisciplines,
+                  sheetTextByRef,
                 });
                 return { chunkIdx, cs, chunkSheets, inserted };
               }),
