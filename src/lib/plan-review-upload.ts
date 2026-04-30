@@ -154,6 +154,17 @@ export async function uploadPlanReviewFiles(
         prepared: 0,
         expected: totalExpectedPages,
       });
+      // Persist extracted text incrementally so a partial rasterize still
+      // gives the AI grounding signal for the pages it did get.
+      const textRows: Array<{
+        plan_review_id: string;
+        firm_id: string;
+        page_index: number;
+        items: unknown;
+        full_text: string;
+        has_text_layer: boolean;
+        char_count: number;
+      }> = [];
       const { succeeded, failures } = await rasterizeAndUploadPagesResilient(
         reviewId,
         pairs,
@@ -167,6 +178,19 @@ export async function uploadPlanReviewFiles(
           startGlobalIndex: existingPageCount ?? 0,
           batchSize: 4,
           pagesPrefix: `${prefix}/pages`,
+          onPageText: (extraction) => {
+            const fullText = extraction.fullText.slice(0, 200_000);
+            textRows.push({
+              plan_review_id: reviewId,
+              firm_id: firmId,
+              page_index: extraction.globalPageIndex,
+              // Cap at 4000 items per page — 99th percentile sheet has < 2000.
+              items: extraction.items.slice(0, 4000),
+              full_text: fullText,
+              has_text_layer: extraction.hasTextLayer,
+              char_count: fullText.length,
+            });
+          },
         },
       );
       pageAssetRows = succeeded;
