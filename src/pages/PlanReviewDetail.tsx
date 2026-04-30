@@ -153,6 +153,8 @@ export default function PlanReviewDetail() {
     reprepping,
     handleFileUpload,
     handleReprepareInBrowser,
+    recovery,
+    closeRecovery,
   } = useUploadAndPrepare({
     reviewId: id,
     review,
