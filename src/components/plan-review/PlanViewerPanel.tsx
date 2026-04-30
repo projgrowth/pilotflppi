@@ -11,7 +11,6 @@ import { useState } from "react";
 import { Progress } from "@/components/ui/progress";
 import { PlanMarkupViewer } from "@/components/PlanMarkupViewer";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
-import { ProcessingOverlay } from "@/components/plan-review/ProcessingOverlay";
 import { deletePlanReviewFile } from "@/lib/delete-plan-review-file";
 import { toast } from "sonner";
 import type { PDFPageImage } from "@/lib/pdf-utils";
@@ -25,22 +24,6 @@ interface Props {
   renderProgress: number;
   uploading: boolean;
   uploadSuccess: boolean;
-  /**
-   * When true and the document set has been uploaded but the AI pipeline hasn't
-   * finished yet, render the full-canvas ProcessingOverlay instead of a tiny
-   * "Loading document…" spinner. Drives the "I can see what's happening" UX.
-   */
-  pipelineProcessing?: boolean;
-  /** Sub-phase to render in the overlay before the pipeline starts. */
-  processingPhase?: import("./ProcessingOverlay").ProcessingPhase;
-  preparedPages?: number;
-  expectedPages?: number;
-  pendingFileCount?: number;
-  /** Optional context shown on the bootstrapping overlay. */
-  projectName?: string;
-  pendingFileNames?: string[];
-  onPipelineComplete?: () => void;
-  onOpenDashboard?: () => void;
 
   findings: Finding[];
   activeFindingIndex: number | null;
@@ -89,7 +72,11 @@ export function PlanViewerPanel(props: Props) {
   // user sees continuous motion from the moment they hit Create Project.
   const isBootstrapping = !!props.pipelineProcessing && !!props.planReviewId;
 
-  if (!props.hasDocuments && !isBootstrapping) {
+  // Workspace is the "review findings on the PDF" surface — when the
+  // pipeline is mid-run we just show the standard empty drop zone (or the
+  // PDF if pages exist). The run-state hero, ETA, and stage stepper live on
+  // /plan-review/:id/dashboard so we don't double-render them here.
+  if (!props.hasDocuments) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div
@@ -109,6 +96,23 @@ export function PlanViewerPanel(props: Props) {
           <p className="text-sm font-medium text-foreground">
             {props.uploading ? "Uploading…" : "Drop your plans (PDFs)"}
           </p>
+          <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+            Include the cover, code summary, and all discipline sheets.<br />
+            We auto-detect Architectural, Structural, MEP, Civil &amp; Fire Protection.
+          </p>
+          <p className="text-2xs text-muted-foreground/70 mt-2">PDFs up to 50&nbsp;MB each</p>
+          <input
+            ref={props.fileInputRef}
+            type="file"
+            accept=".pdf"
+            multiple
+            className="hidden"
+            onChange={(e) => props.onFileUpload(e.target.files)}
+          />
+        </div>
+      </div>
+    );
+  }
           <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
             Include the cover, code summary, and all discipline sheets.<br />
             We auto-detect Architectural, Structural, MEP, Civil &amp; Fire Protection.
