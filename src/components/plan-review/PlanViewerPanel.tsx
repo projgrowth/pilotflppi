@@ -67,11 +67,6 @@ export function PlanViewerPanel(props: Props) {
     }
   };
 
-  // Bootstrapping: review was just created, files are uploading via background
-  // task. Don't show the empty drop zone — show the processing overlay so the
-  // user sees continuous motion from the moment they hit Create Project.
-  const isBootstrapping = !!props.pipelineProcessing && !!props.planReviewId;
-
   // Workspace is the "review findings on the PDF" surface — when the
   // pipeline is mid-run we just show the standard empty drop zone (or the
   // PDF if pages exist). The run-state hero, ETA, and stage stepper live on
@@ -113,46 +108,10 @@ export function PlanViewerPanel(props: Props) {
       </div>
     );
   }
-          <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
-            Include the cover, code summary, and all discipline sheets.<br />
-            We auto-detect Architectural, Structural, MEP, Civil &amp; Fire Protection.
-          </p>
-          <p className="text-2xs text-muted-foreground/70 mt-2">PDFs up to 50&nbsp;MB each</p>
-          <input
-            ref={props.fileInputRef}
-            type="file"
-            accept=".pdf"
-            multiple
-            className="hidden"
-            onChange={(e) => props.onFileUpload(e.target.files)}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  // While the AI pipeline is still working AND we don't yet have rendered
-  // pages to show, take over the canvas with the live progress overlay
-  // instead of stranding the user on a blank "Loading document…" spinner.
-  const showProcessing =
-    !!props.pipelineProcessing && props.pageImages.length === 0 && !!props.planReviewId;
 
   return (
     <>
-      {showProcessing && (
-        <ProcessingOverlay
-          planReviewId={props.planReviewId!}
-          phase={props.processingPhase ?? "analyzing"}
-          preparedPages={props.preparedPages}
-          expectedPages={props.expectedPages}
-          fileCount={props.pendingFileCount}
-          projectName={props.projectName}
-          fileNames={props.pendingFileNames}
-          onComplete={props.onPipelineComplete}
-          onOpenDashboard={props.onOpenDashboard}
-        />
-      )}
-      {!showProcessing && props.renderingPages && props.pageImages.length === 0 && (
+      {props.renderingPages && props.pageImages.length === 0 && (
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center space-y-3">
             <Loader2 className="h-8 w-8 text-accent mx-auto animate-spin" />
