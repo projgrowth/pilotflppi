@@ -68,6 +68,11 @@ export const CORE_STAGES: Stage[] = [
   "critic",
   "dedupe",
   "ground_citations",
+  // verify runs in CORE so every finding gets an adversarial verdict before
+  // the letter-readiness gate is evaluated. Without this, default `core`
+  // runs land on `needs_human_review` with 100% unverified findings and
+  // the user can never send the letter.
+  "verify",
   "challenger",
   "complete",
 ];
@@ -75,9 +80,9 @@ export const CORE_STAGES: Stage[] = [
 // Deep QA = optional secondary pass. Runs only when explicitly invoked
 // with mode='deep'. Reuses existing core artifacts (deficiencies,
 // project_dna, sheet_coverage) — does not re-run discipline_review.
-// `ground_citations` was promoted to CORE; deep keeps the heavier QA passes.
+// `ground_citations` and `verify` were promoted to CORE; deep keeps the
+// heavier QA passes only.
 export const DEEP_STAGES: Stage[] = [
-  "verify",
   "cross_check",
   "deferred_scope",
   "prioritize",
