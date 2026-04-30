@@ -98,6 +98,7 @@ export function useExternalData<S extends ExternalSource>({
     snapshot: query.data ?? null,
     isLoading: query.isLoading,
     error: query.error,
+    refreshError: refresh.error instanceof Error ? refresh.error.message : null,
     refresh: (force = false) => refresh.mutate(force),
     isRefreshing: refresh.isPending,
   };
