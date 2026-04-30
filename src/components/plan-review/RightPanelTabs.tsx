@@ -11,12 +11,14 @@ import { ChevronDown } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
-export type RightPanelMode = "findings" | "checklist" | "completeness" | "letter" | "county" | "activity";
+export type RightPanelMode = "findings" | "checklist" | "completeness" | "letter" | "county" | "activity" | "site_data";
 
 interface Props {
   active: RightPanelMode;
   onChange: (m: RightPanelMode) => void;
   findingsCount?: number;
+  /** When true, surfaces the beta "Site Data" entry in the More menu. */
+  siteDataEnabled?: boolean;
 }
 
 const PRIMARY: { id: RightPanelMode; label: string }[] = [
@@ -24,12 +26,18 @@ const PRIMARY: { id: RightPanelMode; label: string }[] = [
   { id: "letter", label: "Letter" },
 ];
 
-const SECONDARY: { id: RightPanelMode; label: string; description: string }[] = [
+const SECONDARY_BASE: { id: RightPanelMode; label: string; description: string }[] = [
   { id: "checklist", label: "Checklist", description: "Discipline review checklist" },
   { id: "completeness", label: "Completeness", description: "Site plan completeness" },
   { id: "county", label: "County", description: "County requirements" },
   { id: "activity", label: "Activity", description: "Audit timeline of every event" },
 ];
+
+const SITE_DATA_ITEM = {
+  id: "site_data" as const,
+  label: "Site Data",
+  description: "FEMA flood zone & ASCE wind speed",
+};
 
 const SECONDARY_LABEL: Record<RightPanelMode, string> = {
   findings: "Findings",
@@ -38,9 +46,11 @@ const SECONDARY_LABEL: Record<RightPanelMode, string> = {
   completeness: "Completeness",
   county: "County",
   activity: "Activity",
+  site_data: "Site Data",
 };
 
-export function RightPanelTabs({ active, onChange, findingsCount }: Props) {
+export function RightPanelTabs({ active, onChange, findingsCount, siteDataEnabled }: Props) {
+  const SECONDARY = siteDataEnabled ? [...SECONDARY_BASE, SITE_DATA_ITEM] : SECONDARY_BASE;
   const isSecondaryActive = SECONDARY.some((s) => s.id === active);
 
   return (
