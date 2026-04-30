@@ -77,6 +77,11 @@ interface DisciplineRunCtx {
   /** Disciplines absent from the submittal — passed through to the expert
    * prompt so it doesn't fabricate findings against missing trades. */
   missingDisciplines?: string[];
+  /** Vector-text snippets keyed by sheet_ref (uppercased). Provides the
+   * model with deterministic OCR — exact dimensions, code references,
+   * note text — so it doesn't have to squint at the raster. Empty when
+   * the upload predates the text-layer extraction (legacy reviews). */
+  sheetTextByRef?: Record<string, string>;
 }
 
 // Per-worker cache so we don't refetch the active prompt id once per chunk.
