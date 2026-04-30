@@ -180,6 +180,30 @@ async function runDisciplineChecks(
     .map((s) => `${s.sheet_ref}${s.sheet_title ? ` — ${s.sheet_title}` : ""}`)
     .join("\n");
 
+  // Vector-text grounding: feed the model exact text strings extracted
+  // from the PDF (dimensions, FBC citations, note text) so it doesn't
+  // have to OCR the raster. Cap each sheet at 2.5k chars to keep total
+  // prompt size sane on full-discipline batches.
+  const TEXT_PER_SHEET_CAP = 2500;
+  const TEXT_TOTAL_CAP = 18_000;
+  let textBudget = TEXT_TOTAL_CAP;
+  const textSnippets: string[] = [];
+  for (const s of ctx.disciplineSheets) {
+    if (textBudget <= 0) break;
+    const raw = ctx.sheetTextByRef?.[(s.sheet_ref ?? "").toUpperCase().trim()];
+    if (!raw) continue;
+    const trimmed = raw.length > TEXT_PER_SHEET_CAP
+      ? raw.slice(0, TEXT_PER_SHEET_CAP) + " …[truncated]"
+      : raw;
+    const block = `### ${s.sheet_ref}\n${trimmed}`;
+    if (block.length > textBudget) break;
+    textSnippets.push(block);
+    textBudget -= block.length;
+  }
+  const sheetTextBlock = textSnippets.length > 0
+    ? `\n\n## Vector text extracted from the attached sheets (authoritative — quote these strings verbatim in evidence[] when citing dimensions, notes, or code references)\n${textSnippets.join("\n\n")}\n`
+    : "";
+
   // -------- Reviewer Memory: inject learned correction patterns --------
   const occupancy = (ctx.dna?.occupancy_classification as string | null) ?? null;
   const constructionType = (ctx.dna?.construction_type as string | null) ?? null;
