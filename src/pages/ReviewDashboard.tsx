@@ -78,6 +78,13 @@ interface ReviewWithProject {
 
 export default function ReviewDashboard() {
   const { id } = useParams<{ id: string }>();
+  const location = useLocation();
+  const justCreatedState = (location.state ?? null) as
+    | { justCreated?: boolean; pendingFileCount?: number; pendingPageCount?: number }
+    | null;
+  const [justCreatedAt] = useState<number | null>(() =>
+    justCreatedState?.justCreated ? Date.now() : null,
+  );
   const qc = useQueryClient();
   const [running, setRunning] = useState(false);
   const [runningDeep, setRunningDeep] = useState(false);
