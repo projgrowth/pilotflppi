@@ -127,15 +127,16 @@ export async function uploadPlanReviewFiles(
   let totalExpectedPages = 0;
   let allFailures: Array<{ fileName: string; pageIndex: number; reason: string }> = [];
   // Hoisted so step 5a can persist them after the manifest upsert succeeds.
-  const textRows: Array<{
+  type PageTextRow = {
     plan_review_id: string;
     firm_id: string;
     page_index: number;
-    items: unknown;
+    items: { text: string; x: number; y: number; w: number; h: number }[];
     full_text: string;
     has_text_layer: boolean;
     char_count: number;
-  }> = [];
+  };
+  const textRows: PageTextRow[] = [];
   if (typeof window !== "undefined") {
     try {
       const pairs: Array<{
