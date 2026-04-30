@@ -41,6 +41,11 @@ interface Props {
   needsPreparation?: boolean;
   onPrepareNow?: () => void;
   preparingNow?: boolean;
+  /** Stage that the reconciler parked at when status went to needs_user_action.
+   *  Used to pick the right CTA (prepare vs. re-upload). */
+  needsUserActionStage?: string | null;
+  /** Triggered when stage was 'upload' — opens the file picker. */
+  onReuploadFiles?: () => void;
 }
 
 export function StuckRecoveryBanner({
