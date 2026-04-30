@@ -227,16 +227,8 @@ export default function PlanReviewDetail() {
     justCreatedFresh ||
     (pipeRows.length > 0 && !terminalComplete && !hasFatalError);
 
-  // Phase that the ProcessingOverlay should render. Walked deterministically
-  // from the available signals — file_urls + page assets + pipeline rows.
-  const processingPhase: import("@/components/plan-review/ProcessingOverlay").ProcessingPhase =
-    useMemo(() => {
-      if (pipeRows.length > 0) return "analyzing";
-      if (uploading) return "uploading";
-      if ((review?.file_urls?.length ?? 0) === 0) return "bootstrapping";
-      // Files exist but pipeline hasn't started — page prep still running.
-      return "preparing";
-    }, [pipeRows.length, uploading, review?.file_urls?.length]);
+  // (processingPhase removed — the run-state overlay was deleted from the
+  // workspace; the dashboard's AnalyzingHero owns that surface now.)
 
   // (handleReprepareInBrowser moved to useUploadAndPrepare.)
   // (Letter hydration + autosave moved to useCommentLetter.)
@@ -999,15 +991,6 @@ export default function PlanReviewDetail() {
                 renderProgress={renderProgress}
                 uploading={uploading}
                 uploadSuccess={uploadSuccess}
-                pipelineProcessing={pipelineProcessing}
-                processingPhase={processingPhase}
-                preparedPages={uploadProgress?.prepared ?? pageAssetCount}
-                expectedPages={uploadProgress?.expected ?? justCreatedState?.pendingPageCount ?? 0}
-                pendingFileCount={justCreatedState?.pendingFileCount ?? fileUrls.length}
-                projectName={review.project?.name}
-                pendingFileNames={fileUrls.map((u) => decodeURIComponent(u.split("/").pop() || ""))}
-                onPipelineComplete={handlePipelineComplete}
-                onOpenDashboard={openDashboard}
                 planReviewId={review.id}
                 findings={findings}
                 activeFindingIndex={activeFindingIndex}
@@ -1090,15 +1073,6 @@ export default function PlanReviewDetail() {
                 renderProgress={renderProgress}
                 uploading={uploading}
                 uploadSuccess={uploadSuccess}
-                pipelineProcessing={pipelineProcessing}
-                processingPhase={processingPhase}
-                preparedPages={uploadProgress?.prepared ?? pageAssetCount}
-                expectedPages={uploadProgress?.expected ?? justCreatedState?.pendingPageCount ?? 0}
-                pendingFileCount={justCreatedState?.pendingFileCount ?? fileUrls.length}
-                projectName={review.project?.name}
-                pendingFileNames={fileUrls.map((u) => decodeURIComponent(u.split("/").pop() || ""))}
-                onPipelineComplete={handlePipelineComplete}
-                onOpenDashboard={openDashboard}
                 findings={findings}
                 activeFindingIndex={activeFindingIndex}
                 onAnnotationClick={handleAnnotationClick}

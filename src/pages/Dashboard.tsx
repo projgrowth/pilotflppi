@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { OnboardingChecklist } from "@/components/OnboardingChecklist";
 import { PageHeader } from "@/components/PageHeader";
 import { useProjects, getDaysElapsed } from "@/hooks/useProjects";
+import { routeForReview } from "@/lib/review-route";
 import { useAllActivePipelines } from "@/hooks/useAllActivePipelines";
 import { useFirmId } from "@/hooks/useFirmId";
 import { supabase } from "@/integrations/supabase/client";
@@ -197,7 +198,11 @@ export default function Dashboard() {
                 hasActive={pipeline?.hasActive ?? false}
                 stageStartedAt={pipeline?.current?.started_at ?? null}
                 onClick={() =>
-                  navigate(reviewId ? `/plan-review/${reviewId}` : `/projects/${project.id}`)
+                  navigate(
+                    reviewId
+                      ? routeForReview(reviewId, { pipelineActive: pipeline?.hasActive ?? false })
+                      : `/projects/${project.id}`,
+                  )
                 }
               />
             ))}

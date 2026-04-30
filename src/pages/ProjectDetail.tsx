@@ -38,6 +38,7 @@ import { EditProjectDialog } from "@/components/EditProjectDialog";
 import { ScheduleInspectionDialog } from "@/components/ScheduleInspectionDialog";
 import { NewReviewDialog } from "@/components/NewReviewDialog";
 import PipelineHealthChip from "@/components/plan-review/PipelineHealthChip";
+import { routeForReview } from "@/lib/review-route";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -298,7 +299,7 @@ export default function ProjectDetail() {
   <Button
  size="sm"
  className="text-xs"
- onClick={() => navigate(`/plan-review/${reviews[0].id}`)}
+ onClick={() => navigate(routeForReview(reviews[0].id, { aiCheckStatus: reviews[0].ai_check_status }))}
  >
  <ClipboardCheck className="h-3.5 w-3.5 mr-1" /> Review
  </Button>
@@ -543,7 +544,7 @@ export default function ProjectDetail() {
  <div
  key={r.id}
  className="flex items-center justify-between rounded-lg border p-3 hover:bg-muted/30 cursor-pointer transition-colors"
- onClick={() => navigate(`/plan-review/${r.id}`)}
+ onClick={() => navigate(routeForReview(r.id, { aiCheckStatus: r.ai_check_status }))}
  >
  <div className="flex items-center gap-3">
  <Badge variant="secondary" className="text-xs">R{r.round}</Badge>
