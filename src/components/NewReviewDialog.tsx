@@ -430,7 +430,12 @@ export function NewReviewDialog({
       setSubmitProgress(null);
       onComplete?.(review.id, projectId);
       close();
-      navigate(`/plan-review/${review.id}`, {
+      // Land on the run-state dashboard (not the workspace). The workspace is
+      // for reviewing findings against the PDF — landing there mid-run reads
+      // as "you're done, start working" and confuses users. The dashboard
+      // owns the live stepper, page-prep counters, and the "Review on the
+      // plan →" CTA that opens the workspace once findings are ready.
+      navigate(`/plan-review/${review.id}/dashboard`, {
         state: {
           justCreated: true,
           pendingFileCount: files.length,
