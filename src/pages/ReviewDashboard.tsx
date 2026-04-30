@@ -412,7 +412,7 @@ export default function ReviewDashboard() {
       {/* Header — primary action right, secondary in a Re-run dropdown */}
       <div className="flex items-center justify-between gap-3">
         <PageHeader
-          title="Review dashboard"
+          title="Plan review run"
           subtitle={
             review?.project
               ? `${review.project.name} · Round ${review.round}`
