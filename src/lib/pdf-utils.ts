@@ -345,6 +345,16 @@ export async function rasterizeAndUploadPagesResilient(
     /** Called after each successfully uploaded page so callers can persist incrementally. */
     onPageReady?: (asset: PreparedPageAsset) => void | Promise<void>;
     /**
+     * Called with the extracted vector text layer for each page that was
+     * successfully rendered. `globalPageIndex` matches the asset's
+     * `page_index` so the caller can upsert directly into
+     * `plan_review_page_text`. Best-effort — not invoked for failed renders.
+     */
+    onPageText?: (extraction: PageTextExtraction & {
+      globalPageIndex: number;
+      sourceFilePath: string;
+    }) => void | Promise<void>;
+    /**
      * Required for firm-scoped storage: page JPEGs are written to
      * `<pagesPrefix>/<basename>/p-NNN.jpg`. Callers should pass
      * `firms/<firmId>/plan-reviews/<reviewId>/pages` so the new
