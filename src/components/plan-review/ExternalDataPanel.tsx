@@ -156,6 +156,8 @@ export default function ExternalDataPanel({ planReviewId, address }: Props) {
         loading={fema.isLoading || fema.isRefreshing}
         onRefresh={isAdmin ? () => fema.refresh(true) : undefined}
         snapshotAt={fema.snapshot?.fetched_at ?? null}
+        errorMessage={fema.refreshError}
+        onRetry={() => fema.refresh(true)}
       >
         {femaPayload ? <FemaBody p={femaPayload} /> : <Pending />}
       </Card>
@@ -166,6 +168,8 @@ export default function ExternalDataPanel({ planReviewId, address }: Props) {
         loading={asce.isLoading || asce.isRefreshing}
         onRefresh={isAdmin ? () => asce.refresh(true) : undefined}
         snapshotAt={asce.snapshot?.fetched_at ?? null}
+        errorMessage={asce.refreshError}
+        onRetry={() => asce.refresh(true)}
       >
         {ascePayload ? <AsceBody p={ascePayload} /> : <Pending />}
       </Card>
