@@ -207,11 +207,19 @@ export default function PlanReviewDetail() {
   // The "just created" flag stays sticky until pipeline rows appear OR ~3min
   // pass (whichever comes first) so a slow upload doesn't drop the user back
   // into the empty drop zone.
+  // The "just created" flag stays sticky until pipeline rows appear OR
+  // ai_check_status flips to a terminal/error state OR ~60s pass — whichever
+  // comes first. Previously this was 3 minutes which kept "Analyzing your
+  // plans…" up long after upload had already errored.
   const [justCreatedAt] = useState<number | null>(() =>
     justCreatedState?.justCreated ? Date.now() : null,
   );
   const justCreatedFresh =
-    !!justCreatedAt && pipeRows.length === 0 && Date.now() - justCreatedAt < 3 * 60_000;
+    !!justCreatedAt &&
+    pipeRows.length === 0 &&
+    review?.ai_check_status !== "needs_user_action" &&
+    review?.ai_check_status !== "needs_human_review" &&
+    Date.now() - justCreatedAt < 60_000;
   const pipelineProcessing =
     aiRunning ||
     justCreatedFresh ||
