@@ -10,7 +10,7 @@
  * does not render at all (see RightPanelTabs).
  */
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, RefreshCw, MapPin, Wind, Waves, Copy } from "lucide-react";
+import { Loader2, RefreshCw, MapPin, Wind, Waves, Copy, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useExternalData } from "@/hooks/useExternalData";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
