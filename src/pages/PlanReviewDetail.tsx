@@ -77,6 +77,7 @@ import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { deletePlanReview } from "@/lib/delete-plan-review";
 import { UploadFailureRecoveryDialog } from "@/components/plan-review/UploadFailureRecoveryDialog";
 import { cancelPipelineForReview } from "@/lib/pipeline-cancel";
+import { StillAnalyzingBanner } from "@/components/plan-review/StillAnalyzingBanner";
 
 // Wand2/AlertTriangle/Loader2 previously used by inline prepare strip — now owned by ReviewNextStepRail.
 
