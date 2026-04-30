@@ -465,7 +465,7 @@ export default function ReviewDashboard() {
           </DropdownMenu>
           <Button asChild size="sm" variant="outline">
             <Link to={`/plan-review/${id}`}>
-              <ArrowLeft className="mr-1 h-4 w-4" /> Workspace
+              <ArrowLeft className="mr-1 h-4 w-4" /> View on plan
             </Link>
           </Button>
           <Button size="sm" onClick={handleGenerateReport} disabled={!review?.project}>
