@@ -255,20 +255,18 @@ export default function PlanReviewDetail() {
     [],
   );
 
-  // Auto-render pages when review loads with files. (hasAutoRendered ref is
-  // declared earlier so the upload-complete callback can reset it.)
+  // Auto-render pages when review loads with files. Keyed on review.id so we
+  // re-arm exactly once per review; the body re-checks live state to avoid
+  // racing the upload's `resetPages()`.
   useEffect(() => {
-    if (
-      review &&
-      review.file_urls?.length > 0 &&
-      pageImages.length === 0 &&
-      !renderingPages &&
-      !hasAutoRendered.current
-    ) {
-      hasAutoRendered.current = true;
-      renderDocumentPages(review);
-    }
-  }, [review]);
+    if (!review) return;
+    if (!review.file_urls?.length) return;
+    if (hasAutoRendered.current) return;
+    if (pageImages.length > 0 || renderingPages) return;
+    hasAutoRendered.current = true;
+    renderDocumentPages(review);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [review?.id]);
 
   // (handleFileUpload + beforeunload guard moved to useUploadAndPrepare.)
 
