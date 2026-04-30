@@ -265,6 +265,29 @@ export async function uploadPlanReviewFiles(
     if (assetErr) warnings.push(`page_assets: ${assetErr.message}`);
   }
 
+  // 5a. plan_review_page_text upsert — vector text layer per page. Best effort:
+  // a failure here doesn't block the pipeline, but the AI will fall back to
+  // image-only reading on those pages.
+  if (textRows.length > 0) {
+    try {
+      // Chunk to stay well under the request payload cap.
+      for (let i = 0; i < textRows.length; i += 50) {
+        const chunk = textRows.slice(i, i + 50);
+        const { error: textErr } = await supabase
+          .from("plan_review_page_text")
+          .upsert(chunk, { onConflict: "plan_review_id,page_index" });
+        if (textErr) {
+          warnings.push(`page_text: ${textErr.message}`);
+          break;
+        }
+      }
+    } catch (err) {
+      warnings.push(
+        `page_text persist: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   // 5b. Persist per-page rasterize failures so they survive the upload toast.
   // The pipeline reads these to decide whether prepare_pages should re-render
   // the gaps before the AI stage runs.
