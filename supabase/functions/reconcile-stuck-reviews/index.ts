@@ -24,9 +24,12 @@ const MAX_AUTO_RECOVERIES = 1; // retry once, then fail
 // (upload, prepare_pages) need pdf.js running in the user's browser — a server
 // kick does nothing useful and just burns the recovery slot.
 const SERVER_RECOVERABLE_STAGES = new Set<string>([
-  "dna_extract",
   "sheet_map",
+  "submittal_check",
+  "dna_extract",
   "discipline_review",
+  "critic",
+  "challenger",
   "cross_check",
   "ground_citations",
   "verify",
