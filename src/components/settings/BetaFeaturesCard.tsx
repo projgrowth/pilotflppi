@@ -5,6 +5,7 @@
  * features that flags unlock; only firm members with admin role can flip them.
  */
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -32,12 +33,11 @@ const FLAGS: FlagDef[] = [
 export default function BetaFeaturesCard() {
   const { firmSettings } = useFirmSettings();
   const isAdmin = useIsAdmin();
+  const queryClient = useQueryClient();
   const [pending, setPending] = useState<string | null>(null);
 
   if (!firmSettings) return null;
-  const flags =
-    ((firmSettings as { feature_flags?: Record<string, unknown> })
-      .feature_flags as Record<string, boolean>) ?? {};
+  const flags = (firmSettings.feature_flags ?? {}) as Record<string, boolean>;
 
   const setFlag = async (key: string, value: boolean) => {
     if (!isAdmin) return;
@@ -53,9 +53,9 @@ export default function BetaFeaturesCard() {
       return;
     }
     toast.success(`${key} ${value ? "enabled" : "disabled"}`);
-    // Soft refetch via window event the firm-settings query already listens to;
-    // simplest is a reload of the cached query.
-    window.dispatchEvent(new CustomEvent("firm-settings:refetch"));
+    // Invalidate the cached firm-settings query so useFeatureFlag readers
+    // (e.g. the Site Data tab gate) refresh immediately without a reload.
+    await queryClient.invalidateQueries({ queryKey: ["firm-settings"] });
   };
 
   return (

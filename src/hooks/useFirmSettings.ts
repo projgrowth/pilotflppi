@@ -21,6 +21,8 @@ export interface FirmSettings {
   eo_policy_number?: string | null;
   eo_coverage_amount?: number | null;
   eo_expires_on?: string | null;
+  // Per-firm beta feature toggles (jsonb). Keys correspond to FeatureFlag union.
+  feature_flags?: Record<string, boolean> | null;
 }
 
 const DEFAULT_FIRM: Omit<FirmSettings, "id" | "user_id"> = {
