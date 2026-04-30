@@ -32,6 +32,7 @@ import { stageUpload } from "./stages/upload.ts";
 import { stagePreparePages } from "./stages/prepare-pages.ts";
 import { stageSheetMap } from "./stages/sheet-map.ts";
 import { stageSubmittalCheck } from "./stages/submittal-check.ts";
+import { stageCalloutGraph } from "./stages/callout-graph.ts";
 import {
   stageDnaExtract,
   stageDnaReevaluate,
