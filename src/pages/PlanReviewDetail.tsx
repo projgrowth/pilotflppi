@@ -33,6 +33,8 @@ import { ReviewTopBar } from "@/components/plan-review/ReviewTopBar";
 import { CountyPanel } from "@/components/plan-review/CountyPanel";
 import { LetterPanel } from "@/components/plan-review/LetterPanel";
 import { RightPanelTabs, type RightPanelMode } from "@/components/plan-review/RightPanelTabs";
+import ExternalDataPanel from "@/components/plan-review/ExternalDataPanel";
+import { useFeatureFlag } from "@/hooks/useFeatureFlag";
 import { ActivityPanel } from "@/components/plan-review/ActivityPanel";
 import { LetterLintDialog } from "@/components/plan-review/LetterLintDialog";
 import { FindingsListPanel } from "@/components/plan-review/FindingsListPanel";
@@ -167,6 +169,7 @@ export default function PlanReviewDetail() {
   // Comment-letter state lives in useCommentLetter — see below where review/findings are wired up.
   // (uploading/uploadSuccess/reprepping/uploadProgress moved to useUploadAndPrepare.)
   const [rightPanel, setRightPanel] = useState<RightPanelMode>("findings");
+  const siteDataEnabled = useFeatureFlag("external_data_v1");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeFindingIndex, setActiveFindingIndex] = useState<number | null>(null);
   const findingRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -961,6 +964,7 @@ export default function PlanReviewDetail() {
                   active={rightPanel}
                   onChange={setRightPanel}
                   findingsCount={hasFindings ? findings.length : undefined}
+                  siteDataEnabled={siteDataEnabled}
                 />
               </div>
               <div className="overflow-y-auto">
@@ -1004,6 +1008,12 @@ export default function PlanReviewDetail() {
                 {rightPanel === "letter" && <LetterPanel {...letterPanelProps} />}
                 {rightPanel === "county" && <CountyPanel county={county} />}
                 {rightPanel === "activity" && <ActivityPanel projectId={review.project_id} />}
+                {rightPanel === "site_data" && siteDataEnabled && (
+                  <ExternalDataPanel
+                    planReviewId={review.id}
+                    address={review.project?.address || ""}
+                  />
+                )}
               </div>
             </div>
           )}
@@ -1089,6 +1099,7 @@ export default function PlanReviewDetail() {
                     active={rightPanel}
                     onChange={setRightPanel}
                     findingsCount={hasFindings ? findings.length : undefined}
+                    siteDataEnabled={siteDataEnabled}
                   />
                   {hasFindings && rightPanel === "findings" && (
                     <div className="ml-auto flex items-center gap-1.5">
@@ -1122,6 +1133,12 @@ export default function PlanReviewDetail() {
                   {rightPanel === "letter" && <LetterPanel {...letterPanelProps} />}
                   {rightPanel === "county" && <CountyPanel county={county} />}
                   {rightPanel === "activity" && <ActivityPanel projectId={review.project_id} />}
+                  {rightPanel === "site_data" && siteDataEnabled && (
+                    <ExternalDataPanel
+                      planReviewId={review.id}
+                      address={review.project?.address || ""}
+                    />
+                  )}
                 </div>
               </div>
             </ResizablePanel>
