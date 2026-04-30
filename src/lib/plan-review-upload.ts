@@ -165,17 +165,7 @@ export async function uploadPlanReviewFiles(
         prepared: 0,
         expected: totalExpectedPages,
       });
-      // Persist extracted text incrementally so a partial rasterize still
-      // gives the AI grounding signal for the pages it did get.
-      const textRows: Array<{
-        plan_review_id: string;
-        firm_id: string;
-        page_index: number;
-        items: unknown;
-        full_text: string;
-        has_text_layer: boolean;
-        char_count: number;
-      }> = [];
+      // Text rows are accumulated into the hoisted `textRows` array above.
       const { succeeded, failures } = await rasterizeAndUploadPagesResilient(
         reviewId,
         pairs,
