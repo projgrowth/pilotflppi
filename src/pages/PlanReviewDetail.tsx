@@ -836,12 +836,15 @@ export default function PlanReviewDetail() {
       {(() => {
         const progress = ((review as unknown as { ai_run_progress?: Record<string, unknown> }).ai_run_progress ?? {}) as Record<string, unknown>;
         const status = (review as unknown as { ai_check_status?: string }).ai_check_status ?? null;
+        const userActionStage = typeof progress.needs_user_action_stage === "string"
+          ? (progress.needs_user_action_stage as string)
+          : null;
         return (
           <div className="shrink-0 px-4 pt-2 empty:hidden">
             <StuckRecoveryBanner
               planReviewId={review.id}
               autoRecoveredAt={typeof progress.auto_recovered_at === "string" ? progress.auto_recovered_at : null}
-              recoveredFromStage={typeof progress.last_stage === "string" ? progress.last_stage : null}
+              recoveredFromStage={typeof progress.auto_recovered_from_stage === "string" ? progress.auto_recovered_from_stage : null}
               recoveryCount={typeof progress.auto_recovery_count === "number" ? progress.auto_recovery_count : undefined}
               aiCheckStatus={status}
               failureReason={typeof progress.failure_reason === "string" ? progress.failure_reason : null}
@@ -856,6 +859,8 @@ export default function PlanReviewDetail() {
                   : null
               }
               needsPreparation={false}
+              needsUserActionStage={userActionStage}
+              onReuploadFiles={() => fileInputRef.current?.click()}
             />
           </div>
         );

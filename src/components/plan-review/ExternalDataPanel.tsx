@@ -10,7 +10,7 @@
  * does not render at all (see RightPanelTabs).
  */
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, RefreshCw, MapPin, Wind, Waves, Copy } from "lucide-react";
+import { Loader2, RefreshCw, MapPin, Wind, Waves, Copy, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useExternalData } from "@/hooks/useExternalData";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
@@ -156,6 +156,8 @@ export default function ExternalDataPanel({ planReviewId, address }: Props) {
         loading={fema.isLoading || fema.isRefreshing}
         onRefresh={isAdmin ? () => fema.refresh(true) : undefined}
         snapshotAt={fema.snapshot?.fetched_at ?? null}
+        errorMessage={fema.refreshError}
+        onRetry={() => fema.refresh(true)}
       >
         {femaPayload ? <FemaBody p={femaPayload} /> : <Pending />}
       </Card>
@@ -166,6 +168,8 @@ export default function ExternalDataPanel({ planReviewId, address }: Props) {
         loading={asce.isLoading || asce.isRefreshing}
         onRefresh={isAdmin ? () => asce.refresh(true) : undefined}
         snapshotAt={asce.snapshot?.fetched_at ?? null}
+        errorMessage={asce.refreshError}
+        onRetry={() => asce.refresh(true)}
       >
         {ascePayload ? <AsceBody p={ascePayload} /> : <Pending />}
       </Card>
@@ -186,6 +190,8 @@ function Card({
   loading,
   onRefresh,
   snapshotAt,
+  errorMessage,
+  onRetry,
   children,
 }: {
   icon: React.ReactNode;
@@ -193,6 +199,8 @@ function Card({
   loading: boolean;
   onRefresh?: () => void;
   snapshotAt: string | null;
+  errorMessage?: string | null;
+  onRetry?: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -226,7 +234,29 @@ function Card({
           )}
         </div>
       </header>
-      <div className="px-3 py-3 text-xs">{children}</div>
+      <div className="px-3 py-3 text-xs">
+        {errorMessage && !loading ? (
+          <div className="flex items-start gap-2 rounded border border-destructive/30 bg-destructive/5 p-2 text-destructive">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">Lookup failed</div>
+              <div className="text-2xs opacity-80 break-words">{errorMessage}</div>
+            </div>
+            {onRetry && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 shrink-0 text-2xs"
+                onClick={onRetry}
+              >
+                Retry
+              </Button>
+            )}
+          </div>
+        ) : (
+          children
+        )}
+      </div>
     </section>
   );
 }

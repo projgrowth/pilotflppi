@@ -41,6 +41,11 @@ interface Props {
   needsPreparation?: boolean;
   onPrepareNow?: () => void;
   preparingNow?: boolean;
+  /** Stage that the reconciler parked at when status went to needs_user_action.
+   *  Used to pick the right CTA (prepare vs. re-upload). */
+  needsUserActionStage?: string | null;
+  /** Triggered when stage was 'upload' — opens the file picker. */
+  onReuploadFiles?: () => void;
 }
 
 export function StuckRecoveryBanner({
@@ -54,6 +59,8 @@ export function StuckRecoveryBanner({
   needsPreparation,
   onPrepareNow,
   preparingNow,
+  needsUserActionStage,
+  onReuploadFiles,
 }: Props) {
   const [rerunning, setRerunning] = useState(false);
 
@@ -68,12 +75,17 @@ export function StuckRecoveryBanner({
         d.verification_status !== "superseded" &&
         d.verification_status !== "overturned",
     );
-    const verified = live.filter((d) => d.verification_status === "verified" || d.verification_status === "modified").length;
-    const needsHuman = live.filter((d) => d.verification_status === "needs_human").length;
-    const unverified = live.filter(
-      (d) => (d.verification_status ?? "unverified") === "unverified" && d.citation_status !== "hallucinated",
+    // Hallucinated citations are auto-hidden from reviewers; exclude them
+    // from the denominator too so we don't show "12 of 12 unverified" when
+    // every one of those 12 is a fabrication that's already filtered out.
+    const real = live.filter((d) => d.citation_status !== "hallucinated");
+    const hallucinated = live.length - real.length;
+    const verified = real.filter((d) => d.verification_status === "verified" || d.verification_status === "modified").length;
+    const needsHuman = real.filter((d) => d.verification_status === "needs_human").length;
+    const unverified = real.filter(
+      (d) => (d.verification_status ?? "unverified") === "unverified",
     ).length;
-    return { total: live.length, verified, needsHuman, unverified };
+    return { total: real.length, verified, needsHuman, unverified, hallucinated };
   }, [liveDefs]);
 
   const handleRerunVerify = async () => {
@@ -130,18 +142,51 @@ export function StuckRecoveryBanner({
 
   // ---- needs_user_action variant (not dismissible — blocks progress) ----
   if (aiCheckStatus === "needs_user_action") {
+    const stage = needsUserActionStage ?? recoveredFromStage ?? null;
+    const isUpload = stage === "upload";
+    const isPrepare = stage === "prepare_pages";
+    const title = isUpload
+      ? "Action needed: finish uploading files"
+      : "Action needed: finish preparing pages";
+    const defaultMsg = isUpload
+      ? "Upload didn't finish. Re-upload the plan PDF to continue."
+      : "Page preparation didn't finish. Click below so your browser can finish rendering the plan pages.";
     return (
       <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs">
         <AlertTriangle className="h-4 w-4 flex-shrink-0 text-warning" />
         <div className="min-w-0 flex-1">
-          <div className="font-medium text-warning-foreground">
-            Action needed: finish preparing pages
-          </div>
+          <div className="font-medium text-warning-foreground">{title}</div>
           <div className="mt-0.5 text-muted-foreground">
-            {failureReason ??
-              "Page preparation didn't finish. Re-open this project so your browser can finish rendering the plan pages."}
+            {failureReason ?? defaultMsg}
           </div>
         </div>
+        {isPrepare && onPrepareNow && (
+          <Button
+            size="sm"
+            variant="default"
+            onClick={onPrepareNow}
+            disabled={preparingNow}
+            className="h-7 shrink-0 text-2xs"
+          >
+            {preparingNow ? (
+              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            ) : (
+              <Wand2 className="mr-1 h-3 w-3" />
+            )}
+            {preparingNow ? "Preparing…" : "Prepare pages now"}
+          </Button>
+        )}
+        {isUpload && onReuploadFiles && (
+          <Button
+            size="sm"
+            variant="default"
+            onClick={onReuploadFiles}
+            className="h-7 shrink-0 text-2xs"
+          >
+            <Wand2 className="mr-1 h-3 w-3" />
+            Re-upload files
+          </Button>
+        )}
       </div>
     );
   }
@@ -174,7 +219,12 @@ export function StuckRecoveryBanner({
               {unverifiedCount > 0 && (
                 <span>· {unverifiedCount} awaiting verifier ({unverifiedPct}%)</span>
               )}
-              {hasHallucinated && <span>· hallucinated citations auto-hidden</span>}
+              {(liveBreakdown.hallucinated > 0 || hasHallucinated) && (
+                <span>
+                  · {liveBreakdown.hallucinated > 0 ? liveBreakdown.hallucinated : ""}
+                  {liveBreakdown.hallucinated > 0 ? " " : ""}hallucinated citations auto-hidden
+                </span>
+              )}
             </div>
           )}
         </div>

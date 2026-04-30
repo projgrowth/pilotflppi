@@ -52,7 +52,14 @@ export async function withCostCtx<T>(
   }
 }
 
+// Cost telemetry is opt-in via the COST_METRIC_LOGGING env var. By default
+// we DO NOT write cost rows into pipeline_error_log — they crowd the error
+// table (~280 rows in 14 days for one project) and make real failures hard
+// to spot. Set COST_METRIC_LOGGING=1 in the function env to re-enable.
+const COST_METRIC_LOGGING_ENABLED = Deno.env.get("COST_METRIC_LOGGING") === "1";
+
 export async function recordCostMetric(metadata: Record<string, unknown>): Promise<void> {
+  if (!COST_METRIC_LOGGING_ENABLED) return;
   const ctx = CURRENT_COST_CTX;
   if (!ctx.admin || !ctx.planReviewId) return;
   try {
@@ -74,6 +81,6 @@ export async function recordCostMetric(metadata: Record<string, unknown>): Promi
     });
   } catch (err) {
     // Best-effort — never let telemetry mask a real error.
-    console.error("[cost_metric] insert failed:", err);
+    console.warn("[cost_metric] insert failed:", err instanceof Error ? err.message : String(err));
   }
 }
