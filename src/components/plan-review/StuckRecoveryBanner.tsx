@@ -219,7 +219,12 @@ export function StuckRecoveryBanner({
               {unverifiedCount > 0 && (
                 <span>· {unverifiedCount} awaiting verifier ({unverifiedPct}%)</span>
               )}
-              {hasHallucinated && <span>· hallucinated citations auto-hidden</span>}
+              {(liveBreakdown.hallucinated > 0 || hasHallucinated) && (
+                <span>
+                  · {liveBreakdown.hallucinated > 0 ? liveBreakdown.hallucinated : ""}
+                  {liveBreakdown.hallucinated > 0 ? " " : ""}hallucinated citations auto-hidden
+                </span>
+              )}
             </div>
           )}
         </div>
