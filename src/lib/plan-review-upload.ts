@@ -210,14 +210,12 @@ export async function uploadPlanReviewFiles(
         expected: totalExpectedPages,
       });
       if (failures.length > 0) {
+        // Aggregate per-file but DON'T flood warnings — the caller now uses
+        // the structured `failedFiles` array to render one consolidated toast
+        // (or recovery modal). Previously this pushed N+2 strings, producing
+        // four stacked toasts on the same event.
         const byFile = new Map<string, number>();
         for (const f of failures) byFile.set(f.fileName, (byFile.get(f.fileName) ?? 0) + 1);
-        for (const [fileName, count] of byFile) {
-          warnings.push(`${fileName}: ${count} of its pages failed to rasterize.`);
-        }
-        warnings.push(
-          `Rasterized ${succeeded.length} of ${totalExpectedPages} page${totalExpectedPages === 1 ? "" : "s"} — ${failures.length} failed.`,
-        );
       }
     } catch (err) {
       warnings.push(
@@ -315,18 +313,36 @@ export async function uploadPlanReviewFiles(
   // 6. Decide whether to start the pipeline. We refuse on a partial manifest
   // (<80% rasterized) — running on incomplete pages is the silent-failure
   // precursor we just spent rounds 1-6 cleaning up after. Caller surfaces a
-  // "Prepare pages first" CTA via the partialRasterize flag.
+  // recovery modal via the partialRasterize / hardRasterFailure flags.
   const successRatio =
     totalExpectedPages > 0 ? pageAssetRows.length / totalExpectedPages : 1;
   const partialRasterize =
     totalExpectedPages > 0 && successRatio < MIN_RASTERIZE_RATIO;
+  const hardRasterFailure =
+    totalExpectedPages > 0 && pageAssetRows.length === 0;
+
+  // Aggregate failures by file for the recovery dialog. One row per source PDF.
+  const failedFiles: Array<{ fileName: string; failedPages: number; sampleReason: string | null }> = [];
+  if (allFailures.length > 0) {
+    const grouped = new Map<string, { count: number; sample: string | null }>();
+    for (const f of allFailures) {
+      const cur = grouped.get(f.fileName) ?? { count: 0, sample: null };
+      cur.count += 1;
+      if (!cur.sample && f.reason) cur.sample = f.reason;
+      grouped.set(f.fileName, cur);
+    }
+    for (const [fileName, v] of grouped) {
+      failedFiles.push({ fileName, failedPages: v.count, sampleReason: v.sample });
+    }
+  }
 
   let pipelineStarted = false;
   if (partialRasterize) {
-    const reason = `Only ${pageAssetRows.length} of ${totalExpectedPages} pages prepared. Use "Prepare pages now" to retry the gaps before analyzing.`;
-    warnings.push(`Pipeline NOT started — ${reason}`);
+    const reason = hardRasterFailure
+      ? `0 of ${totalExpectedPages} pages prepared. We'll try once more in your browser before asking you to re-upload.`
+      : `Only ${pageAssetRows.length} of ${totalExpectedPages} pages prepared. We'll retry the gaps automatically.`;
     // Persist the limbo state so a user who closes the tab and comes back
-    // tomorrow sees the StuckRecoveryBanner CTA instead of an empty workspace.
+    // tomorrow sees the recovery CTA instead of an empty workspace.
     await supabase
       .from("plan_reviews")
       .update({
@@ -354,7 +370,9 @@ export async function uploadPlanReviewFiles(
     pageAssetCount: pageAssetRows.length,
     pipelineStarted,
     partialRasterize,
+    hardRasterFailure,
     expectedPages: totalExpectedPages,
+    failedFiles,
     warnings,
   };
 }
