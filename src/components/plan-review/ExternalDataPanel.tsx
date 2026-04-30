@@ -190,6 +190,8 @@ function Card({
   loading,
   onRefresh,
   snapshotAt,
+  errorMessage,
+  onRetry,
   children,
 }: {
   icon: React.ReactNode;
@@ -197,6 +199,8 @@ function Card({
   loading: boolean;
   onRefresh?: () => void;
   snapshotAt: string | null;
+  errorMessage?: string | null;
+  onRetry?: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -230,7 +234,29 @@ function Card({
           )}
         </div>
       </header>
-      <div className="px-3 py-3 text-xs">{children}</div>
+      <div className="px-3 py-3 text-xs">
+        {errorMessage && !loading ? (
+          <div className="flex items-start gap-2 rounded border border-destructive/30 bg-destructive/5 p-2 text-destructive">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">Lookup failed</div>
+              <div className="text-2xs opacity-80 break-words">{errorMessage}</div>
+            </div>
+            {onRetry && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 shrink-0 text-2xs"
+                onClick={onRetry}
+              >
+                Retry
+              </Button>
+            )}
+          </div>
+        ) : (
+          children
+        )}
+      </div>
     </section>
   );
 }
