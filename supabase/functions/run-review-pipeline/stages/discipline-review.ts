@@ -113,12 +113,31 @@ async function runDisciplineChecks(
   firmId: string | null,
   ctx: DisciplineRunCtx,
 ): Promise<number> {
-  const { data: items } = await admin
+  // Map display discipline -> checklist `discipline` slug. Residential
+  // disciplines have their own slugs in discipline_negative_space.
+  const checklistDisciplineSlug = (() => {
+    const d = ctx.discipline;
+    if (d === "Residential Building") return "residential_building";
+    if (d === "Residential Structural") return "residential_structural";
+    if (d === "Residential MEP") return "residential_mep";
+    if (d === "Residential Energy") return "residential_energy";
+    if (d === "Product Approvals") return "product_approvals";
+    if (d === "Life Safety") return "life_safety";
+    return d.toLowerCase();
+  })();
+  let checklistQuery = admin
     .from("discipline_negative_space")
     .select("item_key, description, fbc_section, trigger_condition")
-    .eq("discipline", ctx.discipline)
+    .eq("discipline", checklistDisciplineSlug)
     .eq("is_active", true)
     .order("sort_order", { ascending: true });
+  // use_type IS NULL = applies to both. Otherwise restrict.
+  if (ctx.useType === "residential") {
+    checklistQuery = checklistQuery.or("use_type.eq.residential,use_type.is.null");
+  } else if (ctx.useType === "commercial") {
+    checklistQuery = checklistQuery.or("use_type.eq.commercial,use_type.is.null");
+  }
+  const { data: items } = await checklistQuery;
 
   const checklist = (items ?? []) as Array<{
     item_key: string;
