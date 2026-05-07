@@ -31,6 +31,7 @@ export const STAGES: Stage[] = [
   "submittal_check",
   "dna_extract",
   "discipline_review",
+  "checklist_sweep",
   "critic",
   "verify",
   "dedupe",
