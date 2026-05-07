@@ -1027,17 +1027,28 @@ export async function stageDisciplineReview(
 
   let cancelledMidRun = false;
 
+  // Map a residential expert to the underlying sheet-routed disciplines
+  // produced by the title-block parser (which uses commercial labels).
+  const sourceDisciplinesFor = (d: string): string[] => {
+    if (d === "Residential Building") return ["Architectural"];
+    if (d === "Residential Structural") return ["Structural"];
+    if (d === "Residential MEP") return ["MEP"];
+    if (d === "Residential Energy") return ["Architectural", "MEP"];
+    return [d];
+  };
+
   for (const discipline of disciplinesToRun) {
     if (cancelledMidRun) break;
     try {
+      const sources = sourceDisciplinesFor(discipline);
       const disciplineSheets = routed.filter(
-        (s) => s.discipline === discipline && !unchangedSheetRefs.has(s.sheet_ref),
+        (s) => s.discipline !== null && sources.includes(s.discipline) && !unchangedSheetRefs.has(s.sheet_ref),
       );
       const allUrls = disciplineSheets
         .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
         .filter(Boolean) as string[];
 
-      const totalForDiscipline = routed.filter((s) => s.discipline === discipline).length;
+      const totalForDiscipline = routed.filter((s) => s.discipline !== null && sources.includes(s.discipline)).length;
       byDiscipline[discipline] = { reviewed: totalForDiscipline - disciplineSheets.length, total: totalForDiscipline };
 
       if (allUrls.length === 0) continue;
