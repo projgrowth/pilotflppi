@@ -21,6 +21,7 @@ import {
   type PipelineMode,
   STAGES,
   stagesForMode,
+  stagesForUseType,
   NEEDS_BROWSER_RASTERIZATION,
 } from "./_shared/types.ts";
 import { setStage, recordPipelineError, mergeProgress } from "./_shared/pipeline-status.ts";
@@ -39,6 +40,7 @@ import {
   type DnaHealth,
 } from "./stages/dna.ts";
 import { stageDisciplineReview } from "./stages/discipline-review.ts";
+import { stageChecklistSweep } from "./stages/checklist-sweep.ts";
 import { stageCritic } from "./stages/critic.ts";
 import { stageVerify } from "./stages/verify.ts";
 import { stageDedupe } from "./stages/dedupe.ts";
