@@ -159,11 +159,12 @@ export async function stageChecklistSweep(
     return { skipped: true, reason: "no_sheets" };
   }
 
-  // Build page_index → signed_url map from sheets table cross-reference
+  // Build sheet_ref → signed_url map. signed[] is page-indexed (mirrors dna.ts).
   const urlBySheetRef = new Map<string, string>();
-  for (let i = 0; i < signed.length; i++) {
-    const sheet = sheets.find((s) => s.page_index === i);
-    if (sheet) urlBySheetRef.set(sheet.sheet_ref.toUpperCase(), signed[i].signed_url);
+  for (const s of sheets) {
+    if (typeof s.page_index === "number" && signed[s.page_index]?.signed_url) {
+      urlBySheetRef.set(s.sheet_ref.toUpperCase(), signed[s.page_index].signed_url);
+    }
   }
 
   const projectScope = JSON.stringify(
