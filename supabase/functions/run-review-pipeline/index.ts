@@ -114,7 +114,7 @@ Deno.serve(async (req) => {
 
     const { data: pr, error: prErr } = await admin
       .from("plan_reviews")
-      .select("id, firm_id, ai_run_mode")
+      .select("id, firm_id, ai_run_mode, projects(use_type)")
       .eq("id", plan_review_id)
       .maybeSingle();
     if (prErr || !pr) {
@@ -125,6 +125,8 @@ Deno.serve(async (req) => {
     }
     const firmId = (pr as { firm_id: string | null }).firm_id;
     const persistedMode = (pr as { ai_run_mode?: string | null }).ai_run_mode;
+    const useType =
+      ((pr as { projects?: { use_type?: string | null } | null }).projects?.use_type) ?? null;
 
     // Internal self-invokes from the dispatcher always pass an explicit
     // mode. But watchdog-triggered recoveries default to "core" — which
@@ -135,7 +137,9 @@ Deno.serve(async (req) => {
       persistedMode === "deep" || persistedMode === "full"
         ? (persistedMode as PipelineMode)
         : mode;
-    const effectiveChain = stagesForMode(effectiveMode);
+    // Use-type-aware chain: residential CORE runs the simplified
+    // checklist-sweep chain instead of the multi-discipline freelance pass.
+    const effectiveChain = stagesForUseType(effectiveMode, useType);
 
     // First-touch: persist the mode the user originally chose so a future
     // recovery worker can rebuild the same chain.
