@@ -9,6 +9,7 @@ export type Stage =
   | "submittal_check"
   | "dna_extract"
   | "discipline_review"
+  | "checklist_sweep"
   | "critic"
   | "verify"
   | "dedupe"
@@ -30,6 +31,7 @@ export const STAGES: Stage[] = [
   "submittal_check",
   "dna_extract",
   "discipline_review",
+  "checklist_sweep",
   "critic",
   "verify",
   "dedupe",
@@ -94,10 +96,40 @@ export const DEEP_STAGES: Stage[] = [
 
 export type PipelineMode = "core" | "deep" | "full";
 
+// Residential CORE chain. Replaces discipline_review + critic + dedupe +
+// verify + challenger with a single deterministic checklist_sweep stage.
+// Rationale: residential reviews against the FBCR 8th Edition checklist
+// don't benefit from multi-persona freelance findings — they need a clean
+// pass/fail per checklist item, which is exactly what checklist_sweep gives.
+export const RESIDENTIAL_CORE_STAGES: Stage[] = [
+  "upload",
+  "prepare_pages",
+  "sheet_map",
+  "dna_extract",
+  "checklist_sweep",
+  "ground_citations",
+  "complete",
+];
+
 export function stagesForMode(mode: PipelineMode): Stage[] {
   if (mode === "deep") return DEEP_STAGES;
   if (mode === "full") return STAGES;
   return CORE_STAGES;
+}
+
+/**
+ * Use-type-aware chain selection. Residential projects get the simplified
+ * checklist-sweep chain in CORE mode. DEEP/FULL fall back to the
+ * commercial chains since they target multi-trade QA passes.
+ */
+export function stagesForUseType(
+  mode: PipelineMode,
+  useType: string | null,
+): Stage[] {
+  if (mode === "core" && useType === "residential") {
+    return RESIDENTIAL_CORE_STAGES;
+  }
+  return stagesForMode(mode);
 }
 
 export type ChatMessage = {

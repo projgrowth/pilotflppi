@@ -21,6 +21,7 @@ import {
   type PipelineMode,
   STAGES,
   stagesForMode,
+  stagesForUseType,
   NEEDS_BROWSER_RASTERIZATION,
 } from "./_shared/types.ts";
 import { setStage, recordPipelineError, mergeProgress } from "./_shared/pipeline-status.ts";
@@ -39,6 +40,7 @@ import {
   type DnaHealth,
 } from "./stages/dna.ts";
 import { stageDisciplineReview } from "./stages/discipline-review.ts";
+import { stageChecklistSweep } from "./stages/checklist-sweep.ts";
 import { stageCritic } from "./stages/critic.ts";
 import { stageVerify } from "./stages/verify.ts";
 import { stageDedupe } from "./stages/dedupe.ts";
@@ -112,7 +114,7 @@ Deno.serve(async (req) => {
 
     const { data: pr, error: prErr } = await admin
       .from("plan_reviews")
-      .select("id, firm_id, ai_run_mode")
+      .select("id, firm_id, ai_run_mode, projects(use_type)")
       .eq("id", plan_review_id)
       .maybeSingle();
     if (prErr || !pr) {
@@ -123,6 +125,8 @@ Deno.serve(async (req) => {
     }
     const firmId = (pr as { firm_id: string | null }).firm_id;
     const persistedMode = (pr as { ai_run_mode?: string | null }).ai_run_mode;
+    const useType =
+      ((pr as { projects?: { use_type?: string | null } | null }).projects?.use_type) ?? null;
 
     // Internal self-invokes from the dispatcher always pass an explicit
     // mode. But watchdog-triggered recoveries default to "core" — which
@@ -133,7 +137,9 @@ Deno.serve(async (req) => {
       persistedMode === "deep" || persistedMode === "full"
         ? (persistedMode as PipelineMode)
         : mode;
-    const effectiveChain = stagesForMode(effectiveMode);
+    // Use-type-aware chain: residential CORE runs the simplified
+    // checklist-sweep chain instead of the multi-discipline freelance pass.
+    const effectiveChain = stagesForUseType(effectiveMode, useType);
 
     // First-touch: persist the mode the user originally chose so a future
     // recovery worker can rebuild the same chain.
@@ -210,6 +216,7 @@ Deno.serve(async (req) => {
           ? stageDnaReevaluate(admin, plan_review_id)
           : stageDnaExtract(admin, plan_review_id, firmId),
       discipline_review: () => stageDisciplineReview(admin, plan_review_id, firmId),
+      checklist_sweep: () => stageChecklistSweep(admin, plan_review_id, firmId),
       critic: () => stageCritic(admin, plan_review_id),
       verify: () => stageVerify(admin, plan_review_id),
       dedupe: () => stageDedupe(admin, plan_review_id),
@@ -435,6 +442,7 @@ Deno.serve(async (req) => {
         const NON_FATAL_RETRY_STAGES = new Set<Stage>([
           "sheet_map",
           "discipline_review",
+          "checklist_sweep",
           "critic",
           "verify",
           "dedupe",

@@ -1,128 +1,96 @@
+## Goal
 
-## Why the model hallucinates on residential
+Stop trying to be clever on residential. The user's concern is simple: **nail the checklist and prep the cover sheet**. Right now even after Residential Mode, a residential run still fans out to 5 disciplines, runs critic + dedupe + ground_citations + verify + challenger, and lets the model freelance findings. We're going to collapse it.
 
-I read the pipeline end-to-end (`run-review-pipeline/index.ts`, `discipline-experts.ts`, `stages/discipline-review.ts`, `stages/dna.ts`, `stages/ground-citations.ts`) and queried the seed data. There are five concrete reasons residential reviews invent commercial problems:
+## What stays vs. what goes (residential only)
 
-1. **No residential persona exists.** Every entry in `DISCIPLINE_EXPERTS` is written for FBC-**Building** commercial work — Architectural's failure modes literally say *"Common path of travel exceeds 75 ft (B occ, sprinklered)"*, Life Safety's persona is *"NFPA 101 + FBC-B Ch.10"*, Accessibility cites FBC Ch.11. For a residential job we currently only:
-   - filter Accessibility out of the run list (line 955),
-   - prepend a one-line `useTypeLine` hint ("apply FBCR not FBC Building").
-   The 200-line commercial system prompt is still sent. That hint loses to the persona every time.
+```text
+CURRENT residential CORE chain (10 stages):
+  upload → prepare_pages → sheet_map → callout_graph → submittal_check
+  → dna_extract → discipline_review (×5 experts) → critic → dedupe
+  → ground_citations → verify → challenger → complete
 
-2. **The "mandatory checklist" is 100% commercial.** `discipline_negative_space` has 47 active rows — `0` for residential. Every row cites FBC-B / FBC-A / FBC-EC / NEC. We then instruct the model "audit against this MANDATORY checklist", so it dutifully invents FBC §1006.2.1 common-path findings for a single-family house.
+NEW residential chain (6 stages):
+  upload → prepare_pages → sheet_map → cover_scope → checklist_sweep
+  → ground_citations → complete
+```
 
-3. **Too many disciplines run.** For a typical SFR we still spin up Architectural, Structural, Energy, MEP, Life Safety, Civil, Landscape, Product Approvals — 8 expert calls × multiple chunks. Most are irrelevant to a 70%-of-portfolio house and each call must "find something" to feel useful, which produces noise.
+Removed for residential: `callout_graph`, `submittal_check` (already skipped), `dna_extract` (replaced by lighter `cover_scope`), `discipline_review`, `critic`, `dedupe`, `verify`, `challenger`. Commercial chain is unchanged.
 
-4. **Citation grounding leans commercial.** `fbc_code_sections` has 504 rows, only 37 residential. When `ground_citations` falls back to the vector-similarity nearest-neighbor (threshold 0.55), it overwhelmingly suggests an FBC-B section, "verifying" a hallucinated commercial citation.
+## The two stages that do the work
 
-5. **Reviewer memory + jurisdiction context are not use-type scoped.** Learned `correction_patterns` and HVHZ/jurisdiction blocks are injected regardless of use type, so commercial rejections and HVHZ uplift talk leak into residential prompts.
+### 1. `cover_scope` (new, replaces `dna_extract` for residential)
 
-There is also no **per-project scope summary**. The model never sees a sentence like *"This is a new 2-story SFR, ~2,400 sf, no pool, no accessory structure"* — it just sees raw sheets and a generic checklist, so it free-associates.
-
-## What we will build
-
-A "Residential mode" that is the default path for `projects.use_type = 'residential'` and that strips back everything not anchored to **FBC Residential 8th Edition (2023) — codes.iccsafe.org/content/FLRC2023P2**.
-
-### 1. Residential personas + failure modes (`discipline-experts.ts`)
-
-Add a parallel `RESIDENTIAL_DISCIPLINE_EXPERTS` table keyed to the disciplines that actually apply to FBCR work:
-
-- `Residential Building` — FBCR Ch. 3 (building planning), 4 (foundations), 5 (floors), 6 (walls), 7 (wall covering), 8 (roof-ceiling), 9 (roof assemblies), 10 (chimneys), 11 (energy efficiency).
-- `Residential Structural` — FBCR Ch. 3 R301 (loads, wind), R401-R407 (foundations), R602 (wood walls), R802 (rafters/trusses), HVHZ R4404.
-- `Residential MEP` — FBCR Ch. 12-24 (mechanical, fuel gas), Ch. 25-32 (plumbing), Ch. 33-43 (electrical), referencing NEC where adopted.
-- `Residential Energy` — FBCR Ch. 11 / FBC-EC Residential provisions (climate zone 1/2 path, RESCheck/Form R405).
-- `Product Approvals` — keep, but trimmed to windows/doors/roofing/garage doors with FL# (NOA only when HVHZ).
-
-Each persona will:
-- Open with *"FBC Residential 8th Edition (2023) is the controlling code. FBC-Building, NFPA 101, and FBC Ch.11 do NOT apply unless the cover sheet declares a use beyond R-3."*
-- List failure modes drawn from FBCR (e.g. *"R310 EERO not provided in basement / habitable attic"*, *"R602.10 braced wall lines not designated"*, *"R301.2.1 wind design not shown"*, *"R703 weather-resistive barrier not specified"*).
-- End with the existing SHARED_RULES block.
-
-`composeDisciplineSystemPrompt(discipline, { useType })` will pick the residential or commercial table based on `useType` rather than always pulling from the commercial table.
-
-### 2. Residential checklist seed (`discipline_negative_space`)
-
-Add ~40 active rows with `use_type = 'residential'` covering at minimum:
-
-- R301 wind design parameters declared on cover/structural notes
-- R302 fire separation (townhouse / garage to dwelling)
-- R310 emergency escape & rescue openings
-- R311 means of egress (stairs, halls, doors)
-- R312 guards & R313 sprinklers (if townhouse)
-- R314 smoke alarms / R315 CO alarms
-- R316 foam plastic insulation
-- R401-R407 foundation
-- R602.10 braced wall lines + R602.11 anchorage
-- R703 exterior wall covering / WRB
-- R802 rafters/trusses & R806 attic ventilation
-- R903 roof drainage / R905 roof coverings (with FL#/NOA)
-- R1001 chimneys / R1002 fireplaces
-- N1101+ energy provisions (envelope, mechanical, lighting paths)
-- Plumbing Ch.25-32 (water heater PRV, backflow, fixture rough-in)
-- Electrical Ch.34-43 (service size, AFCI/GFCI, panel sched, smoke/CO power)
-
-Schema change: add `use_type text` column to `discipline_negative_space` and update the `runDisciplineChecks` query to `.eq('use_type', useType)` (treat null as "applies to both" for back-compat).
-
-### 3. Cover-sheet scope extractor (new mini-stage)
-
-Right after `dna_extract`, call a small `scope_summary` extractor on the cover/index sheet only. It outputs a short JSON blob the rest of the pipeline injects verbatim:
+One AI call against the cover sheet + index sheet only. Outputs a small JSON blob:
 
 ```text
 {
-  building_type: "single_family_detached" | "townhouse" | "duplex" | "addition" | "renovation",
-  stories: 1,
-  conditioned_sf: 2380,
-  has_garage: true,
-  has_pool: false,
-  has_accessory_structure: false,
-  hvhz: false,
-  scope_notes: "New 2-story SFR on slab, attached 2-car garage, asphalt shingle roof"
+  building_type, stories, conditioned_sf, has_garage, has_pool,
+  hvhz, wind_speed, exposure, climate_zone, scope_notes
 }
 ```
 
-This is prepended to every discipline prompt as the **PROJECT SCOPE** section. The model is told: *"Only raise findings that are clearly within this scope. Do NOT invent components (pool, elevator, sprinkler riser, etc.) that are not listed here."*
+Written to `project_dna` (reusing existing columns) so downstream UI keeps working. No persona, no failure-mode brainstorming — pure extraction.
 
-### 4. Discipline trim for residential
+### 2. `checklist_sweep` (new, replaces `discipline_review` for residential)
 
-In `discipline-review.ts` line 955, replace the current filter with:
+Deterministic loop over the residential rows in `discipline_negative_space` (the ~41 FBCR items we already seeded). For each checklist item:
 
-```text
-useType === "residential"
-  ? ["Residential Building", "Residential Structural", "Residential MEP",
-     "Residential Energy", "Product Approvals"]
-  : DISCIPLINES
-```
+1. Pull the 1-3 most likely sheets for that item (from `sheet_coverage` discipline mapping — e.g. R310 EERO → Architectural floor plans; R602.10 braced walls → Structural).
+2. One narrow AI call: *"Looking ONLY at these sheets, is FBCR §X complied with? Answer: compliant / deficient / not_visible. If deficient or not_visible, write a one-sentence finding."*
+3. Insert the result as a finding tagged with that checklist row id, `requires_human_review=true` for `not_visible`.
 
-Drop `Life Safety`, `Civil`, `Landscape`, and `Accessibility` for residential by default. Civil/Landscape only get re-enabled if the scope summary shows a separate site-civil sheet set.
+This guarantees:
+- **One finding per checklist item, max.** No fan-out, no duplicates, nothing to dedupe.
+- **Every checklist item gets a verdict** — the human always sees the full FBCR list, not whatever the model felt like raising.
+- **No hallucinated topics** — the model can't invent items not on the checklist; it only judges items we hand it.
 
-### 5. Use-type-aware grounding + reviewer memory
+Because findings already carry the FBCR section from the checklist row, `ground_citations` becomes a trivial deterministic check (no vector fallback needed).
 
-- `ground_citations`: when `useType === 'residential'`, filter `match_fbc_code_sections` to rows whose `code` is `FBCR` or whose `section` matches `^R\d` / `^N11\d` / `^M\d`/`^P\d`/`^E\d`. Vector fallback that returns a non-residential hit becomes `mismatch` instead of `verified`.
-- Backfill `fbc_code_sections` with the FBCR 8th-edition table of contents (chapter + section + title) from `codes.iccsafe.org/content/FLRC2023P2` so verification has something to land on. Bodies can be stubs initially — the existence check is what matters.
-- `correction_patterns` query in `discipline-review.ts` adds `.eq('use_type', useType)` so commercial rejections don't pollute residential prompts.
+### 3. Stages we drop for residential and why
 
-### 6. Strip cross-cutting noise
+- `discipline_review`: replaced by checklist_sweep. The 5 expert personas were the main hallucination source.
+- `critic` / `verify` / `challenger`: these existed to second-guess freeform findings. Checklist findings are pre-scoped — second-guessing adds latency and noise.
+- `dedupe`: nothing to dedupe when each checklist item produces ≤1 finding.
+- `callout_graph`: useful for multi-trade commercial sets; on a 12-sheet SFR it adds no signal.
+- `dna_extract`: replaced by lighter `cover_scope`. The full DNA extractor pulls ~40 fields tuned for commercial; we only need ~10 for residential.
 
-For residential, also disable in this pass:
+## Cost / latency impact
 
-- `submittal_check` already skips (good). Also skip `cross_check`, `deferred_scope`, `challenger`, `callout_graph` for residential — they're tuned for multi-trade commercial sets and add latency without useful findings.
-- Remove the HVHZ/jurisdiction prose block from prompts when `dna.hvhz === false`.
-- Self-critique pass (`runDisciplineChecks` SELF_CRITIQUE) stays — it actually fights hallucination — but its prompt gets the same RESIDENTIAL persona.
+Today a residential run is ~5 experts × ~3 chunks × ~$0.04 + critic + verify + challenger ≈ **~$1.20 and 4-7 min**. New chain is `cover_scope` (1 call) + `checklist_sweep` (~41 cheap calls, batchable to ~8) + `ground_citations` (deterministic) ≈ **~$0.25 and 60-90 sec**.
 
-### 7. Final checklist sweep (your "reference back to checklist at end of day")
+## UI side — the board
 
-After all discipline calls finish, run a deterministic sweep that takes the ordered residential checklist (#2 above) and the union of all findings. For each checklist item with no matching finding, insert a low-priority "Verify on plan: <item>" finding tagged `requires_human_review=true`. This guarantees a human sees every checklist item even if AI missed it, without the AI fabricating a deficient quote.
+The review dashboard board currently groups findings by discipline. For residential we'll add a simple toggle that defaults to **"Checklist view"**: rows are the FBCR checklist items in a fixed order (R301 → R314 → R401 → R602 → R703 → R802 → R903 → N1101 → P/E), each row showing compliant / deficient / verify-on-plan. Discipline view still available but secondary.
+
+Cover-sheet card on the dashboard pulls directly from `cover_scope` output so the reviewer sees the project summary up top before any findings.
 
 ## Technical details
 
-- Files: `supabase/functions/run-review-pipeline/discipline-experts.ts`, `stages/discipline-review.ts`, `stages/dna.ts`, `stages/ground-citations.ts`, `_shared/types.ts` (add residential disciplines + `stagesForResidential` chain), and a new `stages/scope-summary.ts`.
-- Migrations: add `use_type text` to `discipline_negative_space` and seed FBCR rows; backfill FBCR section index in `fbc_code_sections`.
-- Model: keep `google/gemini-2.5-flash` for cost; the wins come from prompt scoping, not a bigger model.
-- Backward compatibility: commercial flow is unchanged — all changes branch on `projects.use_type === 'residential'`.
+**New files**
+- `supabase/functions/run-review-pipeline/stages/cover-scope.ts`
+- `supabase/functions/run-review-pipeline/stages/checklist-sweep.ts`
 
-## Out of scope for this pass
+**Modified**
+- `_shared/types.ts`: add `cover_scope` + `checklist_sweep` to `Stage`; add `RESIDENTIAL_CORE_STAGES` and a `stagesForUseType(mode, useType)` helper.
+- `index.ts`: dispatch on `useType` when picking the chain.
+- `discipline-review.ts`: leave commercial path intact; early-return for residential (defensive, since chain won't include it).
+- `discipline_negative_space`: add `sheet_hints text[]` column so each checklist row declares which sheet disciplines/keywords to inspect (e.g. R310 → `["Architectural"]`, plus title-keyword `["floor plan","bedroom"]`).
+- `ground-citations.ts`: short-circuit for residential findings that already carry an FBCR section from the checklist row.
+- New small UI: "Checklist view" tab on the review board (FindingsListPanel) — groups by `checklist_item_id` instead of discipline when `useType==='residential'`.
 
-- AI learning loop changes beyond the use-type filter
-- UI changes to plan review (separate task)
-- Importing full FBCR body text — we seed titles/sections only; full text comes later
+**Deferred (not in this pass)**
+- FBCR full-text seed in `fbc_code_sections` (titles already exist; bodies later)
+- AI learning loop changes
+- Commercial pipeline simplification (separate effort)
 
-I'll implement in this order on approval: residential personas → checklist seed + schema column → scope-summary stage → discipline trim + memory filter → grounding filter + FBCR section seed → final checklist sweep.
+**Backward compat**: Commercial chain, personas, and all existing stages untouched. Existing in-flight residential runs finish on the old chain; only new runs use the simplified one.
+
+## Implementation order on approval
+
+1. Schema: add `sheet_hints` column + backfill the 41 residential rows with sensible hints.
+2. `cover_scope` stage + wire into chain.
+3. `checklist_sweep` stage + batched AI calls.
+4. `stagesForUseType` dispatch in `index.ts`.
+5. Checklist view tab on the review board.
+6. Smoke test on a real residential set, compare findings against the FBCR checklist.

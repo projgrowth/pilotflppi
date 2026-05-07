@@ -919,6 +919,7 @@ export type Database = {
           id: string
           is_active: boolean
           item_key: string
+          sheet_hints: Json
           sort_order: number
           trigger_condition: string | null
           updated_at: string
@@ -932,6 +933,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           item_key: string
+          sheet_hints?: Json
           sort_order?: number
           trigger_condition?: string | null
           updated_at?: string
@@ -945,6 +947,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           item_key?: string
+          sheet_hints?: Json
           sort_order?: number
           trigger_condition?: string | null
           updated_at?: string
