@@ -444,12 +444,36 @@ export function composeDisciplineSystemPrompt(
         `If a deficiency only exists because a missing trade isn't here, classify it as a procedural finding (no code_section, set permit_blocker=true, requires_human_review=true) noting which trade is missing — the submittal-check stage already raised a top-level blocker.\n`
       : "";
 
+  // Residential header — pinned to the top so the persona that follows is
+  // unambiguously rooted in FBCR. Critical: prevents the model from leaning
+  // on its (much larger) commercial training corpus.
+  const residentialHeader =
+    useType === "residential"
+      ? `## CONTROLLING CODE — READ FIRST
+This is a 1- or 2-family dwelling / townhouse permit. The Florida Building Code, Residential, 8th Edition (2023) (FBCR) is the ONLY applicable building code. FBC-Building, NFPA 101, and FBC Chapter 11 (commercial accessibility / 2010 ADA) DO NOT apply and citing them is a defect. Use FBCR section numbers (e.g. R310.1, R602.10, R905, M1505, P2902, E3902).
+Reference: codes.iccsafe.org/content/FLRC2023P2
+
+`
+      : "";
+
+  const scopeBlock =
+    options?.scopeSummary && options.scopeSummary.trim().length > 0
+      ? `## PROJECT SCOPE — derived from cover sheet
+${options.scopeSummary.trim()}
+
+Only raise findings clearly within this scope. Do NOT invent components (pool, elevator, sprinkler riser, accessory structure, etc.) that are not listed in the scope above. If a checklist item refers to a component not in scope, skip it.
+
+`
+      : "";
+
   // Fallback for unknown disciplines — preserves old generic behavior so the
   // pipeline never breaks if a new discipline is added before its config.
   if (!expert) {
     return (
+      residentialHeader +
+      scopeBlock +
       `You are a Florida private-provider plan reviewer specializing in ${discipline}. ` +
-      `Audit submitted construction documents against the Florida Building Code and applicable referenced standards. ` +
+      `Audit submitted construction documents against the ${useType === "residential" ? "Florida Building Code, Residential (FBCR)" : "Florida Building Code"} and applicable referenced standards. ` +
       missingBlock +
       SHARED_RULES
     );
@@ -463,6 +487,8 @@ export function composeDisciplineSystemPrompt(
     .join("\n");
 
   return (
+    residentialHeader +
+    scopeBlock +
     `${expert.persona}\n\n` +
     `## Must-check domains for ${discipline}\n${checkDomainsBlock}\n\n` +
     `## Common failure modes — be biased to detect these\n${failureModesBlock}\n\n` +
