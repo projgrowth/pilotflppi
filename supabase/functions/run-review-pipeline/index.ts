@@ -216,6 +216,7 @@ Deno.serve(async (req) => {
           ? stageDnaReevaluate(admin, plan_review_id)
           : stageDnaExtract(admin, plan_review_id, firmId),
       discipline_review: () => stageDisciplineReview(admin, plan_review_id, firmId),
+      checklist_sweep: () => stageChecklistSweep(admin, plan_review_id, firmId),
       critic: () => stageCritic(admin, plan_review_id),
       verify: () => stageVerify(admin, plan_review_id),
       dedupe: () => stageDedupe(admin, plan_review_id),
@@ -441,6 +442,7 @@ Deno.serve(async (req) => {
         const NON_FATAL_RETRY_STAGES = new Set<Stage>([
           "sheet_map",
           "discipline_review",
+          "checklist_sweep",
           "critic",
           "verify",
           "dedupe",
