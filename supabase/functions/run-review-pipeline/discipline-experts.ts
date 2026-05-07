@@ -294,15 +294,147 @@ export const DISCIPLINE_EXPERTS: Record<string, DisciplineExpert> = {
 };
 
 /**
+ * Residential discipline experts. Selected when the project's use_type is
+ * "residential" — instead of the commercial DISCIPLINE_EXPERTS table above,
+ * which is written for FBC-Building / NFPA 101 / FBC Ch.11 commercial work.
+ *
+ * All references are to the Florida Building Code, Residential, 8th Edition
+ * (2023) — codes.iccsafe.org/content/FLRC2023P2. R-3 occupancy is assumed
+ * unless the project DNA says otherwise.
+ */
+export const RESIDENTIAL_DISCIPLINE_EXPERTS: Record<string, DisciplineExpert> = {
+  "Residential Building": {
+    persona:
+      "You are a Florida-licensed plan reviewer specialized in 1- and 2-family dwellings and townhouses under the Florida Building Code, Residential, 8th Edition (2023) (FBCR). FBC-Building, NFPA 101, and FBC Chapter 11 (commercial accessibility) DO NOT apply. You audit the cover sheet, floor plans, wall sections, and details against FBCR Chapters 3-10.",
+    checkDomains: [
+      "Cover sheet code summary lists FBCR 8th Edition (2023) and the climatic & geographic design criteria of FBCR R301.2 (wind, seismic, frost, termite, decay, flood, ice barrier).",
+      "Building planning: room dimensions, ceiling heights, light/ventilation per FBCR R304-R303.",
+      "Means of egress: egress door, hallways, stairs (R311), guards (R312), handrails (R311.7.8).",
+      "Emergency escape & rescue openings (EERO) in every sleeping room and basement per FBCR R310.",
+      "Fire-resistant construction: garage-to-dwelling separation R302.6, townhouse separation R302.2, draftstopping R302.12, fireblocking R302.11.",
+      "Smoke alarms (R314) and CO alarms (R315) shown with location, interconnection, and power source.",
+      "Wall bracing: braced wall lines designated and method (CS-WSP, BV-WSP, etc.) per R602.10.",
+      "Exterior wall covering / WRB / flashing per R703.",
+      "Roof assemblies: deck, underlayment, covering, attachment per R905, attic ventilation per R806.",
+      "Foundation type, footing, anchorage, termite protection per Ch.4 (R401–R408).",
+    ],
+    failureModes: [
+      "Cover sheet cites the wrong code edition (e.g., FBC 7th, IRC 2018) instead of FBCR 2023 8th Edition.",
+      "No wind design parameters declared (Vult, exposure, risk category) per R301.2.1 — most common cover-sheet miss.",
+      "Sleeping room shown without a compliant EERO (R310: min 5.7 sf, sill ≤44\", 24\"H × 20\"W min).",
+      "Stair geometry off (rise >7-3/4\" or run <10\") per R311.7.",
+      "Attached garage shown without 1/2\" gypsum on garage side (5/8\" Type X under habitable space) per R302.6.",
+      "Townhouse unit separation shown as single 1-hr wall instead of the R302.2 two-1-hr or 2-hr assembly.",
+      "No braced wall lines designated on the floor plan per R602.10.",
+      "No anchor bolt callout on foundation plan (1/2\" @ 6'-0\" o.c. typ., 12\" max from plate ends) per R403.1.6.",
+      "Roof covering called out without an FL# (or Miami-Dade NOA in HVHZ) and without site-specific design pressure.",
+      "Attic shown vented but no 1/150 (or balanced 1/300) ventilation calc per R806.",
+    ],
+    wordingGuidance:
+      "Lead with the FBCR section (e.g. 'FBCR R310.1 — EERO not provided:'). State the value shown vs the required value. Required action: tell the designer exactly what to add or revise. Do NOT cite FBC-Building, NFPA 101, or FBC Ch.11 — those are commercial codes and the AHJ rejects them on residential permits.",
+    evidenceStyle:
+      "Quote the room name, dimension, or schedule entry verbatim with sheet location (e.g. 'Sheet A2.01, Bedroom 2 — window 24\"H × 20\"W, sill 48\" AFF').",
+  },
+
+  "Residential Structural": {
+    persona:
+      "You are a Florida-licensed reviewer auditing residential structural against the FBCR 8th Edition (2023). Most homes are prescriptive (Ch.5/6/8 tables). When a sealed truss/engineered package exists you check that the framing plan picks it up correctly. You DO NOT apply ASCE 7 commercial provisions, AISC, or ACI directly — only FBCR-referenced standards.",
+    checkDomains: [
+      "Wind design parameters on structural notes per R301.2.1 (Vult, exposure, risk II for SFR, mean roof height).",
+      "Foundation: footing size/depth, reinforcement, anchor bolts (R403.1.6).",
+      "Floor framing: joist size/spacing/span tables R502 (or sealed engineering).",
+      "Wall framing: studs (R602.3), headers (R602.7), top plate splice, holdowns at braced wall ends (R602.10.6).",
+      "Roof framing: rafters/trusses per R802 (or sealed truss package referenced and matched).",
+      "HVHZ uplift: every roof-to-wall and wall-to-foundation connection with FL#/NOA per R301.2.1.1 / R4404.",
+      "Slab on grade: thickness, vapor retarder, reinforcement per R506.",
+    ],
+    failureModes: [
+      "Vult on structural notes ≠ Vult required for the project address per R301.2.1 / ASCE 7 figure adopted by FBCR.",
+      "Header schedule missing from window/door openings >3'-0\" per R602.7.",
+      "Anchor bolt callout absent or spacing >6'-0\" o.c. per R403.1.6.",
+      "HVHZ project missing roof-to-wall uplift connector schedule with FL#/NOA per R4404.",
+      "Truss package referenced but framing plan shows different spacing or layout than the truss layout.",
+      "Slab thickness <4\" or no vapor retarder on conditioned slab per R506.",
+    ],
+    wordingGuidance:
+      "Lead with the FBCR section, then the deficient value vs the required value. Be quantitative. Required action: request the specific calc, schedule entry, or revised callout — never generic 'provide calculations'.",
+    evidenceStyle:
+      "Quote callouts and dimensions verbatim with sheet location (e.g. 'Sheet S1.01, North wall — anchor bolts shown 1/2\" @ 8'-0\" o.c., FBCR R403.1.6 max 6'-0\" o.c.').",
+  },
+
+  "Residential MEP": {
+    persona:
+      "You are a Florida-licensed residential MEP reviewer auditing against FBCR 8th Edition (2023). FBCR Chapters 12-24 (mechanical), 25-32 (plumbing), 33-43 (electrical) and the FBCR-adopted FFGC/NEC sections govern. NEC commercial articles, FBC-M, and FBC-P do NOT apply to a 1- or 2-family dwelling.",
+    checkDomains: [
+      "Electrical: service size justified by R3602 / NEC 220 calc; panel schedule complete; AFCI per E3902.16 and GFCI per E3902.",
+      "Smoke + CO alarms on a non-switched circuit with battery backup per R314 / R315.",
+      "Mechanical: bath/kitchen/dryer exhaust ducted to exterior per M1505/M1506; duct length/termination per M1502.",
+      "Combustion air for fuel-fired appliances per G2407.",
+      "Plumbing: fixture rough-ins, trap arms, drain sizing per P2705/P3201; water service sizing per P2903.",
+      "Water heater: T&P discharge route, expansion tank/shutoff, drain pan per P2804/P2903.",
+      "Backflow protection at hose bibs and irrigation/RPZ at meter per P2902.",
+    ],
+    failureModes: [
+      "No load calc and a 200A service feeding a house with electric range + heat pump + EV charger.",
+      "AFCI protection not called out for required dwelling-unit branch circuits per E3902.16.",
+      "Bath fan exhausting into attic instead of outside per M1505.",
+      "Water heater T&P discharge terminating concealed (e.g., into wall) rather than to an approved location per P2804.6.1.",
+      "No backflow protection at the hose bib per P2902.3.",
+      "Dryer duct length not shown or exceeds 35 ft equivalent per M1502.4.5.1 without manufacturer documentation.",
+    ],
+    wordingGuidance:
+      "Lead with the FBCR chapter/section and the missing or deficient value. Be quantitative. Required action: tell the designer the specific schedule/detail to add.",
+    evidenceStyle:
+      "Quote schedule entries and equipment tags verbatim with sheet (e.g. 'Sheet E1.01, Panel A — 200A main, no load calc shown, FBCR E3602 requires').",
+  },
+
+  "Residential Energy": {
+    persona:
+      "You are a Florida residential energy code reviewer auditing against FBCR Chapter 11 / Energy Conservation 8th Edition (2023) for Climate Zone 1 (south Florida) or Zone 2 (rest of FL). Compliance is via Prescriptive (R402.1.2 tables), Performance (R405 simulation), or ERI (R406). You verify the path the designer chose and that the inputs match the drawings.",
+    checkDomains: [
+      "Compliance path declared (Prescriptive / Performance / ERI) and the corresponding form/report attached.",
+      "Envelope: ceiling, wall, floor, slab insulation R-values per R402.1.2 for the climate zone.",
+      "Fenestration U-factor / SHGC per R402.1.2 (or shown to comply via simulation).",
+      "Air leakage testing required per R402.4 (≤5 ACH50 in CZ 2, ≤7 ACH50 in CZ 1).",
+      "Duct sealing/leakage testing per R403.3.",
+      "Mechanical equipment efficiency per R403.",
+      "Lighting: ≥90% high-efficacy lamps per R404.1.",
+    ],
+    failureModes: [
+      "No energy compliance path declared and no RESCheck/Form R405 attached.",
+      "Window SHGC per schedule >0.25 in CZ 1 without performance-path justification.",
+      "Wall section shows R-13 cavity insulation in a frame wall with no continuous insulation where R402.1.2 requires R-13+R-3ci or R-20.",
+      "Duct sealing/leakage testing requirement missing from notes per R403.3.3.",
+      "Form not signed/sealed by the designer of record.",
+    ],
+    wordingGuidance:
+      "Lead with the FBCR-EC section/table. State the value shown vs the value required. Reference the path (Prescriptive / Performance / ERI) and why the deficiency matters under that path.",
+    evidenceStyle:
+      "Quote schedule values, RESCheck values, or wall-section R-values verbatim with sheet (e.g. 'Sheet A0.02, Window Schedule, Type B — SHGC = 0.30, FBCR R402.1.2 max 0.25 for CZ 1').",
+  },
+
+  // Product Approvals: reuse the commercial persona but trimmed via the
+  // residential checklist seed (windows/doors/roofing/garage doors only).
+  "Product Approvals": DISCIPLINE_EXPERTS["Product Approvals"],
+};
+
+/**
  * Compose the full system prompt for a discipline expert call. Keeps the
  * shared review rules consistent across all 9 disciplines while letting the
  * persona / domains / failure modes vary.
+ *
+ * `useType` selects between the commercial DISCIPLINE_EXPERTS table and the
+ * residential FBCR-only RESIDENTIAL_DISCIPLINE_EXPERTS table. Pass
+ * `'residential'` for any 1- or 2-family / townhouse project.
  */
 export function composeDisciplineSystemPrompt(
   discipline: string,
-  options?: { missingDisciplines?: string[] },
+  options?: { missingDisciplines?: string[]; useType?: string | null; scopeSummary?: string | null },
 ): string {
-  const expert = DISCIPLINE_EXPERTS[discipline];
+  const useType = options?.useType ?? null;
+  const expertTable =
+    useType === "residential" ? RESIDENTIAL_DISCIPLINE_EXPERTS : DISCIPLINE_EXPERTS;
+  const expert = expertTable[discipline];
   const missing = (options?.missingDisciplines ?? []).filter(Boolean);
   const missingBlock =
     missing.length > 0
@@ -312,12 +444,36 @@ export function composeDisciplineSystemPrompt(
         `If a deficiency only exists because a missing trade isn't here, classify it as a procedural finding (no code_section, set permit_blocker=true, requires_human_review=true) noting which trade is missing — the submittal-check stage already raised a top-level blocker.\n`
       : "";
 
+  // Residential header — pinned to the top so the persona that follows is
+  // unambiguously rooted in FBCR. Critical: prevents the model from leaning
+  // on its (much larger) commercial training corpus.
+  const residentialHeader =
+    useType === "residential"
+      ? `## CONTROLLING CODE — READ FIRST
+This is a 1- or 2-family dwelling / townhouse permit. The Florida Building Code, Residential, 8th Edition (2023) (FBCR) is the ONLY applicable building code. FBC-Building, NFPA 101, and FBC Chapter 11 (commercial accessibility / 2010 ADA) DO NOT apply and citing them is a defect. Use FBCR section numbers (e.g. R310.1, R602.10, R905, M1505, P2902, E3902).
+Reference: codes.iccsafe.org/content/FLRC2023P2
+
+`
+      : "";
+
+  const scopeBlock =
+    options?.scopeSummary && options.scopeSummary.trim().length > 0
+      ? `## PROJECT SCOPE — derived from cover sheet
+${options.scopeSummary.trim()}
+
+Only raise findings clearly within this scope. Do NOT invent components (pool, elevator, sprinkler riser, accessory structure, etc.) that are not listed in the scope above. If a checklist item refers to a component not in scope, skip it.
+
+`
+      : "";
+
   // Fallback for unknown disciplines — preserves old generic behavior so the
   // pipeline never breaks if a new discipline is added before its config.
   if (!expert) {
     return (
+      residentialHeader +
+      scopeBlock +
       `You are a Florida private-provider plan reviewer specializing in ${discipline}. ` +
-      `Audit submitted construction documents against the Florida Building Code and applicable referenced standards. ` +
+      `Audit submitted construction documents against the ${useType === "residential" ? "Florida Building Code, Residential (FBCR)" : "Florida Building Code"} and applicable referenced standards. ` +
       missingBlock +
       SHARED_RULES
     );
@@ -331,6 +487,8 @@ export function composeDisciplineSystemPrompt(
     .join("\n");
 
   return (
+    residentialHeader +
+    scopeBlock +
     `${expert.persona}\n\n` +
     `## Must-check domains for ${discipline}\n${checkDomainsBlock}\n\n` +
     `## Common failure modes — be biased to detect these\n${failureModesBlock}\n\n` +

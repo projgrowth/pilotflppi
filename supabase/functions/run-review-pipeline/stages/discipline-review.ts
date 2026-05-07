@@ -113,12 +113,31 @@ async function runDisciplineChecks(
   firmId: string | null,
   ctx: DisciplineRunCtx,
 ): Promise<number> {
-  const { data: items } = await admin
+  // Map display discipline -> checklist `discipline` slug. Residential
+  // disciplines have their own slugs in discipline_negative_space.
+  const checklistDisciplineSlug = (() => {
+    const d = ctx.discipline;
+    if (d === "Residential Building") return "residential_building";
+    if (d === "Residential Structural") return "residential_structural";
+    if (d === "Residential MEP") return "residential_mep";
+    if (d === "Residential Energy") return "residential_energy";
+    if (d === "Product Approvals") return "product_approvals";
+    if (d === "Life Safety") return "life_safety";
+    return d.toLowerCase();
+  })();
+  let checklistQuery = admin
     .from("discipline_negative_space")
     .select("item_key, description, fbc_section, trigger_condition")
-    .eq("discipline", ctx.discipline)
+    .eq("discipline", checklistDisciplineSlug)
     .eq("is_active", true)
     .order("sort_order", { ascending: true });
+  // use_type IS NULL = applies to both. Otherwise restrict.
+  if (ctx.useType === "residential") {
+    checklistQuery = checklistQuery.or("use_type.eq.residential,use_type.is.null");
+  } else if (ctx.useType === "commercial") {
+    checklistQuery = checklistQuery.or("use_type.eq.commercial,use_type.is.null");
+  }
+  const { data: items } = await checklistQuery;
 
   const checklist = (items ?? []) as Array<{
     item_key: string;
@@ -316,6 +335,7 @@ ${learnedText}\n`
 
   const systemPrompt = composeDisciplineSystemPrompt(ctx.discipline, {
     missingDisciplines: ctx.missingDisciplines,
+    useType: ctx.useType,
   });
 
   const useTypeLine = ctx.useType === "residential"
@@ -952,8 +972,12 @@ export async function stageDisciplineReview(
     jurisdiction = (jr ?? null) as Record<string, unknown> | null;
   }
 
+  // Residential: only run the FBCR-scoped experts. Commercial-only
+  // disciplines (Life Safety, Civil, Landscape, Accessibility, generic
+  // Architectural/Structural/MEP/Energy) are skipped — they cite
+  // FBC-Building / NFPA 101 / FBC Ch.11, which don't apply to R-3 work.
   const disciplinesToRun = useType === "residential"
-    ? DISCIPLINES.filter((d) => d !== "Accessibility")
+    ? ["Residential Building", "Residential Structural", "Residential MEP", "Residential Energy", "Product Approvals"]
     : DISCIPLINES;
 
   type RoutedSheet = {
@@ -1003,17 +1027,28 @@ export async function stageDisciplineReview(
 
   let cancelledMidRun = false;
 
+  // Map a residential expert to the underlying sheet-routed disciplines
+  // produced by the title-block parser (which uses commercial labels).
+  const sourceDisciplinesFor = (d: string): string[] => {
+    if (d === "Residential Building") return ["Architectural"];
+    if (d === "Residential Structural") return ["Structural"];
+    if (d === "Residential MEP") return ["MEP"];
+    if (d === "Residential Energy") return ["Architectural", "MEP"];
+    return [d];
+  };
+
   for (const discipline of disciplinesToRun) {
     if (cancelledMidRun) break;
     try {
+      const sources = sourceDisciplinesFor(discipline);
       const disciplineSheets = routed.filter(
-        (s) => s.discipline === discipline && !unchangedSheetRefs.has(s.sheet_ref),
+        (s) => s.discipline !== null && sources.includes(s.discipline) && !unchangedSheetRefs.has(s.sheet_ref),
       );
       const allUrls = disciplineSheets
         .map((s) => signedUrls[s.page_index ?? -1]?.signed_url)
         .filter(Boolean) as string[];
 
-      const totalForDiscipline = routed.filter((s) => s.discipline === discipline).length;
+      const totalForDiscipline = routed.filter((s) => s.discipline !== null && sources.includes(s.discipline)).length;
       byDiscipline[discipline] = { reviewed: totalForDiscipline - disciplineSheets.length, total: totalForDiscipline };
 
       if (allUrls.length === 0) continue;
