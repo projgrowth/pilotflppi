@@ -13,6 +13,7 @@ export type PipelineStage =
   | "submittal_check"
   | "dna_extract"
   | "discipline_review"
+  | "checklist_sweep"
   | "critic"
   | "cross_check"
   | "verify"
