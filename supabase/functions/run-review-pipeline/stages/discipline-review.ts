@@ -335,6 +335,7 @@ ${learnedText}\n`
 
   const systemPrompt = composeDisciplineSystemPrompt(ctx.discipline, {
     missingDisciplines: ctx.missingDisciplines,
+    useType: ctx.useType,
   });
 
   const useTypeLine = ctx.useType === "residential"
@@ -971,8 +972,12 @@ export async function stageDisciplineReview(
     jurisdiction = (jr ?? null) as Record<string, unknown> | null;
   }
 
+  // Residential: only run the FBCR-scoped experts. Commercial-only
+  // disciplines (Life Safety, Civil, Landscape, Accessibility, generic
+  // Architectural/Structural/MEP/Energy) are skipped — they cite
+  // FBC-Building / NFPA 101 / FBC Ch.11, which don't apply to R-3 work.
   const disciplinesToRun = useType === "residential"
-    ? DISCIPLINES.filter((d) => d !== "Accessibility")
+    ? ["Residential Building", "Residential Structural", "Residential MEP", "Residential Energy", "Product Approvals"]
     : DISCIPLINES;
 
   type RoutedSheet = {
